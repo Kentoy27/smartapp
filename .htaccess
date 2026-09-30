@@ -1,0 +1,15 @@
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Serve files that actually exist inside the public/ directory directly,
+    # e.g. /vendor/sweetalert2/... or /css/app.css, instead of routing them
+    # through Laravel's front controller.
+    RewriteCond %{DOCUMENT_ROOT}/public%{REQUEST_URI} -f [OR]
+    RewriteCond %{DOCUMENT_ROOT}/public%{REQUEST_URI} -d
+    RewriteRule ^ public%{REQUEST_URI} [L]
+
+    # Route everything else through the Laravel front controller, skipping
+    # index.php itself to avoid an infinite internal rewrite loop.
+    RewriteCond %{REQUEST_URI} !index\.php$
+    RewriteRule ^ index.php [L]
+</IfModule>
