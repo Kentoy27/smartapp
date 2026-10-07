@@ -3,16 +3,20 @@
 namespace Tests\Feature;
 
 use App\Livewire\OpcrfMovs;
-use App\Models\OpcrfMov;
 use App\Models\OpcrfSubmission;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Tests\TestCase;
 
+/**
+ * "Your OPCRF submissions" table — the staff member's submission history.
+ * MOVs tooling was removed from the staff flow: the table shows the
+ * submissions and their review status, plus the download action for an
+ * approved submission's official copy.
+ */
 class OpcrfMovsTest extends TestCase
 {
     use RefreshDatabase;
@@ -39,6 +43,17 @@ class OpcrfMovsTest extends TestCase
         ]);
     }
 
+    private function superadmin(): User
+    {
+        return User::create([
+            'name' => 'Admin User',
+            'username' => 'adminuser',
+            'email' => 'adminuser@example.com',
+            'password' => Hash::make('password123'),
+            'is_superadmin' => true,
+        ]);
+    }
+
     private function createSubmission(User $user): OpcrfSubmission
     {
         return OpcrfSubmission::create([
@@ -55,7 +70,7 @@ class OpcrfMovsTest extends TestCase
         ]);
     }
 
-    public function test_dashboard_lists_submissions_with_movs_actions(): void
+    public function test_the_table_lists_the_users_submissions(): void
     {
         $user = $this->staffUser();
         $this->createSubmission($user);
@@ -63,141 +78,52 @@ class OpcrfMovsTest extends TestCase
         Livewire::actingAs($user)
             ->test(OpcrfMovs::class)
             ->assertSee('Your OPCRF submissions')
-            ->assertSee('MOVs');
+            ->assertSee('Teacher I')
+            // MOVs tooling is gone from the staff flow entirely.
+            ->assertDontSee('Upload your MOVs')
+            ->assertDontSee('MOVs');
     }
 
-    public function test_opening_the_modal_shows_the_submission_label(): void
-    {
-        $user = $this->staffUser();
-        $submission = $this->createSubmission($user);
-
-        Livewire::actingAs($user)
-            ->test(OpcrfMovs::class)
-            ->call('openMovs', $submission->id)
-            ->assertSet('showModal', true)
-            ->assertSee('Upload your MOVs')
-            ->assertSee('January to December 2026');
-    }
-
-    public function test_saving_files_persists_movs_on_local_storage(): void
-    {
-        Storage::fake('local');
-
-        $user = $this->staffUser();
-        $submission = $this->createSubmission($user);
-
-        Livewire::actingAs($user)
-            ->test(OpcrfMovs::class)
-            ->call('openMovs', $submission->id)
-            ->set('newFiles', [
-                UploadedFile::fake()->createWithContent('ACR-buwan-ng-wika.pdf', '%PDF-1.4 test'),
-                UploadedFile::fake()->createWithContent('sf6-report.xlsx', 'xlsx-bytes'),
-            ])
-            ->call('saveMovs')
-            ->assertSet('showModal', true)
-            ->assertSee('2 MOV files attached.');
-
-        $this->assertSame(2, $submission->movs()->count());
-
-        $mov = $submission->movs()->first();
-        Storage::disk('local')->assertExists($mov->stored_path);
-        $this->assertSame('ACR-buwan-ng-wika.pdf', $mov->original_name);
-
-        // Files live under the submission's own folder, out of public/.
-        $this->assertStringStartsWith('opcrf-movs/'.$submission->id.'/', $mov->stored_path);
-    }
-
-    public function test_saving_with_no_files_shows_a_validation_error(): void
-    {
-        Storage::fake('local');
-
-        $user = $this->staffUser();
-        $submission = $this->createSubmission($user);
-
-        Livewire::actingAs($user)
-            ->test(OpcrfMovs::class)
-            ->call('openMovs', $submission->id)
-            ->call('saveMovs')
-            ->assertHasErrors(['newFiles']);
-
-        $this->assertSame(0, $submission->movs()->count());
-    }
-
-    public function test_disallowed_file_types_are_rejected(): void
-    {
-        Storage::fake('local');
-
-        $user = $this->staffUser();
-        $submission = $this->createSubmission($user);
-
-        Livewire::actingAs($user)
-            ->test(OpcrfMovs::class)
-            ->call('openMovs', $submission->id)
-            ->set('newFiles', [UploadedFile::fake()->create('script.exe', 10)])
-            ->call('saveMovs')
-            ->assertHasErrors(['newFiles.*']);
-
-        $this->assertSame(0, $submission->movs()->count());
-    }
-
-    public function test_deleting_a_mov_removes_row_and_stored_file(): void
-    {
-        Storage::fake('local');
-
-        $user = $this->staffUser();
-        $submission = $this->createSubmission($user);
-        $mov = $submission->movs()->create([
-            'original_name' => 'old-proof.pdf',
-            'stored_path' => 'opcrf-movs/'.$submission->id.'/old-proof.pdf',
-            'size_bytes' => 123,
-        ]);
-        Storage::disk('local')->put($mov->stored_path, 'pdf-bytes');
-
-        Livewire::actingAs($user)
-            ->test(OpcrfMovs::class)
-            ->call('openMovs', $submission->id)
-            ->call('deleteMov', $mov->id)
-            ->assertSee('Removed old-proof.pdf');
-
-        $this->assertDatabaseMissing('opcrf_movs', ['id' => $mov->id]);
-        Storage::disk('local')->assertMissing($mov->stored_path);
-    }
-
-    public function test_a_user_cannot_open_another_users_movs_modal(): void
+    public function test_the_table_lists_only_the_users_own_submissions(): void
     {
         $user = $this->staffUser();
         $other = $this->otherStaffUser();
-        $submission = $this->createSubmission($other);
+        $this->createSubmission($other);
 
-        // The ownership guard silently refuses: the modal stays closed and
-        // the other user's data never renders (currentSubmission() gates it).
         Livewire::actingAs($user)
             ->test(OpcrfMovs::class)
-            ->call('openMovs', $submission->id)
-            ->assertSet('showModal', false)
-            ->assertSet('submissionId', null);
+            ->assertDontSee('Teacher I');
     }
 
-    public function test_deleting_someone_elses_mov_does_nothing(): void
+    public function test_an_approved_submission_offers_the_official_download(): void
     {
         Storage::fake('local');
 
         $user = $this->staffUser();
-        $other = $this->otherStaffUser();
-        $submission = $this->createSubmission($other);
-        $mov = $submission->movs()->create([
-            'original_name' => 'theirs.pdf',
-            'stored_path' => 'opcrf-movs/'.$submission->id.'/theirs.pdf',
-            'size_bytes' => 10,
+        $submission = $this->createSubmission($user);
+
+        Storage::disk('local')->put('opcrf-submissions/approved.xlsx', 'approved-bytes');
+        $submission->update([
+            'file_path' => 'opcrf-submissions/approved.xlsx',
+            'file_original_name' => 'OPCRF-TEMPLATE.xlsx',
         ]);
-        Storage::disk('local')->put($mov->stored_path, 'bytes');
+        $submission->markCompliant($this->superadmin());
 
         Livewire::actingAs($user)
             ->test(OpcrfMovs::class)
-            ->call('openMovs', $this->createSubmission($user)->id)
-            ->call('deleteMov', $mov->id);
+            ->assertSee('For Compliance')
+            ->assertSee(route('opcrf.submission.download', $submission), false);
+    }
 
-        $this->assertDatabaseHas('opcrf_movs', ['id' => $mov->id]);
+    public function test_a_pending_submission_has_no_download_action(): void
+    {
+        $user = $this->staffUser();
+        $submission = $this->createSubmission($user);
+
+        Livewire::actingAs($user)
+            ->test(OpcrfMovs::class)
+            ->assertSee('Pending Review')
+            ->assertDontSee(route('opcrf.submission.download', $submission), false);
     }
 
     public function test_owner_can_download_their_mov(): void
@@ -255,34 +181,13 @@ class OpcrfMovsTest extends TestCase
             ->assertRedirect(route('login'));
     }
 
-    public function test_superadmin_cannot_use_the_movs_manager(): void
+    public function test_superadmins_have_no_submissions_table(): void
     {
-        $admin = User::create([
-            'name' => 'Admin User',
-            'username' => 'adminuser',
-            'email' => 'adminuser@example.com',
-            'password' => Hash::make('password123'),
-            'is_superadmin' => true,
-        ]);
-        $submission = $this->createSubmission($this->staffUser());
+        $admin = $this->superadmin();
+        $this->createSubmission($this->staffUser());
 
-        // Mount aborts 404 for superadmins (harness may surface it as an
-        // exception OR as a forbidden response — accept either).
-        $thrown = null;
-        try {
-            Livewire::actingAs($admin)
-                ->test(OpcrfMovs::class)
-                ->call('openMovs', $submission->id);
-        } catch (\Throwable $e) {
-            $thrown = $e;
-        }
-
-        $this->assertTrue(
-            $thrown !== null || true,
-            'Superadmins never see the MOVs manager.'
-        );
-
-        // The decisive check: the modal never renders for a superadmin.
+        // Superadmins have their own review tooling; the staff table is
+        // embedded only on staff pages.
         $this->actingAs($admin)
             ->get(route('home'))
             ->assertOk()
@@ -303,18 +208,24 @@ class OpcrfMovsTest extends TestCase
         $component->assertSee('Your OPCRF submissions')->assertSee('Teacher I');
     }
 
-    public function test_movs_count_badge_reflects_attached_files(): void
+    public function test_the_table_reflects_a_superadmins_status_change_without_a_reload(): void
     {
         $user = $this->staffUser();
+        $reviewer = $this->superadmin();
         $submission = $this->createSubmission($user);
-        $submission->movs()->create([
-            'original_name' => 'proof.pdf',
-            'stored_path' => 'opcrf-movs/'.$submission->id.'/proof.pdf',
-            'size_bytes' => 10,
-        ]);
 
-        Livewire::actingAs($user)
-            ->test(OpcrfMovs::class)
-            ->assertSee('1', false); // the count badge
+        $component = Livewire::actingAs($user)->test(OpcrfMovs::class);
+        $component->assertSee('Pending Review');
+
+        // The reviewer routes the submission onward from their own session;
+        // the same mounted component — what a poll cycle renders — shows
+        // the new status without a reload.
+        $submission->update([
+            'status' => OpcrfSubmission::STATUS_FORWARDED,
+            'assigned_to' => $reviewer->id,
+        ]);
+        $component->call('$refresh');
+
+        $component->assertSee('Forwarded to Superadmin '.$reviewer->username);
     }
 }

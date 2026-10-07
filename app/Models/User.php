@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
@@ -12,13 +13,14 @@ class User extends Authenticatable
 
     protected $fillable = [
         'name',
-        'employee_id',
+        'position',
         'role',
         'username',
         'email',
         'password',
         'is_superadmin',
         'google_id',
+        'school_id',
     ];
 
     protected $hidden = [
@@ -27,25 +29,17 @@ class User extends Authenticatable
     ];
 
     protected $casts = [
-        'email_verified_at' => 'datetime',
         'password' => 'hashed',
         'is_superadmin' => 'boolean',
     ];
 
     /**
-     * May this account use the WFP (Work and Financial Plan) module?
-     *
-     * The WFP feature is reserved for the School Head (SH) role: the SDS
-     * Viewer and the Super Admin are both denied. In this app the SH role is
-     * the `user` value (a null role is treated as SH everywhere, matching the
-     * Users table), so access is "not a superadmin and not a viewer".
-     *
-     * This is the single source of truth for WFP authorization — used by the
-     * page/route guards, the dashboard card, the sidebar item, and every
-     * Livewire action.
+     * The school this account belongs to (District → School → User) —
+     * null for superadmins and accounts created before a school was
+     * assigned.
      */
-    public function canAccessWfp(): bool
+    public function school(): BelongsTo
     {
-        return ! $this->is_superadmin && $this->role !== 'viewer';
+        return $this->belongsTo(School::class);
     }
 }

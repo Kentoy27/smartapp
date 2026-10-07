@@ -2,97 +2,69 @@
 
 namespace App\Support;
 
+use App\Models\OpcrfSchedule;
+use Illuminate\Support\Carbon;
+
 /**
  * The OPCRF part-availability policy for staff accounts.
  *
- * The template ships one part per sheet tab (PART I … PART IV). Outside the
- * school year's final term window a staff member may only work with Part One,
- * so their download is the template rebuilt with the PART I tab as its only
- * worksheet; inside the window they get the complete workbook. Superadmins
- * bypass the gate — the Review Opcrf download serves the archived workbook
- * as stored.
+ * The template ships one part per sheet tab (PART I … PART IV). Staff work
+ * with Part One from the beginning: their download is the template rebuilt
+ * with the PART I tab as its only worksheet (config
+ * opcrf.part_one.part_one_only, on by default). With that lock released,
+ * the school year's final-term window decides: outside it the download is
+ * Part-I-only; inside it the complete workbook opens. Superadmins bypass
+ * the gate — their downloads serve workbooks as stored.
  *
- * @see \App\Support\OpcrfWorkbookTrim for the sheet surgery
+ * A superadmin-configured SCHEDULE now outranks all of that: once an
+ * opcrf_schedules row exists for Part 1 (OpcrfAccess), it alone decides
+ * whether the full workbook opens, and the hard-coded window below is only
+ * the fallback for an installation that has not created any schedules yet.
+ *
+ * @see OpcrfWorkbookTrim for the sheet surgery
+ * @see OpcrfAccess for the schedule the superadmin owns
  */
 class OpcrfPartOne
 {
     /**
-     * Is the full template open — the recurring final-term window?
+     * Is the full template open?
      *
-     * The window is a recurring month-day pair (e.g. 03-16 → 04-30); when
-     * "closes" falls before "opens" it runs across the new year. The window
-     * is inclusive on both ends.
+     * A configured Part 1 schedule wins outright — that is the control the
+     * superadmin actually operates. With no schedule at all, the legacy
+     * behaviour applies: "Part One only, from the beginning" (the default)
+     * keeps it permanently closed; with the lock released it is the recurring
+     * final-term window.
      */
     public static function windowOpen(): bool
     {
-        [$opens, $closes] = self::windowBoundaries();
+        $scheduled = OpcrfAccess::scheduleFor(OpcrfAccess::currentYear(), OpcrfSchedule::PART_ONE);
 
-        if ($opens === null || $closes === null) {
-            return false;
+        if ($scheduled !== null) {
+            return $scheduled->isOpenAt();
         }
 
-        // The closing boundary is a calendar day, so it lasts through its
-        // final moment — the whole closing day sits inside the window.
-        $closes = $closes->copy()->endOfDay();
-
-        if ($opens->lessThanOrEqualTo($closes)) {
-            // A window inside one calendar year.
-            return now()->between($opens, $closes);
-        }
-
-        // A window across the new year (e.g. 11-01 → 03-15): it is open when
-        // today is after the opening date OR before the closing one.
-        return now()->greaterThanOrEqualTo($opens) || now()->lessThanOrEqualTo($closes);
+        return self::legacyWindowOpen();
     }
 
     /**
-     * This year's window boundaries, or null when the configured dates are
-     * not valid MM-DD pairs (the gate then stays closed rather than
-     * misbehaving on a typo).
+     * The pre-schedule, config-driven window. Kept as the fallback for an
+     * installation that has not created any opcrf_schedules rows.
+     */
+    public static function legacyWindowOpen(): bool
+    {
+        return OpcrfAccess::legacyWindowOpen();
+    }
+
+    /**
+     * The legacy window's boundaries (null when the config dates are not
+     * valid MM-DD pairs). Delegates to the access service so both paths read
+     * one implementation.
      *
-     * @return array{0: ?\Illuminate\Support\Carbon, 1: ?\Illuminate\Support\Carbon}
+     * @return array{0: ?Carbon, 1: ?Carbon}
      */
-    private static function windowBoundaries(): array
+    public static function windowBoundaries(): array
     {
-        $opens = self::boundary((string) config('opcrf.part_one.term_opens'));
-        $closes = self::boundary((string) config('opcrf.part_one.term_closes'));
-
-        if ($opens === null || $closes === null) {
-            return [null, null];
-        }
-
-        // A closing date before the opening one means the window spans the
-        // new year — the opening boundary then belongs to this year only
-        // when we are not already past the closing date of the current span.
-        if ($closes->lessThan($opens) && now()->greaterThan($closes)) {
-            $closes = $closes->addYear();
-        } elseif ($closes->lessThan($opens)) {
-            $opens = $opens->subYear();
-        }
-
-        return [$opens, $closes];
-    }
-
-    /**
-     * Parse an "MM-DD" config value against the current year, or null.
-     */
-    private static function boundary(string $value): ?object
-    {
-        if (preg_match('/^(\d{2})-(\d{2})$/', $value, $m) !== 1) {
-            return null;
-        }
-
-        try {
-            $date = now()->setDate(
-                (int) now()->format('Y'),
-                (int) $m[1],
-                (int) $m[2]
-            );
-        } catch (\Throwable) {
-            return null; // An impossible date (02-30) keeps the gate closed.
-        }
-
-        return $date->startOfDay();
+        return OpcrfAccess::legacyWindowBoundaries();
     }
 
     /**
@@ -104,6 +76,8 @@ class OpcrfPartOne
     {
         [$opens, $closes] = self::windowBoundaries();
 
+        $scheduled = OpcrfAccess::scheduleFor(OpcrfAccess::currentYear(), OpcrfSchedule::PART_ONE);
+
         return [
             // How many parts the staff member's download carries right now.
             'part' => self::windowOpen() ? 4 : 1,
@@ -114,6 +88,12 @@ class OpcrfPartOne
                     : $opens->translatedFormat('F j, Y'))
                 : null,
             'label' => (string) config('opcrf.part_one.term_label', 'the end of the school year term'),
+
+            // What the schedule says, when there is one: the card quotes the
+            // configured window instead of the legacy term label.
+            'scheduled' => $scheduled !== null,
+            'schedule_start' => $scheduled?->start_datetime,
+            'schedule_end' => $scheduled?->end_datetime,
         ];
     }
 

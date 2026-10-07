@@ -2,16 +2,16 @@
 
 namespace App\Livewire;
 
-use App\Models\OpcrfMov;
 use App\Models\OpcrfSubmission;
+use App\Models\OpcrfTemplate;
 use App\Models\User;
+use App\Notifications\OpcrfSubmitted;
 use App\Support\OpcrfSpreadsheet;
-use Illuminate\Support\Collection;
+use App\Support\OpcrfTemplatePersonalizer;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Validation\Rule;
-use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Livewire\WithFileUploads;
 use RuntimeException;
 
@@ -25,10 +25,9 @@ use RuntimeException;
  * over to a "Review before submitting" modal showing every extracted
  * detail — nothing is stored until the user confirms inside that modal.
  *
- * Confirming stores the submission and immediately pops up a locked
- * "Upload your MOVs" window: the staff member must attach at least one
- * Means of Verification before they can continue — that window has no
- * close button and cannot be dismissed via ESC or a backdrop click.
+ * Confirming stores the submission and closes the flow: the dashboard's
+ * OPCRF Template card locks (the cycle is complete) and the submission
+ * appears in the staff member's Opcrf page and the reviewer's list.
  */
 #[Title('Dashboard — SmartApp')]
 class OpcrfUpload extends Component
@@ -83,58 +82,52 @@ class OpcrfUpload extends Component
     public array $sheet = ['title' => '', 'headers' => [], 'evaluators' => [], 'parts' => [], 'signers' => []];
 
     /**
+     * Every tab of the analyzed workbook, in the analyzer's "workbook"
+     * shape: PART II's competency sections, PART III's rating summary
+     * and agreement block, PART IV's improvement plans, and any other
+     * tabs (workbook-added notes sheets) as raw cell grids. Rendered
+     * beneath the main PART I sheet in the review modal, and archived
+     * nothing — everything here is re-read from the file at submission
+     * review time.
+     *
+     * @var array{tabs: array<int, array{name: string, position: int, cells: int}>, part_two: array{sections: array<int, array{key: string, title: string, note: string, groups: array<int, array{label: string, indicators: array<int, array{text: string, rating: ?float}>, average: ?float}>}>, total_rows: array<int, array{key: string, label: string, score: ?float}>, signers: array<int, array{ref: string, role: string, name: string}>}, part_three: array{components: array<int, array{part: string, component: string, weight: string, obtained: ?float}>, agreement: array<int, array{role: string, name: string}>}, part_four: array{office_plan: array<int, array<string, string>>, office_feedback: string, development_plan: array<int, array<string, string>>, development_feedback: string, signers: array<int, array{ref: string, role: string, name: string}>}, extra_sheets: array<int, array{name: string, rows: array<int, array{row: int, cells: array<int, array{ref: string, column: string, value: string}>}}>}
+     */
+    public array $workbook = ['tabs' => [], 'part_two' => ['sections' => [], 'total_rows' => [], 'signers' => []], 'part_three' => ['components' => [], 'agreement' => []], 'part_four' => ['office_plan' => [], 'office_feedback' => '', 'development_plan' => [], 'development_feedback' => '', 'signers' => []], 'extra_sheets' => []];
+
+    /**
      * Success toast after a confirmed upload (clearSuccess pattern).
      */
     public ?string $successMessage = null;
 
     /**
-     * Locked "Upload your MOVs" window — pops up right after the reviewed
-     * OPCR is confirmed. It cannot be dismissed: it only releases once at
-     * least one MOV file has been attached and Continue is clicked.
+     * The name read out of the uploaded workbook, shown in the review modal
+     * so the staff member can see exactly which name the system read.
      */
-    public bool $showMovsModal = false;
+    public string $verifiedName = '';
 
     /**
-     * The submission the locked MOVs window belongs to (set at confirm
-     * time). It is resolved through movSubmission(), which re-checks
-     * ownership on every call.
+     * The upload check's verdict, shown in the review modal. Null when the
+     * workbook says nothing worth remarking on; otherwise a plain-language
+     * heads-up ("this file names somebody else", "no name could be read",
+     * "this was downloaded from another account") that the staff member is
+     * free to ignore — the upload proceeds either way, and the note rides
+     * along to the reviewer.
      */
-    public ?int $movSubmissionId = null;
-
-    public string $movSubmissionLabel = '';
+    public ?string $nameNote = null;
 
     /**
-     * True once at least one MOV file has been attached inside the locked
-     * window — that is what unlocks the Continue button.
+     * The template version stamped into the uploaded workbook (null when the
+     * file carries no stamp — an older copy, or one made by hand).
      */
-    public bool $movsSaved = false;
+    public ?string $templateVersion = null;
 
     /**
-     * Newly-picked MOV files (multiple). Livewire temp-uploads them; they
-     * are moved into permanent storage immediately in updatedMovFiles().
-     */
-    public $movFiles = [];
-
-    /**
-     * The superadmin this OPCR is being sent to (the review modal's picker).
-     * Only that account sees the submission afterwards.
+     * The superadmin every submission is routed to — resolved
+     * automatically at submit time (config('opcrf.review_route'), by
+     * username, falling back to the first superadmin by username), never
+     * picked by the staff member.
      */
     public $reviewer_id = '';
-
-    /**
-     * Superadmin accounts a staff member can send their OPCR to, oldest
-     * first by username.
-     *
-     * @return Collection<int, User>
-     */
-    #[Computed]
-    public function reviewers(): Collection
-    {
-        return User::query()
-            ->where('is_superadmin', true)
-            ->orderBy('username')
-            ->get(['id', 'username', 'name']);
-    }
 
     /**
      * Rules for the review modal's confirm step. Blanks are approved:
@@ -142,8 +135,8 @@ class OpcrfUpload extends Component
      * empty strings for unfilled text and self_rating stored as 0.00
      * when the template carried no ratings (shown as “—” in the table).
      *
-     * The recipient is required and must be a superadmin — the server, not
-     * the picker, is what enforces it.
+     * The recipient is never client-supplied — resolveAutoReviewer()
+     * chooses it server-side at submit time.
      *
      * @return array<string, array<int, mixed>>
      */
@@ -159,13 +152,6 @@ class OpcrfUpload extends Component
             // Only guard against nonsense: a value the analyzer could
             // never have produced.
             'self_rating' => ['nullable', 'numeric', 'min:0', 'max:5'],
-            'reviewer_id' => [
-                'required',
-                'integer',
-                Rule::exists('users', 'id')->where(
-                    fn ($query) => $query->where('is_superadmin', true)
-                ),
-            ],
         ];
     }
 
@@ -179,33 +165,16 @@ class OpcrfUpload extends Component
             'objectives' => 'objectives',
             'accomplishments' => 'accomplishments',
             'self_rating' => 'self rating',
-            'reviewer_id' => 'superadmin to send this OPCR to',
         ];
     }
 
     public function mount(): void
     {
-        abort_if(Auth::user()?->is_superadmin, 404);
-    }
-
-    /**
-     * The submission the locked MOVs window is attached to. Null unless it
-     * exists AND the signed-in user owns it — the authorization boundary
-     * for every MOV action in this flow (same gate as OpcrfMovs).
-     */
-    public function movSubmission(): ?OpcrfSubmission
-    {
-        if ($this->movSubmissionId === null) {
-            return null;
-        }
-
-        $submission = OpcrfSubmission::find($this->movSubmissionId);
-
-        if ($submission === null || ! $submission->canBeManagedBy(Auth::user())) {
-            return null;
-        }
-
-        return $submission;
+        // Everything this component records is attributed to a user, and
+        // confirmSubmit() reads Auth::id() — so a guest is refused here
+        // rather than half way through a submit.
+        abort_unless(Auth::check(), 404);
+        abort_if(Auth::user()->is_superadmin, 404);
     }
 
     /**
@@ -213,39 +182,38 @@ class OpcrfUpload extends Component
      */
     public function openUpload(): void
     {
-        abort_if(Auth::user()?->is_superadmin, 404);
+        abort_unless(Auth::check(), 404);
+        abort_if(Auth::user()->is_superadmin, 404);
 
         $this->resetValidation();
-        $this->resetMovs();
-        $this->ensureReviewerSelected();
         $this->showUpload = true;
     }
 
     /**
-     * Pre-select the first superadmin so the usual single-admin setup is one
-     * click; the staff member can pick another one in the picker. Stays blank
-     * when no superadmin account exists — the submit then fails validation
-     * with an explanation instead of routing to nobody.
+     * The superadmin submissions route to automatically: the configured
+     * account (by username), or — when no account carries that name — the
+     * first superadmin by username, so a submission is never stranded
+     * unroutable. Null when the system has no superadmin at all (the
+     * submit then fails validation with an explanation).
      */
-    private function ensureReviewerSelected(): void
+    private function resolveAutoReviewer(): ?User
     {
-        if ($this->reviewer_id !== '' && $this->reviewer_id !== null) {
-            return;
+        $configured = trim((string) config('opcrf.review_route', ''));
+
+        $reviewer = null;
+
+        if ($configured !== '') {
+            $reviewer = User::query()
+                ->where('is_superadmin', true)
+                ->where('username', $configured)
+                ->first();
         }
 
-        $this->reviewer_id = (string) ($this->reviewers->first()?->id ?? '');
-    }
-
-    /**
-     * Clear the locked-MOVs step (used defensively when the flow restarts).
-     */
-    private function resetMovs(): void
-    {
-        $this->showMovsModal = false;
-        $this->movSubmissionId = null;
-        $this->movSubmissionLabel = '';
-        $this->movsSaved = false;
-        $this->movFiles = [];
+        return $reviewer
+            ?? User::query()
+                ->where('is_superadmin', true)
+                ->orderBy('username')
+                ->first();
     }
 
     /**
@@ -256,6 +224,9 @@ class OpcrfUpload extends Component
     {
         $this->showUpload = false;
         $this->file = null;
+        $this->verifiedName = '';
+        $this->nameNote = null;
+        $this->templateVersion = null;
         $this->resetValidation();
     }
 
@@ -265,15 +236,33 @@ class OpcrfUpload extends Component
      */
     public function updatedFile(): void
     {
-        abort_if(Auth::user()?->is_superadmin, 404);
+        abort_unless(Auth::check(), 404);
+        abort_if(Auth::user()->is_superadmin, 404);
 
         $this->validate([
-            'file' => ['required', 'file', 'max:10240', 'extensions:xlsx'],
+            'file' => ['required', 'file', 'max:'.(int) config('opcrf.template.max_kb', 10240), 'extensions:xlsx'],
         ], [
-            'file.required' => 'Choose your filled-in OPCRF .xlsx file first.',
+            'file.required' => 'Please upload your completed OPCRF template before submitting.',
             'file.extensions' => 'The OPCRF must be the .xlsx template file.',
             'file.max' => 'The file is too large (10 MB maximum).',
         ]);
+
+        // What can the system tell about this workbook? Read its own contents —
+        // the template stamp and the name typed into its header block — so
+        // the reviewer can be told what it says.
+        //
+        // Nothing about that can refuse the upload. A name that is absent,
+        // spelled differently, or somebody else's is recorded, not enforced:
+        // staff file their OPCR freely. Whatever is found becomes $nameNote,
+        // shown in the review modal and saved on the submission.
+        $check = OpcrfTemplatePersonalizer::verify($this->file->getRealPath(), Auth::user());
+
+        // Kept for the review modal and for the submission's template link.
+        $this->templateVersion = $check['version'];
+        $this->verifiedName = $check['name'];
+        $this->nameNote = $check['status'] === OpcrfTemplatePersonalizer::MATCH
+            ? null
+            : $check['message'];
 
         try {
             $this->analyzeAndFill();
@@ -288,7 +277,6 @@ class OpcrfUpload extends Component
         $this->showUpload = false;
         $this->showReview = true;
         $this->analyzed = true;
-        $this->ensureReviewerSelected();
     }
 
     /**
@@ -318,6 +306,11 @@ class OpcrfUpload extends Component
         // + the three parts + signer block) straight from the workbook,
         // for the template-like review modal.
         $spreadsheet = new OpcrfSpreadsheet($path);
+
+        // Every tab of the file: PART II / III / IV parsed into their
+        // layouts, plus any non-standard tabs as raw cell grids.
+        $this->workbook = $spreadsheet->workbook();
+
         $this->sheet = [
             'title' => mb_substr($spreadsheet->title(), 0, 200),
             'headers' => $spreadsheet->headerCells(),
@@ -358,19 +351,47 @@ class OpcrfUpload extends Component
      */
     public function confirmSubmit(): void
     {
-        abort_if(Auth::user()?->is_superadmin, 404);
+        abort_unless(Auth::check(), 404);
+        abort_if(Auth::user()->is_superadmin, 404);
 
         // Re-validate server-side: the review modal's data must still be
         // well-formed (the client could have crafted the call). Blanks are
         // approved — they simply record as empty.
         $validated = $this->validate();
 
+        // The recipient is chosen by the system, not the staff member:
+        // the configured superadmin (Eve by default), first superadmin as
+        // the fallback.
+        $reviewer = $this->resolveAutoReviewer();
+
+        if ($reviewer === null) {
+            $this->addError('file', 'No superadmin account exists yet — ask an administrator to create one before you can submit your OPCR.');
+
+            return;
+        }
+
+        // Re-read server-side before anything is written: the contents were
+        // read when the file was picked, but the client could have crafted
+        // this call. Same rule as the upload window — this records what the
+        // workbook says, and nothing more.
+        $uploadCheck = null;
+        $accountName = null;
+
+        if ($this->file instanceof TemporaryUploadedFile) {
+            $check = OpcrfTemplatePersonalizer::verify($this->file->getRealPath(), Auth::user());
+
+            $uploadCheck = $check['status'];
+            $accountName = $check['expected'];
+        }
+
         // Archive the staff member's actual uploaded .xlsx alongside the
         // submission, so the superadmin reviews (and can replace) the
-        // literal submitted file — not just the extracted values.
+        // literal submitted file — not just the extracted values. The bytes
+        // are stored exactly as received: nothing overwrites or rewrites
+        // them, so the archived workbook is the staff member's own file.
         $archivedPath = null;
 
-        if ($this->file instanceof \Livewire\Features\SupportFileUploads\TemporaryUploadedFile) {
+        if ($this->file instanceof TemporaryUploadedFile) {
             $archivedPath = $this->file->storeAs(
                 'opcrf-submissions/'.Auth::id(),
                 uniqid().'-'.$this->file->getClientOriginalName(),
@@ -378,10 +399,28 @@ class OpcrfUpload extends Component
             );
         }
 
+        // The template the account last generated, recorded when there is
+        // one: a submission is judged on its contents, so an account that
+        // never downloaded a template is not blocked — the link is simply
+        // left empty rather than invented.
+        $template = OpcrfTemplate::latestFor(Auth::user());
+
         $submission = OpcrfSubmission::create([
             'user_id' => Auth::id(),
-            'reviewer_id' => (int) $validated['reviewer_id'],
+            // Which Part of the form this answers. The dashboard's upload
+            // card belongs to Part 1 — the part the personalized template is
+            // generated from — so that is what it records. Part 2-4
+            // submissions are filed from their own guarded Part pages.
+            'opcrf_part' => OpcrfSubmission::PART_ONE,
+            'opcrf_template_id' => $template?->id,
+            'reviewer_id' => $reviewer->id,
             'employee_name' => (string) $validated['employee_name'],
+            // What the upload check said, and the account name it said it
+            // against — so the reviewer can see the comparison without
+            // opening the workbook, and without the account being renamed
+            // afterwards rewriting history.
+            'upload_check' => $uploadCheck,
+            'account_name' => $accountName,
             'position' => (string) $validated['position'],
             'review_period' => (string) $validated['review_period'],
             'division_office' => (string) $validated['division_office'],
@@ -395,20 +434,17 @@ class OpcrfUpload extends Component
             'submitted_at' => now(),
         ]);
 
+        // The reviewer now has work waiting: their notification bell in the
+        // topbar says so without them having to open Review Opcrf.
+        $reviewer->notify(new OpcrfSubmitted($submission));
+
         $this->showReview = false;
         $this->showUpload = false;
         $this->analyzed = false;
         $this->file = null;
         $this->reviewer_id = '';
-
-        // The locked next step: right after the reviewed OPCR is recorded,
-        // the "Upload your MOVs" window pops up. It stays up until at least
-        // one MOV is attached — there is no way to dismiss it.
-        $this->movSubmissionId = $submission->id;
-        $this->movSubmissionLabel = $submission->review_period;
-        $this->movsSaved = false;
-        $this->movFiles = [];
-        $this->showMovsModal = true;
+        $this->nameNote = null;
+        $this->verifiedName = '';
 
         $this->successMessage = 'OPCR uploaded — your form was analyzed and recorded.';
 
@@ -416,7 +452,6 @@ class OpcrfUpload extends Component
         // — tell it the dataset changed so the confirmed upload shows up
         // without a reload. The event also broadcasts browser-wide so the
         // superadmin's Review Opcrf page and sidebar badge update live.
-        $this->dispatch('opcrf-submission-created')->to(OpcrfMovs::class);
         $this->dispatch('opcrf-submission-created');
     }
 
@@ -430,149 +465,17 @@ class OpcrfUpload extends Component
         $this->showUpload = false;
         $this->analyzed = false;
         $this->file = null;
+        $this->verifiedName = '';
+        $this->nameNote = null;
+        $this->templateVersion = null;
         $this->resetValidation();
+
+        $this->workbook = ['tabs' => [], 'part_two' => ['sections' => [], 'total_rows' => [], 'signers' => []], 'part_three' => ['components' => [], 'agreement' => []], 'part_four' => ['office_plan' => [], 'office_feedback' => '', 'development_plan' => [], 'development_feedback' => '', 'signers' => []], 'extra_sheets' => []];
     }
 
     public function clearSuccess(): void
     {
         $this->successMessage = null;
-    }
-
-    /**
-     * The MOVs for the locked window's submission (fresh on every render).
-     *
-     * @return Collection<int, OpcrfMov>
-     */
-    #[Computed]
-    public function movsModalFiles()
-    {
-        $submission = $this->movSubmission();
-
-        return $submission
-            ? $submission->movs()->get()
-            : collect();
-    }
-
-    /**
-     * A MOV file was picked inside the locked window: validate it and move
-     * it straight into permanent storage. There is no queue/attach step —
-     * the window is locked, so files must land immediately. One file is
-     * enough to satisfy the requirement; more can be added freely.
-     */
-    public function updatedMovFiles(): void
-    {
-        abort_if(Auth::user()?->is_superadmin, 404);
-
-        $submission = $this->movSubmission();
-
-        if ($submission === null) {
-            abort(403);
-        }
-
-        $this->validate([
-            'movFiles' => ['required', 'array', 'min:1', 'max:10'],
-            'movFiles.*' => [
-                'file',
-                'max:10240',
-                'extensions:pdf,doc,docx,xls,xlsx,ppt,pptx,jpg,jpeg,png,zip',
-            ],
-        ], [
-            'movFiles.required' => 'Choose at least one MOV file first.',
-            'movFiles.max' => 'Attach up to 10 files at a time.',
-            'movFiles.*.max' => 'Each file must be 10 MB or smaller.',
-            'movFiles.*.extensions' => 'Allowed: PDF, Word, Excel, PowerPoint, images, and ZIP.',
-        ]);
-
-        $saved = 0;
-
-        foreach ($this->movFiles as $file) {
-            $path = $file->storeAs(
-                'opcrf-movs/'.$submission->id,
-                uniqid().'-'.$file->getClientOriginalName(),
-                'local'
-            );
-
-            $submission->movs()->create([
-                'original_name' => $file->getClientOriginalName(),
-                'stored_path' => $path,
-                'size_bytes' => $file->getSize(),
-            ]);
-
-            $saved++;
-        }
-
-        $this->movFiles = [];
-        $this->movsSaved = true;
-        $this->resetValidation();
-        unset($this->movsModalFiles); // recompute on the next render
-
-        $this->successMessage = $saved === 1
-            ? '1 MOV file attached to your OPCR.'
-            : $saved.' MOV files attached to your OPCR.';
-    }
-
-    /**
-     * Remove one attached MOV (row + stored file) from inside the locked
-     * window.
-     */
-    public function removeMov(int $movId): void
-    {
-        abort_if(Auth::user()?->is_superadmin, 404);
-
-        $submission = $this->movSubmission();
-
-        if ($submission === null) {
-            abort(403);
-        }
-
-        // Scope to this submission — ids from other users' MOVs do nothing.
-        $mov = $submission->movs()->whereKey($movId)->first();
-
-        if ($mov === null) {
-            return;
-        }
-
-        $name = $mov->original_name;
-        $mov->delete(); // model hook removes the stored file
-        unset($this->movsModalFiles);
-
-        // The requirement is at least one MOV: if the last one went away,
-        // the window locks down again until a new file is attached.
-        if ($submission->movs()->count() === 0) {
-            $this->movsSaved = false;
-        }
-
-        $this->successMessage = "Removed {$name}.";
-    }
-
-    /**
-     * At least one MOV is attached: release the lock and close the window.
-     * The window cannot be dismissed any other way — this is the only exit.
-     */
-    public function finishMovs(): void
-    {
-        abort_if(Auth::user()?->is_superadmin, 404);
-
-        $submission = $this->movSubmission();
-
-        if ($submission === null) {
-            abort(403);
-        }
-
-        // Still no MOVs? The lock holds — the window cannot be escaped.
-        if ($submission->movs()->count() === 0) {
-            $this->addError('movFiles', 'Attach at least one MOV file to continue.');
-
-            return;
-        }
-
-        $this->resetMovs();
-        $this->resetValidation();
-
-        // Back to the dashboard: the OPCRF Template card re-renders locked,
-        // since this submission now carries its MOVs.
-        $this->successMessage = 'MOVs saved — your OPCR submission is complete.';
-        $this->redirect(route('home'));
     }
 
     public function render()

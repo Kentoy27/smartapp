@@ -73,8 +73,10 @@
                                 @if ($account->name)
                                     <span class="cell-sub">{{ $account->name }}</span>
                                 @endif
-                                <span class="cell-sub">ID: {{ $account->employee_id ?: 'Not assigned' }}</span>
                                 <span class="cell-sub">{{ $account->email }}</span>
+                                @if ($account->school)
+                                    <span class="cell-sub">{{ $account->school->name }}@if ($account->school->school_id) · {{ $account->school->school_id }}@endif</span>
+                                @endif
                             </td>
                             <td>
                                 <span @class(['badge', 'badge-muted' => ! $account->is_superadmin])>
@@ -90,53 +92,69 @@
                             </td>
                             <td class="users-actions-col">
                                 @if ($this->canManageUsers())
-                                <div class="users-actions-row">
-                                    <button
-                                        type="button"
-                                        class="users-action"
-                                        wire:click="openEditModal({{ $account->id }})"
-                                        wire:loading.attr="disabled"
-                                        wire:target="openEditModal"
-                                        title="Edit {{ $account->username }}"
-                                    >
-                                        <span class="users-action-inner">
-                                            <x-icon name="pencil" :size="14" />
-                                            <span>Edit</span>
-                                        </span>
-                                    </button>
+                                    {{-- A superadmin cannot change their own role or
+                                         delete themselves, so their own row has a
+                                         single action — shown as a plain button
+                                         rather than a menu holding one item. --}}
+                                    @php($canChangeRole = $this->canChangeRoles() && ! $account->is(auth()->user()))
+                                    @php($canDelete = ! $account->is(auth()->user()))
 
-                                    @if ($this->canChangeRoles() && ! $account->is(auth()->user()))
+                                    @if (! $canChangeRole && ! $canDelete)
                                         <button
                                             type="button"
                                             class="users-action"
-                                            wire:click="openRoleModal({{ $account->id }})"
+                                            wire:click="openEditModal({{ $account->id }})"
                                             wire:loading.attr="disabled"
-                                            wire:target="openRoleModal"
-                                            title="Change role for {{ $account->username }}"
+                                            wire:target="openEditModal"
+                                            title="Edit {{ $account->username }}"
                                         >
                                             <span class="users-action-inner">
-                                                <x-icon name="shield" :size="14" />
-                                                <span>Change Role</span>
+                                                <x-icon name="pencil" :size="14" />
+                                                <span>Edit</span>
                                             </span>
                                         </button>
-                                    @endif
+                                    @else
+                                        {{-- Otherwise the row's actions collapse behind
+                                             one trigger: three buttons on every row is
+                                             a wall of chrome, and the destructive one
+                                             should not sit in the open. --}}
+                                        <x-row-menu :label="'More actions for '.$account->username">
+                                            <x-row-menu-item
+                                                wire:click="openEditModal({{ $account->id }})"
+                                                wire:loading.attr="disabled"
+                                                wire:target="openEditModal"
+                                                title="Edit {{ $account->username }}"
+                                            >
+                                                <x-icon name="pencil" :size="15" />
+                                                <span>Edit</span>
+                                            </x-row-menu-item>
 
-                                    @unless ($account->is(auth()->user()))
-                                        <button
-                                            type="button"
-                                            class="users-action users-action--danger"
-                                            wire:click="openDeleteModal({{ $account->id }})"
-                                            wire:loading.attr="disabled"
-                                            wire:target="openDeleteModal"
-                                            title="Delete {{ $account->username }}"
-                                        >
-                                            <span class="users-action-inner">
-                                                <x-icon name="trash" :size="14" />
-                                                <span>Delete</span>
-                                            </span>
-                                        </button>
-                                    @endunless
-                                </div>
+                                            @if ($canChangeRole)
+                                                <x-row-menu-item
+                                                    wire:click="openRoleModal({{ $account->id }})"
+                                                    wire:loading.attr="disabled"
+                                                    wire:target="openRoleModal"
+                                                    title="Change role for {{ $account->username }}"
+                                                >
+                                                    <x-icon name="shield" :size="15" />
+                                                    <span>Change Role</span>
+                                                </x-row-menu-item>
+                                            @endif
+
+                                            @if ($canDelete)
+                                                <x-row-menu-item
+                                                    wire:click="openDeleteModal({{ $account->id }})"
+                                                    wire:loading.attr="disabled"
+                                                    wire:target="openDeleteModal"
+                                                    title="Delete {{ $account->username }}"
+                                                    danger
+                                                >
+                                                    <x-icon name="trash" :size="15" />
+                                                    <span>Delete</span>
+                                                </x-row-menu-item>
+                                            @endif
+                                        </x-row-menu>
+                                    @endif
                                 @else
                                     <span class="badge badge-muted">View only</span>
                                 @endif
@@ -267,92 +285,11 @@
             </div>
 
             <form wire:submit="saveUser" class="modal-form">
-                <div class="field">
-                    <label for="formName">Real Name</label>
-                    <input
-                        id="formName"
-                        type="text"
-                        placeholder="e.g. Jane Doe"
-                        autocomplete="off"
-                        wire:model="name"
-                        @class(['error' => $errors->has('name')])
-                    >
-                    @error('name') <div class="error-text">{{ $message }}</div> @enderror
-                </div>
-
-                <div class="field">
-                    <label for="formEmployeeId">Employee ID</label>
-                    <input
-                        id="formEmployeeId"
-                        type="text"
-                        placeholder="e.g. EMP-001"
-                        autocomplete="off"
-                        wire:model="employee_id"
-                        @class(['error' => $errors->has('employee_id')])
-                    >
-                    @error('employee_id') <div class="error-text">{{ $message }}</div> @enderror
-                </div>
-
-                <div class="field">
-                    <label for="formUsername">Username</label>
-                    <input
-                        id="formUsername"
-                        type="text"
-                        placeholder="e.g. jane"
-                        autocomplete="off"
-                        wire:model="username"
-                        @class(['error' => $errors->has('username')])
-                        required
-                    >
-                    @error('username') <div class="error-text">{{ $message }}</div> @enderror
-                </div>
-
-                <div class="field">
-                    <label for="formEmail">Email</label>
-                    <input
-                        id="formEmail"
-                        type="email"
-                        placeholder="e.g. jane@example.com"
-                        autocomplete="off"
-                        wire:model="email"
-                        @class(['error' => $errors->has('email')])
-                        required
-                    >
-                    @error('email') <div class="error-text">{{ $message }}</div> @enderror
-                </div>
-
-                <div class="field">
-                    <label for="formPassword">Password</label>
-                    <div class="password-wrap">
-                        <input
-                            id="formPassword"
-                            type="password"
-                            placeholder="{{ $editingUserId ? 'Leave blank to keep current password' : 'Minimum 8 characters' }}"
-                            autocomplete="new-password"
-                            wire:model="password"
-                            @class(['error' => $errors->has('password')])
-                            {{ $editingUserId ? '' : 'required' }}
-                        >
-                        <button
-                            type="button"
-                            class="password-toggle"
-                            x-on:click="revealed = !revealed"
-                            x-data="{ revealed: false }"
-                            x-bind:type="'button'"
-                            :aria-pressed="revealed.toString()"
-                            :aria-label="revealed ? 'Hide password' : 'Show password'"
-                            :title="revealed ? 'Hide password' : 'Show password'"
-                            x-bind:class="revealed && 'revealed'"
-                            x-effect="document.getElementById('formPassword').type = revealed ? 'text' : 'password'"
-                        >
-                            <x-icon name="eye" :size="18" class="icon-eye" />
-                            <x-icon name="eye-off" :size="18" class="icon-eye-off" />
-                        </button>
-                    </div>
-                    @error('password') <div class="error-text">{{ $message }}</div> @enderror
-                </div>
-
                 @if (auth()->user()?->is_superadmin)
+                    {{-- ROLE FIRST: it decides the shape of the rest of the
+                         form. Picking SH reveals the Division → School →
+                         School ID cascade below; the other roles have no
+                         school, so those fields disappear. --}}
                     <div class="field">
                         <label>Role</label>
                         <div class="role-picker" x-cloak>
@@ -400,6 +337,152 @@
                         <input type="hidden" wire:model="isSuperadmin">
                     </div>
                 @endif
+
+                {{-- SCHOOL ASSIGNMENT (SH only): division → school → School ID
+                     (read only — it comes from the selected school's record)
+                     → the same ID fills the login below. --}}
+                @if ($this->isSchoolHead())
+                    <div class="field">
+                        <label for="formSchoolDivision">School Division</label>
+                        <select
+                            id="formSchoolDivision"
+                            wire:model="school_division"
+                            @class(['error' => $errors->has('school_division')])
+                        >
+                            <option value="">Select School Division</option>
+                            @foreach ($this->divisions as $division)
+                                <option value="{{ $division->id }}">{{ $division->name }}</option>
+                            @endforeach
+                        </select>
+                        @error('school_division') <div class="error-text">{{ $message }}</div> @enderror
+                    </div>
+
+                    <div class="field">
+                        <label for="formSchool">School</label>
+                        <select
+                            id="formSchool"
+                            wire:model.live="school_id_choice"
+                            @class(['error' => $errors->has('school_id_choice')])
+                            @disabled($this->divisionSchools->isEmpty())
+                        >
+                            <option value="">Select School</option>
+                            @foreach ($this->divisionSchools as $school)
+                                <option value="{{ $school->id }}">{{ $school->name }}</option>
+                            @endforeach
+                        </select>
+                        @error('school_id_choice') <div class="error-text">{{ $message }}</div> @enderror
+                    </div>
+
+                    <div class="field">
+                        <label for="formSchoolId">School ID</label>
+                        <input
+                            id="formSchoolId"
+                            type="text"
+                            value="{{ $this->selectedSchoolId }}"
+                            placeholder="Select a school…"
+                            readonly
+                            class="is-readonly"
+                        >
+                    </div>
+                @endif
+
+                <div class="field">
+                    <label for="formName">Name</label>
+                    <input
+                        id="formName"
+                        type="text"
+                        placeholder="e.g. Juan Dela Cruz"
+                        autocomplete="off"
+                        wire:model="name"
+                        @class(['error' => $errors->has('name')])
+                        required
+                    >
+                    <div class="field-hint">
+                        The employee's real name, exactly as it should appear on their OPCRF.
+                        Uploads are matched against this, so it has to be their actual name — not an
+                        employee ID or a login.
+                    </div>
+                    @error('name') <div class="error-text">{{ $message }}</div> @enderror
+                </div>
+
+                <div class="field">
+                    <label for="formUsername">Username</label>
+                    <input
+                        id="formUsername"
+                        type="text"
+                        placeholder="e.g. jane"
+                        autocomplete="off"
+                        wire:model="username"
+                        @class(['error' => $errors->has('username')])
+                        required
+                    >
+                    @if ($this->isSchoolHead() && $this->school_id_choice !== '')
+                        @if ($this->selectedSchoolId !== '')
+                            <div class="field-hint">Defaults to {{ $this->selectedSchoolId }} — the selected school's ID. Change it if you want a different login.</div>
+                            @if ($this->editingUserId === null)
+                                <div class="field-hint">The password is set to the same ID automatically, so the SH can sign in straight away.</div>
+                            @endif
+                        @else
+                            {{-- A school with no School ID on record has nothing to
+                                 default the login to — say so instead of leaving
+                                 the superadmin wondering why it stayed blank. --}}
+                            <div class="field-hint">This school has no School ID on record, so the login can't be filled in for you — type one.</div>
+                        @endif
+                    @endif
+                    @error('username') <div class="error-text">{{ $message }}</div> @enderror
+                </div>
+
+                <div class="field">
+                    <label for="formEmail">Email</label>
+                    <input
+                        id="formEmail"
+                        type="email"
+                        placeholder="e.g. jane@example.com"
+                        autocomplete="off"
+                        wire:model="email"
+                        @class(['error' => $errors->has('email')])
+                        required
+                    >
+                    @error('email') <div class="error-text">{{ $message }}</div> @enderror
+                </div>
+
+                {{-- PASSWORD: skipped entirely when the form can derive one.
+                     An SH's starting password is their school's ID — the same
+                     value the login already defaults to — so there is nothing
+                     to type. Editing keeps the field: blank means "unchanged",
+                     and that is how an admin resets a forgotten password. --}}
+                @unless ($this->hasAutoPassword())
+                    <div class="field">
+                        <label for="formPassword">Password</label>
+                        <div class="password-wrap">
+                            <input
+                                id="formPassword"
+                                type="password"
+                                placeholder="{{ $editingUserId ? 'Leave blank to keep current password' : 'Minimum 8 characters' }}"
+                                autocomplete="new-password"
+                                wire:model="password"
+                                @class(['error' => $errors->has('password')])
+                                {{ $editingUserId ? '' : 'required' }}
+                            >
+                            <button
+                                type="button"
+                                class="password-toggle"
+                                x-on:click="revealed = !revealed"
+                                x-data="{ revealed: false }"
+                                x-bind:type="'button'"
+                                :aria-pressed="revealed.toString()"
+                                :aria-label="revealed ? 'Hide password' : 'Show password'"
+                                :title="revealed ? 'Hide password' : 'Show password'"
+                                x-bind:class="revealed && 'revealed'"
+                                x-effect="document.getElementById('formPassword').type = revealed ? 'text' : 'password'"
+                            >
+                                <x-icon name="eye" :size="18" class="icon-eye" />
+                                <x-icon name="eye-off" :size="18" class="icon-eye-off" />
+                            </button>
+                        </div>
+                        @error('password') <div class="error-text">{{ $message }}</div> @enderror
+                    </div>
+                @endunless
 
                 <div class="modal-actions">
                     <button type="button" class="btn-ghost" wire:click="closeCreateModal">Cancel</button>

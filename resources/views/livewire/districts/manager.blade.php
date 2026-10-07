@@ -1,17 +1,19 @@
-{{-- The View District button lives in the static page shell (outside this
-     component), so it dispatches an Alpine window event that lands here. --}}
-<div class="district-manager" x-data x-on:open-districts.window="$wire.openModal()">
-    {{-- VIEW DISTRICT MODAL --}}
+{{-- The Manage Districts & Schools button lives in the static page shell
+     (outside this component), so it dispatches an Alpine window event that
+     lands here. --}}
+<div class="district-manager" x-data x-on:open-districts.window="$wire.openModal($event.detail?.district ?? null)">
+    {{-- DISTRICTS & SCHOOLS MODAL --}}
     <div class="modal-backdrop {{ $showModal ? 'is-open' : '' }}"
          @if ($showModal) @click="self && $wire.closeModal()" @endif
          role="presentation">
         <div class="modal modal--district" role="dialog" aria-modal="true" aria-labelledby="districtModalTitle" @click.stop>
             <div class="modal-head">
-                <h2 id="districtModalTitle">Districts &amp; Schools</h2>
+                <h2 id="districtModalTitle">Manage Districts &amp; Schools</h2>
                 <button type="button" class="modal-close" wire:click="closeModal" aria-label="Close" title="Close">×</button>
             </div>
 
             <div class="district-modal-body">
+
                 {{-- ADD DISTRICT --}}
                 <form wire:submit="addDistrict" class="district-add-form">
                     <div class="field">
@@ -19,7 +21,7 @@
                         <input
                             id="districtName"
                             type="text"
-                            placeholder="e.g. District 1"
+                            placeholder="e.g. District I"
                             autocomplete="off"
                             wire:model="districtName"
                             @class(['error' => $errors->has('districtName')])
@@ -32,123 +34,268 @@
                     </button>
                 </form>
 
-                {{-- DISTRICT / SCHOOL TABLE --}}
-                <div class="table-wrap district-table-wrap">
-                    <table class="data-table district-table">
-                        <thead>
-                            <tr>
-                                <th scope="col">District / School</th>
-                                <th scope="col" class="district-type-col">Type</th>
-                                <th scope="col" class="district-actions-col">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @forelse ($this->districts as $district)
-                                {{-- DISTRICT ROW --}}
-                                <tr class="district-row-row" wire:key="district-{{ $district->id }}">
-                                    <td>
-                                        @if ($editing && $editing['type'] === 'district' && $editing['id'] === $district->id)
-                                            <form wire:submit="saveRename" class="rename-form">
-                                                <input
-                                                    type="text"
-                                                    wire:model="editingName"
-                                                    autofocus
-                                                    @class(['error' => $errors->has('editingName')])
-                                                >
-                                                <button type="submit" class="rename-save" wire:loading.attr="disabled" wire:target="saveRename" title="Save">✓</button>
-                                                <button type="button" class="rename-cancel" wire:click="cancelRename" title="Cancel">×</button>
-                                                @error('editingName') <div class="error-text">{{ $message }}</div> @enderror
-                                            </form>
-                                        @else
-                                            <span class="cell-strong">{{ $district->name }}</span>
-                                            <span class="cell-sub">{{ $district->schools_count }} {{ Str::plural('school', $district->schools_count) }}</span>
-                                        @endif
-                                    </td>
-                                    <td class="district-type-col"><span class="badge">District</span></td>
-                                    <td class="district-actions-col">
-                                        <div class="district-actions-row">
-                                            <button type="button" class="district-action" wire:click="openSchoolForm({{ $district->id }})" title="Add a school under {{ $district->name }}">
-                                                <x-icon name="plus" :size="13" /><span>Add school</span>
-                                            </button>
-                                            <button type="button" class="district-action" wire:click="startRename('district', {{ $district->id }})" title="Rename {{ $district->name }}">
-                                                <x-icon name="pencil" :size="13" /><span>Rename</span>
-                                            </button>
-                                            <button type="button" class="district-action district-action--danger" wire:click="deleteDistrict({{ $district->id }})" wire:confirm="Delete {{ $district->name }} and all of its schools? This cannot be undone." title="Delete {{ $district->name }}">
-                                                <x-icon name="trash" :size="13" /><span>Delete</span>
+                @error('deleteSchool') <div class="error-text">{{ $message }}</div> @enderror
+
+                {{-- DISTRICT LIST: each row clickable — selecting a district
+                     expands its schools table (name + School ID + actions). --}}
+                <div class="district-list">
+                    @forelse ($this->districts as $district)
+                        <div class="district-block" wire:key="district-{{ $district->id }}">
+                            <button
+                                type="button"
+                                class="district-toggle {{ $selectedDistrictId === $district->id ? 'is-selected' : '' }}"
+                                wire:click="selectDistrict({{ $district->id }})"
+                            >
+                                <span class="district-toggle-name">
+                                    <x-icon name="chevron-down" :size="14" class="district-caret" />
+                                    {{ $district->name }}
+                                </span>
+                                <span class="district-toggle-count">{{ $district->schools_count }} {{ Str::plural('School', $district->schools_count) }}</span>
+                            </button>
+
+                            @if ($selectedDistrictId === $district->id)
+                                <div class="district-schools-panel">
+                                    <div class="district-schools-head">
+                                        <span class="district-schools-title">Schools</span>
+                                        <div class="district-schools-tools">
+                                            <input
+                                                type="search"
+                                                class="district-school-search"
+                                                placeholder="Search schools…"
+                                                wire:model.live.debounce.300ms="schoolSearch"
+                                            >
+                                            <button
+                                                type="button"
+                                                class="btn-primary btn-primary--small"
+                                                wire:click="openSchoolForm({{ $district->id }})"
+                                            >
+                                                <x-icon name="plus" :size="13" />
+                                                <span>Add School</span>
                                             </button>
                                         </div>
-                                    </td>
-                                </tr>
+                                    </div>
 
-                                {{-- SCHOOL ROWS --}}
-                                @foreach ($district->schools as $school)
-                                    <tr class="school-row-row" wire:key="school-{{ $school->id }}">
-                                        <td>
-                                            @if ($editing && $editing['type'] === 'school' && $editing['id'] === $school->id)
-                                                <form wire:submit="saveRename" class="rename-form">
-                                                    <input
-                                                        type="text"
-                                                        wire:model="editingName"
-                                                        autofocus
-                                                        @class(['error' => $errors->has('editingName')])
-                                                    >
-                                                    <button type="submit" class="rename-save" wire:loading.attr="disabled" wire:target="saveRename" title="Save">✓</button>
-                                                    <button type="button" class="rename-cancel" wire:click="cancelRename" title="Cancel">×</button>
-                                                    @error('editingName') <div class="error-text">{{ $message }}</div> @enderror
-                                                </form>
-                                            @else
-                                                <span class="school-cell">
-                                                    <x-icon name="school" :size="13" class="school-dot" />
-                                                    {{ $school->name }}
+                                    <div class="table-wrap">
+                                        <table class="data-table district-school-table">
+                                            <thead>
+                                                <tr>
+                                                    <th scope="col">School Name</th>
+                                                    <th scope="col">School ID</th>
+                                                    <th scope="col">Users</th>
+                                                    <th scope="col" class="district-actions-col">Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach ($this->selectedDistrictSchools as $school)
+                                                    @if ($editingSchoolId === $school->id)
+                                                        <tr wire:key="school-edit-{{ $school->id }}">
+                                                            <td colspan="4">
+                                                                <form wire:submit="saveEditSchool" class="school-edit-form">
+                                                                    {{-- Same panel as Add School: a header that says what
+                                                                         is being edited and where it lives, the same two
+                                                                         field grid, and the same separated action row. --}}
+                                                                    <div class="school-form-head">
+                                                                        <span class="school-form-title">
+                                                                            <x-icon name="pen-line" :size="15" />
+                                                                            <span>Edit School</span>
+                                                                        </span>
+                                                                        <span class="school-form-chip" title="This school belongs to {{ $district->name }}">
+                                                                            <x-icon name="school" :size="13" />
+                                                                            <span>{{ $district->name }}</span>
+                                                                        </span>
+                                                                    </div>
+
+                                                                    <div class="school-form-grid">
+                                                                        <div class="field">
+                                                                            <label for="editSchoolName-{{ $school->id }}">School Name</label>
+                                                                            <span class="input-icon">
+                                                                                <x-icon name="school" :size="16" />
+                                                                                <input id="editSchoolName-{{ $school->id }}" type="text" placeholder="e.g. ABC Elementary School" autocomplete="off" wire:model="editSchoolName" @class(['error' => $errors->has('editSchoolName')])>
+                                                                            </span>
+                                                                            @error('editSchoolName') <div class="error-text">{{ $message }}</div> @enderror
+                                                                        </div>
+
+                                                                        <div class="field">
+                                                                            <label for="editSchoolId-{{ $school->id }}">School ID</label>
+                                                                            <span class="input-icon">
+                                                                                <x-icon name="shield" :size="16" />
+                                                                                <input id="editSchoolId-{{ $school->id }}" type="text" placeholder="e.g. 123456" autocomplete="off" inputmode="numeric" wire:model="editSchoolId" @class(['error' => $errors->has('editSchoolId')])>
+                                                                            </span>
+                                                                            {{-- Changing an ID never rewrites the logins
+                                                                                 already created from it. --}}
+                                                                            @if (! $errors->has('editSchoolId'))
+                                                                                <div class="field-hint">Must stay unique across all schools. Existing accounts keep the login they were given.</div>
+                                                                            @endif
+                                                                            @error('editSchoolId') <div class="error-text">{{ $message }}</div> @enderror
+                                                                        </div>
+                                                                    </div>
+
+                                                                    <div class="school-edit-actions">
+                                                                        <button type="button" class="btn-ghost" wire:click="cancelEditSchool">Cancel</button>
+                                                                        <button type="submit" class="btn-primary" wire:loading.attr="disabled" wire:target="saveEditSchool">
+                                                                            <x-icon name="pen-line" :size="15" />
+                                                                            <span wire:loading.remove wire:target="saveEditSchool">Save Changes</span>
+                                                                            <span wire:loading wire:target="saveEditSchool">Saving…</span>
+                                                                        </button>
+                                                                    </div>
+                                                                </form>
+                                                            </td>
+                                                        </tr>
+                                                    @else
+                                                        <tr wire:key="school-{{ $school->id }}">
+                                                            <td>
+                                                                <span class="school-cell">
+                                                                    <x-icon name="school" :size="13" class="school-dot" />
+                                                                    {{ $school->name }}
+                                                                </span>
+                                                            </td>
+                                                            <td><span class="badge">{{ $school->school_id !== null ? $school->school_id : '—' }}</span></td>
+                                                            <td>{{ $school->users_count }}</td>
+                                                            <td class="district-actions-col">
+                                                                <x-row-menu :label="'More actions for '.$school->name">
+                                                                    <x-row-menu-item wire:click="startEditSchool({{ $school->id }})" title="Edit {{ $school->name }}">
+                                                                        <x-icon name="pencil" :size="15" />
+                                                                        <span>Edit</span>
+                                                                    </x-row-menu-item>
+                                                                    <x-row-menu-item wire:click="openDeleteSchool({{ $school->id }})" title="Delete {{ $school->name }}" danger>
+                                                                        <x-icon name="trash" :size="15" />
+                                                                        <span>Delete</span>
+                                                                    </x-row-menu-item>
+                                                                </x-row-menu>
+                                                            </td>
+                                                        </tr>
+                                                    @endif
+                                                @endforeach
+                                                @if ($this->selectedDistrictSchools->isEmpty())
+                                                    <tr>
+                                                        <td colspan="4" class="table-empty">
+                                                            {{ $schoolSearch !== '' ? 'No schools match your search.' : 'No schools yet — add the first one.' }}
+                                                        </td>
+                                                    </tr>
+                                                @endif
+                                            </tbody>
+                                        </table>
+                                    </div>
+
+                                    {{-- ADD SCHOOL FORM: the district is fixed —
+                                         the school lands in the selected district, so the
+                                         district reads as context (a chip in the header)
+                                         rather than a field the superadmin could change. --}}
+                                    @if ($schoolFormDistrictId === $district->id)
+                                        <form wire:submit="addSchool" class="school-add-panel" wire:key="school-form-{{ $district->id }}">
+                                            <div class="school-form-head">
+                                                <span class="school-form-title">
+                                                    <x-icon name="plus" :size="15" />
+                                                    <span>Add School</span>
                                                 </span>
-                                            @endif
-                                        </td>
-                                        <td class="district-type-col"><span class="badge badge-muted">School</span></td>
-                                        <td class="district-actions-col">
-                                            <div class="district-actions-row">
-                                                <button type="button" class="district-action" wire:click="startRename('school', {{ $school->id }})" title="Rename {{ $school->name }}">
-                                                    <x-icon name="pencil" :size="13" /><span>Rename</span>
-                                                </button>
-                                                <button type="button" class="district-action district-action--danger" wire:click="deleteSchool({{ $school->id }})" wire:confirm="Delete {{ $school->name }}?" title="Delete {{ $school->name }}">
-                                                    <x-icon name="trash" :size="13" /><span>Delete</span>
+                                                <span class="school-form-chip" title="This school will be added to {{ $district->name }}">
+                                                    <x-icon name="school" :size="13" />
+                                                    <span>{{ $district->name }}</span>
+                                                </span>
+                                            </div>
+
+                                            <div class="school-form-grid">
+                                                <div class="field">
+                                                    <label for="schoolName">School Name</label>
+                                                    <span class="input-icon">
+                                                        <x-icon name="school" :size="16" />
+                                                        <input
+                                                            id="schoolName"
+                                                            type="text"
+                                                            placeholder="e.g. ABC Elementary School"
+                                                            autocomplete="off"
+                                                            wire:model="schoolName"
+                                                            @class(['error' => $errors->has('schoolName')])
+                                                        >
+                                                    </span>
+                                                    @error('schoolName') <div class="error-text">{{ $message }}</div> @enderror
+                                                </div>
+
+                                                <div class="field">
+                                                    <label for="schoolId">School ID</label>
+                                                    <span class="input-icon">
+                                                        <x-icon name="shield" :size="16" />
+                                                        <input
+                                                            id="schoolId"
+                                                            type="text"
+                                                            placeholder="e.g. 123456"
+                                                            autocomplete="off"
+                                                            inputmode="numeric"
+                                                            wire:model="schoolId"
+                                                            @class(['error' => $errors->has('schoolId')])
+                                                        >
+                                                    </span>
+                                                    {{-- The ID is the SH's default login when the
+                                                         account is created, so say why it matters. --}}
+                                                    @if (! $errors->has('schoolId'))
+                                                        <div class="field-hint">Unique across all schools — it becomes the SH's default login.</div>
+                                                    @endif
+                                                    @error('schoolId') <div class="error-text">{{ $message }}</div> @enderror
+                                                </div>
+                                            </div>
+
+                                            <div class="school-edit-actions">
+                                                <button type="button" class="btn-ghost" wire:click="cancelSchoolForm">Cancel</button>
+                                                <button type="submit" class="btn-primary" wire:loading.attr="disabled" wire:target="addSchool">
+                                                    <x-icon name="plus" :size="15" />
+                                                    <span wire:loading.remove wire:target="addSchool">Add School</span>
+                                                    <span wire:loading wire:target="addSchool">Adding…</span>
                                                 </button>
                                             </div>
-                                        </td>
-                                    </tr>
-                                @endforeach
+                                        </form>
+                                    @endif
 
-                                {{-- INLINE ADD-SCHOOL ROW --}}
-                                @if ($schoolFormDistrictId === $district->id)
-                                    <tr class="school-row-row" wire:key="school-form-{{ $district->id }}">
-                                        <td colspan="3">
-                                            <form wire:submit="addSchool" class="school-add-form">
-                                                <span class="school-cell">
-                                                    <x-icon name="plus" :size="13" class="school-dot" />
-                                                    <input
-                                                        type="text"
-                                                        placeholder="New school name…"
-                                                        autocomplete="off"
-                                                        wire:model="schoolName"
-                                                        autofocus
-                                                        @class(['error' => $errors->has('schoolName')])
-                                                    >
-                                                </span>
-                                                <button type="submit" class="btn-primary" wire:loading.attr="disabled" wire:target="addSchool">Add</button>
-                                                <button type="button" class="btn-ghost" wire:click="cancelSchoolForm">Cancel</button>
-                                                @error('schoolName') <div class="error-text">{{ $message }}</div> @enderror
-                                            </form>
-                                        </td>
-                                    </tr>
-                                @endif
-                            @empty
-                                <tr>
-                                    <td colspan="3" class="table-empty">No districts yet — add the first one above.</td>
-                                </tr>
-                            @endforelse
-                        </tbody>
-                    </table>
+                                    <div class="district-panel-foot">
+                                        <button type="button" class="district-action district-action--danger" wire:click="deleteDistrict({{ $district->id }})" wire:confirm="Delete {{ $district->name }} and all of its schools? This cannot be undone." title="Delete {{ $district->name }}">
+                                            <x-icon name="trash" :size="13" /><span>Delete district</span>
+                                        </button>
+                                        <button type="button" class="district-action" wire:click="selectDistrict(null)">
+                                            <x-icon name="chevron-down" :size="13" class="district-caret district-caret--up" /><span>Close</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            @endif
+                        </div>
+                    @empty
+                        <p class="table-empty">No districts yet — add the first one above.</p>
+                    @endforelse
                 </div>
             </div>
         </div>
     </div>
+
+    {{-- DELETE SCHOOL CONFIRMATION --}}
+    @if ($showDeleteSchoolModal)
+        <div
+            class="modal-backdrop is-open"
+            x-data
+            @keydown.escape.window="$wire.closeDeleteSchool()"
+            @click.self="$wire.closeDeleteSchool()"
+            role="presentation"
+        >
+            <div class="modal modal--confirmation" role="dialog" aria-modal="true" aria-labelledby="deleteSchoolTitle" @click.stop>
+                <div class="modal-head">
+                    <h2 id="deleteSchoolTitle">Delete School</h2>
+                    <button type="button" class="modal-close" wire:click="closeDeleteSchool" aria-label="Close" title="Close">×</button>
+                </div>
+
+                <div class="modal-form">
+                    <p class="delete-modal-description">
+                        Are you sure you want to delete
+                        <strong>{{ $deleteSchoolLabel }}</strong>?
+                        This cannot be undone. A school that still has user
+                        accounts cannot be deleted.
+                    </p>
+
+                    <div class="modal-actions">
+                        <button type="button" class="btn-ghost" wire:click="closeDeleteSchool">Cancel</button>
+                        <button type="button" class="btn-danger" wire:click="confirmDeleteSchool" wire:loading.attr="disabled" wire:target="confirmDeleteSchool">
+                            <span wire:loading.remove wire:target="confirmDeleteSchool">Delete School</span>
+                            <span wire:loading wire:target="confirmDeleteSchool">Deleting…</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    @endif
 </div>

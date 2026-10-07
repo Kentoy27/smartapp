@@ -85,7 +85,7 @@ class OpcrfPageTest extends TestCase
         $this->assertStringNotContainsString('Users', $html);
     }
 
-    public function test_sidebar_items_are_listed_alphabetically_for_staff(): void
+    public function test_sidebar_items_follow_the_working_order_for_staff(): void
     {
         $user = $this->staffUser();
 
@@ -104,7 +104,7 @@ class OpcrfPageTest extends TestCase
         $sorted = $positions;
         sort($sorted);
 
-        $this->assertSame($sorted, $positions, 'Sidebar items must appear A→Z.');
+        $this->assertSame($sorted, $positions, 'Sidebar items must appear in working order.');
     }
 
     public function test_sidebar_hides_opcrf_from_superadmins(): void

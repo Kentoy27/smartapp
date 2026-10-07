@@ -5,31 +5,71 @@ namespace App\Livewire;
 use App\Models\District;
 use App\Models\School;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
 /**
- * Superadmin-only district management.
+ * Superadmin-only district & school management.
  *
- * Lives in a modal on the dashboard ("View District" button): a table of
- * districts with the schools under each, plus add / rename / delete for
- * both levels. The dashboard hosts it via <livewire:district-manager />.
+ * Lives in a modal on the dashboard ("Manage Districts & Schools"):
+ * clickable districts with their schools underneath (name + School ID),
+ * an Add School form (district pre-filled, School ID required and unique
+ * across the system), edit and delete per school — a school that still
+ * has active user accounts cannot be deleted — plus add / rename /
+ * delete for districts. The dashboard hosts it via
+ * <livewire:district-manager />.
  */
 class DistrictManager extends Component
 {
     public bool $showModal = false;
 
+    /**
+     * The district whose schools are expanded (clicked) in the modal —
+     * null collapses every district to a single row.
+     */
+    public ?int $selectedDistrictId = null;
+
+    /**
+     * School search within the selected district.
+     */
+    public string $schoolSearch = '';
+
     public string $districtName = '';
 
-    /** District the "add school" form is currently open for. */
+    /**
+     * The add-school form: opens under $schoolFormDistrictId, whose name
+     * the modal shows pre-filled and read-only.
+     */
     public ?int $schoolFormDistrictId = null;
 
     public string $schoolName = '';
 
-    /** Inline rename state: ['type' => 'district'|'school', 'id' => int]. */
+    public string $schoolId = '';
+
+    /**
+     * The edit-school form: opens for $editingSchoolId.
+     */
+    public ?int $editingSchoolId = null;
+
+    public string $editSchoolName = '';
+
+    public string $editSchoolId = '';
+
+    /** Inline district rename state: ['id' => int]. */
     public ?array $editing = null;
 
     public string $editingName = '';
+
+    /**
+     * Delete-school confirmation: guarded against schools with users.
+     */
+    public bool $showDeleteSchoolModal = false;
+
+    public ?int $deleteSchoolId = null;
+
+    public string $deleteSchoolLabel = '';
 
     public function mount(): void
     {
@@ -40,15 +80,53 @@ class DistrictManager extends Component
     public function districts()
     {
         return District::query()
-            ->with('schools')
+            ->with(['schools' => fn ($query) => $query->withCount('users')])
             ->withCount('schools')
             ->orderBy('name')
             ->get();
     }
 
-    public function openModal(): void
+    /**
+     * The schools of the selected district (search-filtered), for the
+     * modal's schools table.
+     */
+    #[Computed]
+    public function selectedDistrictSchools()
+    {
+        if ($this->selectedDistrictId === null) {
+            return collect();
+        }
+
+        return School::query()
+            ->where('district_id', $this->selectedDistrictId)
+            ->withCount('users')
+            ->when($this->schoolSearch !== '', function ($query): void {
+                $term = '%'.str_replace(['%', '_'], ['\%', '\_'], $this->schoolSearch).'%';
+
+                $query->where(function ($q) use ($term): void {
+                    $q->where('name', 'like', $term)
+                        ->orWhere('school_id', 'like', $term);
+                });
+            })
+            ->orderBy('name')
+            ->get();
+    }
+
+    public function selectDistrict(?int $districtId): void
+    {
+        $this->selectedDistrictId = $districtId;
+        $this->schoolSearch = '';
+        $this->cancelSchoolForm();
+        $this->cancelEditSchool();
+    }
+
+    public function openModal(?int $districtId = null): void
     {
         $this->showModal = true;
+
+        if ($districtId !== null && District::whereKey($districtId)->exists()) {
+            $this->selectDistrict($districtId);
+        }
     }
 
     public function closeModal(): void
@@ -67,17 +145,23 @@ class DistrictManager extends Component
             'districtName.unique' => 'A district with this name already exists.',
         ]);
 
-        District::create(['name' => trim($this->districtName)]);
+        $district = District::create(['name' => trim($this->districtName)]);
 
         $this->districtName = '';
-        $this->dispatch('district-added');
+        $this->selectedDistrictId = $district->id;
+        $this->dispatch('districts-changed');
     }
+
+    /* ---------- ADD SCHOOL ---------- */
 
     public function openSchoolForm(int $districtId): void
     {
+        abort_unless(Auth::user()?->is_superadmin, 404);
+
         $this->schoolFormDistrictId = $districtId;
         $this->schoolName = '';
-        $this->editing = null;
+        $this->schoolId = '';
+        $this->cancelEditSchool();
         $this->resetValidation();
     }
 
@@ -85,6 +169,7 @@ class DistrictManager extends Component
     {
         $this->schoolFormDistrictId = null;
         $this->schoolName = '';
+        $this->schoolId = '';
         $this->resetValidation();
     }
 
@@ -93,25 +178,139 @@ class DistrictManager extends Component
         abort_unless(Auth::user()?->is_superadmin, 404);
 
         $this->validate([
+            // Unique only within the district being added to.
             'schoolName' => [
                 'required', 'string', 'max:160',
-                // Unique only within the district being added to.
-                'unique:schools,name,NULL,id,district_id,' . $this->schoolFormDistrictId,
+                'unique:schools,name,NULL,id,district_id,'.$this->schoolFormDistrictId,
             ],
+            // The DepEd school ID is unique across the whole system.
+            'schoolId' => ['required', 'string', 'max:20', 'unique:schools,school_id'],
         ], [
+            'schoolName.required' => 'The school name is required.',
             'schoolName.unique' => 'This school already exists in the district.',
+            'schoolId.required' => 'The School ID is required.',
+            'schoolId.unique' => 'That School ID is already used by another school.',
         ]);
 
-        School::create([
+        $school = School::create([
             'district_id' => $this->schoolFormDistrictId,
             'name' => trim($this->schoolName),
+            'school_id' => trim($this->schoolId),
         ]);
 
         $this->schoolName = '';
-        $this->dispatch('district-added');
+        $this->schoolId = '';
+        $this->selectedDistrictId = $school->district_id;
+        $this->schoolFormDistrictId = null;
+        $this->dispatch('districts-changed');
     }
 
-    /* ---------- RENAME (inline) ---------- */
+    /* ---------- EDIT SCHOOL ---------- */
+
+    public function startEditSchool(int $schoolId): void
+    {
+        abort_unless(Auth::user()?->is_superadmin, 404);
+
+        $school = School::findOrFail($schoolId);
+
+        $this->editingSchoolId = $school->id;
+        $this->editSchoolName = $school->name;
+        $this->editSchoolId = (string) $school->school_id;
+        $this->cancelSchoolForm();
+        $this->resetValidation();
+    }
+
+    public function cancelEditSchool(): void
+    {
+        $this->editingSchoolId = null;
+        $this->editSchoolName = '';
+        $this->editSchoolId = '';
+        $this->resetValidation();
+    }
+
+    public function saveEditSchool(): void
+    {
+        abort_unless(Auth::user()?->is_superadmin, 404);
+
+        $school = School::findOrFail($this->editingSchoolId);
+
+        $this->validate([
+            'editSchoolName' => [
+                'required', 'string', 'max:160',
+                Rule::unique('schools', 'name')
+                    ->where('district_id', $school->district_id)
+                    ->ignore($school->id),
+            ],
+            'editSchoolId' => [
+                'required', 'string', 'max:20',
+                Rule::unique('schools', 'school_id')->ignore($school->id),
+            ],
+        ], [
+            'editSchoolName.required' => 'The school name is required.',
+            'editSchoolName.unique' => 'This school already exists in the district.',
+            'editSchoolId.required' => 'The School ID is required.',
+            'editSchoolId.unique' => 'That School ID is already used by another school.',
+        ]);
+
+        $school->update([
+            'name' => trim($this->editSchoolName),
+            'school_id' => trim($this->editSchoolId),
+        ]);
+
+        $this->cancelEditSchool();
+        $this->dispatch('districts-changed');
+    }
+
+    /* ---------- DELETE SCHOOL ---------- */
+
+    public function openDeleteSchool(int $schoolId): void
+    {
+        abort_unless(Auth::user()?->is_superadmin, 404);
+
+        $school = School::withCount('users')->findOrFail($schoolId);
+
+        $this->deleteSchoolId = $school->id;
+        $this->deleteSchoolLabel = $school->name;
+        $this->showDeleteSchoolModal = true;
+        $this->resetValidation();
+    }
+
+    public function closeDeleteSchool(): void
+    {
+        $this->showDeleteSchoolModal = false;
+        $this->deleteSchoolId = null;
+        $this->deleteSchoolLabel = '';
+    }
+
+    public function confirmDeleteSchool(): void
+    {
+        abort_unless(Auth::user()?->is_superadmin, 404);
+
+        $school = School::withCount('users')->find($this->deleteSchoolId);
+
+        if ($school === null) {
+            $this->closeDeleteSchool();
+
+            return;
+        }
+
+        // A school with active user accounts cannot be deleted — the users
+        // would be orphaned. Reassign them first.
+        if ($school->users_count > 0) {
+            $this->closeDeleteSchool();
+            $this->addError('deleteSchool', $school->name.' still has '.$school->users_count.' '
+                .Str::plural('user', $school->users_count).' — reassign them before deleting the school.');
+
+            return;
+        }
+
+        $school->delete();
+
+        $this->closeDeleteSchool();
+        $this->dispatch('districts-changed');
+    }
+
+    /* ---------- DISTRICT RENAME / DELETE ---------- */
 
     public function startRename(string $type, int $id): void
     {
@@ -122,7 +321,7 @@ class DistrictManager extends Component
             : School::findOrFail($id)->name;
 
         $this->editing = ['type' => $type, 'id' => $id];
-        $this->schoolFormDistrictId = null;
+        $this->cancelSchoolForm();
         $this->resetValidation();
     }
 
@@ -149,6 +348,7 @@ class DistrictManager extends Component
             $taken = District::where('name', $name)->where('id', '!=', $district->id)->exists();
             if ($taken) {
                 $this->addError('editingName', 'A district with this name already exists.');
+
                 return;
             }
 
@@ -162,6 +362,7 @@ class DistrictManager extends Component
                 ->exists();
             if ($taken) {
                 $this->addError('editingName', 'This school already exists in the district.');
+
                 return;
             }
 
@@ -170,10 +371,8 @@ class DistrictManager extends Component
 
         $this->editing = null;
         $this->editingName = '';
-        $this->dispatch('district-added');
+        $this->dispatch('districts-changed');
     }
-
-    /* ---------- DELETE ---------- */
 
     public function deleteDistrict(int $id): void
     {
@@ -182,28 +381,29 @@ class DistrictManager extends Component
         // Schools cascade via the foreign key.
         District::whereKey($id)->delete();
 
-        if ($this->schoolFormDistrictId === $id) {
-            $this->cancelSchoolForm();
+        if ($this->selectedDistrictId === $id) {
+            $this->selectDistrict(null);
         }
 
-        $this->dispatch('district-added');
-    }
-
-    public function deleteSchool(int $id): void
-    {
-        abort_unless(Auth::user()?->is_superadmin, 404);
-
-        School::whereKey($id)->delete();
-        $this->dispatch('district-added');
+        $this->dispatch('districts-changed');
     }
 
     private function resetForms(): void
     {
+        $this->selectedDistrictId = null;
+        $this->schoolSearch = '';
         $this->districtName = '';
         $this->schoolFormDistrictId = null;
         $this->schoolName = '';
+        $this->schoolId = '';
+        $this->editingSchoolId = null;
+        $this->editSchoolName = '';
+        $this->editSchoolId = '';
         $this->editing = null;
         $this->editingName = '';
+        $this->showDeleteSchoolModal = false;
+        $this->deleteSchoolId = null;
+        $this->deleteSchoolLabel = '';
         $this->resetErrorBag();
     }
 

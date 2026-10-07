@@ -3,6 +3,7 @@
 namespace Tests\Unit\Support;
 
 use App\Support\OpcrfPartOne;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Tests\Concerns\BuildsOpcrfWorkbooks;
 use Tests\TestCase;
@@ -11,13 +12,29 @@ class OpcrfPartOneTest extends TestCase
 {
     use BuildsOpcrfWorkbooks;
 
+    // The gate now consults the superadmin's opcrf_schedules table first and
+    // falls back to this legacy window only when no schedule exists — so the
+    // table has to exist for these tests to mean anything. With the table
+    // empty, every one of them exercises the legacy fallback.
+    use RefreshDatabase;
+
     protected function setUp(): void
     {
         parent::setUp();
 
-        // A fixed clock inside the default window (03-16 → 04-30): the
-        // template's full form is open.
+        // A fixed clock inside the default window (03-16 → 04-30): with the
+        // Part-One-only lock released, the template's full form is open.
         Carbon::setTestNow('2026-04-01 10:00:00');
+    }
+
+    /**
+     * The default state is "Part One only, from the beginning" — the window
+     * tests below release the lock (opcrf.part_one.part_one_only = false)
+     * so the term-gate logic itself is exercised.
+     */
+    private function unlockFullTemplate(): void
+    {
+        config(['opcrf.part_one.part_one_only' => false]);
     }
 
     protected function tearDown(): void
@@ -27,8 +44,24 @@ class OpcrfPartOneTest extends TestCase
         parent::tearDown();
     }
 
+    public function test_part_one_only_is_the_default_from_the_beginning(): void
+    {
+        // No config, any date: the lock holds and only Part One ships.
+        Carbon::setTestNow('2026-04-01 10:00:00'); // inside the old window
+
+        $this->assertFalse(OpcrfPartOne::windowOpen());
+        $this->assertSame(['PART I (CY 2025 & SY2025-2026)'], $this->sheetNamesOfWorkbook(OpcrfPartOne::templateBytes()));
+        $this->assertSame('OPCRF-PART-I.xlsx', OpcrfPartOne::templateDownloadName());
+
+        $summary = OpcrfPartOne::summary();
+        $this->assertSame(1, $summary['part']);
+        $this->assertFalse($summary['full_open']);
+    }
+
     public function test_the_window_is_open_between_its_boundaries(): void
     {
+        $this->unlockFullTemplate();
+
         $this->assertTrue(OpcrfPartOne::windowOpen());
 
         Carbon::setTestNow('2026-03-16 00:00:00');
@@ -40,6 +73,8 @@ class OpcrfPartOneTest extends TestCase
 
     public function test_the_window_is_closed_outside_its_boundaries(): void
     {
+        $this->unlockFullTemplate();
+
         Carbon::setTestNow('2026-03-15 23:59:59');
         $this->assertFalse(OpcrfPartOne::windowOpen());
 
@@ -52,6 +87,8 @@ class OpcrfPartOneTest extends TestCase
 
     public function test_a_window_across_the_new_year_is_understood(): void
     {
+        $this->unlockFullTemplate();
+
         config(['opcrf.part_one.term_opens' => '11-01']);
         config(['opcrf.part_one.term_closes' => '03-15']);
 
@@ -67,6 +104,8 @@ class OpcrfPartOneTest extends TestCase
 
     public function test_an_invalid_window_keeps_the_gate_closed(): void
     {
+        $this->unlockFullTemplate();
+
         config(['opcrf.part_one.term_opens' => 'not-a-date']);
         config(['opcrf.part_one.term_closes' => '13-45']);
 
@@ -91,6 +130,8 @@ class OpcrfPartOneTest extends TestCase
 
     public function test_the_summary_describes_the_open_state_inside_the_term(): void
     {
+        $this->unlockFullTemplate();
+
         Carbon::setTestNow('2026-04-01 10:00:00');
 
         $summary = OpcrfPartOne::summary();
@@ -111,6 +152,8 @@ class OpcrfPartOneTest extends TestCase
 
     public function test_inside_the_term_the_full_template_is_served(): void
     {
+        $this->unlockFullTemplate();
+
         Carbon::setTestNow('2026-04-01 10:00:00');
 
         $this->assertSame(
@@ -123,6 +166,8 @@ class OpcrfPartOneTest extends TestCase
 
     public function test_the_part_one_copy_is_smaller_than_the_full_template(): void
     {
+        $this->unlockFullTemplate();
+
         Carbon::setTestNow('2026-04-01 10:00:00');
         $full = OpcrfPartOne::templateBytes();
 

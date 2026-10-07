@@ -3,6 +3,7 @@
 namespace App\Livewire;
 
 use App\Models\OpcrfSubmission;
+use App\Support\OpcrfTemplatePersonalizer;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -92,18 +93,26 @@ class OpcrfForm extends Component
 
     public function mount(): void
     {
+        // The form is pre-filled from the signed-in account, so it needs one.
+        // Without this, identityFor(null) below raises a TypeError — a 500
+        // rather than a refusal.
+        abort_unless(Auth::check(), 404);
+
         // Staff-only page; superadmins use their own tooling (same guard
         // as the /opcrf route itself).
-        abort_if(Auth::user()?->is_superadmin, 404);
+        abort_if(Auth::user()->is_superadmin, 404);
 
-        // Pre-fill from the signed-in account — matches what the template
-        // header would normally carry.
-        $user = Auth::user();
+        // Pre-filled from the signed-in account — and from the SAME source
+        // the personalized template download writes from
+        // (OpcrfTemplatePersonalizer::identityFor), so the typed form and the
+        // downloaded workbook can never disagree about who the staff member
+        // is. One user-information source, not two.
+        $identity = OpcrfTemplatePersonalizer::identityFor(Auth::user());
 
-        $this->employee_name = (string) ($user->name ?? '');
-        $this->position = '';
-        $this->review_period = '';
-        $this->division_office = '';
+        $this->employee_name = $identity['name'];
+        $this->position = $identity['position'];
+        $this->review_period = $identity['review_period'];
+        $this->division_office = $identity['division_office'];
         $this->objectives = '';
         $this->accomplishments = '';
         $this->self_rating = '';
@@ -173,7 +182,9 @@ class OpcrfForm extends Component
             'employee_name', 'position', 'review_period', 'division_office',
             'objectives', 'accomplishments', 'self_rating', 'remarks',
         );
-        $this->employee_name = (string) (Auth::user()->name ?? '');
+        // Accounts created in Users no longer carry a real name (it was never used),
+        // so fall back to the login — the OPCRF still needs an employee name.
+        $this->employee_name = (string) (Auth::user()->name ?: Auth::user()->username);
         $this->resetValidation();
         $this->successMessage = null;
     }

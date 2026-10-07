@@ -1,6 +1,6 @@
-<div class="opcrf-movs-component">
+<div class="opcrf-movs-component" wire:poll.15s>
 
-    {{-- SUCCESS ALERT: popped once after attach/remove, then cleared so
+    {{-- SUCCESS ALERT: popped once after a resubmission, then cleared so
          later renders never re-fire it. --}}
     @if ($successMessage)
         <div
@@ -17,7 +17,59 @@
         ></div>
     @endif
 
-    {{-- SUBMISSIONS TABLE --}}
+    {{-- ACTION REQUIRED: a returned submission sits at the top of the
+         table — the reviewer's remarks front and center, with the
+         Revise & Resubmit entry point. --}}
+    @php($returned = $this->submissions->firstWhere('status', \App\Models\OpcrfSubmission::STATUS_RETURNED))
+    @if ($returned !== null)
+        <div class="card opcrf-action-required" wire:key="action-required-{{ $returned->id }}">
+            <div class="opcrf-action-required-head">
+                <span class="opcrf-action-required-icon" aria-hidden="true">
+                    <x-icon name="undo-2" :size="16" />
+                </span>
+                <span class="opcrf-action-required-title">Action Required — Revision Needed</span>
+                <span class="badge badge--warn">{{ $returned->statusLabelFor(auth()->user()) }}</span>
+            </div>
+
+            <p class="opcrf-action-required-text">
+                <strong>Your OPCRF has been returned for revision.</strong>
+                Please review the Superadmin's remarks, make the necessary
+                corrections, and resubmit your OPCRF.
+            </p>
+
+            <div class="opcrf-action-required-remarks">
+                <div class="opcrf-action-required-remarks-label">
+                    Superadmin Remarks @if ($returned->latestReview?->reviewer)
+                        — {{ $returned->latestReview->reviewer->username }}@endif
+                </div>
+                <p class="opcrf-action-required-remarks-text">
+                    {{ $returned->latestReview?->remarks !== null && trim((string) $returned->latestReview?->remarks) !== ''
+                        ? $returned->latestReview->remarks
+                        : 'No remarks were provided — please review your submission and correct any missing or inconsistent details.' }}
+                </p>
+            </div>
+
+            <div class="opcrf-action-required-foot">
+                <span class="opcrf-review-owner">
+                    Returned {{ $returned->latestReview?->reviewed_at?->format('M j, Y g:i A') ?? '' }}
+                    @if ($returned->latestReview?->reviewer)
+                        by {{ $returned->latestReview->reviewer->username }}@endif
+                </span>
+                <button
+                    type="button"
+                    class="btn-primary"
+                    wire:click="openRevise({{ $returned->id }})"
+                    wire:loading.attr="disabled"
+                    wire:target="openRevise"
+                >
+                    <x-icon name="pen-line" :size="14" />
+                    <span>Revise &amp; Resubmit</span>
+                </button>
+            </div>
+        </div>
+    @endif
+
+    {{-- SUBMISSIONS TABLE ----}}
     <div class="card">
         <div class="card-head">
             <div class="card-title">Your OPCRF submissions</div>
@@ -57,44 +109,51 @@
                                     <span class="badge">{{ $submission->self_rating > 0 ? number_format($submission->self_rating, 2) : '—' }}</span>
                                 </td>
                                 <td>
-                                    @if ($submission->isApproved())
-                                        <span class="badge badge--ok" title="Approved on {{ $submission->approved_at->format('M j, Y g:i A') }}">Approved</span>
+                                    @php($latestReview = $submission->latestReview)
+                                    <span
+                                        class="badge {{ $submission->statusBadgeClass() }}"
+                                        @if ($latestReview !== null)
+                                            title="{{ $latestReview->reviewer?->username ?? 'Superadmin' }} · {{ $latestReview->actionLabel() }} · {{ $latestReview->reviewed_at->format('M j, Y g:i A') }}"
+                                        @endif
+                                    >{{ $submission->statusLabelFor(auth()->user()) }}</span>
+                                </td>
+                                <td class="opcrf-remarks-cell">
+                                    @if ($latestReview !== null && $latestReview->remarks !== null && trim($latestReview->remarks) !== '')
+                                        {{ $latestReview->remarks }}
+                                        <span class="opcrf-review-owner">— {{ $latestReview->reviewer?->username ?? 'reviewer' }}</span>
                                     @else
-                                        <span class="badge badge-muted">Pending review</span>
+                                        {{ $submission->remarks ?: '—' }}
                                     @endif
                                 </td>
-                                <td class="opcrf-remarks-cell">{{ $submission->remarks ?: '—' }}</td>
                                 <td class="users-actions-col">
-                                    <span class="users-actions-row">
-                                        @if ($submission->isApproved() && $submission->hasFile())
-                                            <a
-                                                class="users-action"
-                                                href="{{ route('opcrf.submission.download', $submission) }}"
-                                                title="Download the approved copy of your OPCRF"
-                                            >
-                                                <span class="users-action-inner">
-                                                    <x-icon name="download" :size="14" />
-                                                    <span>Download</span>
-                                                </span>
-                                            </a>
-                                        @endif
+                                    @if ($submission->status === \App\Models\OpcrfSubmission::STATUS_RETURNED)
                                         <button
                                             type="button"
                                             class="users-action"
-                                            wire:click="openMovs({{ $submission->id }})"
+                                            wire:click="openRevise({{ $submission->id }})"
                                             wire:loading.attr="disabled"
-                                            wire:target="openMovs"
-                                            title="Upload MOVs for {{ $submission->review_period }}"
+                                            wire:target="openRevise"
+                                            title="Revise and resubmit this OPCRF"
                                         >
                                             <span class="users-action-inner">
-                                                <x-icon name="paperclip" :size="14" />
-                                                <span>MOVs</span>
-                                                @if ($submission->movs_count > 0)
-                                                    <span class="badge">{{ $submission->movs_count }}</span>
-                                                @endif
+                                                <x-icon name="pen-line" :size="14" />
+                                                <span>Revise &amp; Resubmit</span>
                                             </span>
                                         </button>
-                                    </span>
+                                    @elseif ($submission->isApproved() && $submission->hasFile())
+                                        <a
+                                            class="users-action"
+                                            href="{{ route('opcrf.submission.download', $submission) }}"
+                                            title="Download the approved copy of your OPCRF"
+                                        >
+                                            <span class="users-action-inner">
+                                                <x-icon name="download" :size="14" />
+                                                <span>Download</span>
+                                            </span>
+                                        </a>
+                                    @else
+                                        <span class="opcrf-review-owner">—</span>
+                                    @endif
                                 </td>
                             </tr>
                         @endforeach
@@ -106,114 +165,91 @@
         @endif
     </div>
 
-    {{-- UPLOAD YOUR MOVS MODAL: opened per submission row. Lists attached
-         files, takes several new ones, and removes individually. --}}
-    @if ($showModal && $this->currentSubmission())
+    {{-- REVISE & RESUBMIT: opened from a returned row — the reviewer's
+         remarks are shown first (what to correct), then the revised
+         workbook replaces the returned one (previous upload archived as
+         Version N) and the submission re-enters review as 'resubmitted',
+         routed to the superadmin who returned it. --}}
+    @if ($this->resubmitSubmission !== null)
         <div
             class="modal-backdrop is-open"
             x-data
-            @keydown.escape.window="$wire.closeMovs()"
-            @click.self="$wire.closeMovs()"
+            @keydown.escape.window="$wire.closeRevise()"
+            @click.self="$wire.closeRevise()"
             role="presentation"
         >
-            <div class="modal modal--movs" role="dialog" aria-modal="true" aria-labelledby="opcrfMovsTitle" @click.stop>
+            <div class="modal modal--opcr-revise" role="dialog" aria-modal="true" aria-labelledby="opcrReviseTitle" @click.stop>
                 <div class="modal-head">
-                    <h2 id="opcrfMovsTitle">Upload your MOVs</h2>
-                    <button type="button" class="modal-close" wire:click="closeMovs" aria-label="Close" title="Close">×</button>
+                    <h2 id="opcrReviseTitle">Revise &amp; Resubmit</h2>
+                    <button type="button" class="modal-close" wire:click="closeRevise" aria-label="Close" title="Close">×</button>
                 </div>
 
-                <p class="opcrf-review-note">
-                    Attach your <strong>Means of Verification</strong> for
-                    <strong>{{ $submissionLabel }}</strong> — the reports, signed
-                    forms, and documents that prove each accomplishment. Up to
-                    10 MB per file; PDF, Word, Excel, PowerPoint, images, and ZIP.
-                </p>
-
-                <div class="modal-form opcrf-movs-body">
-                    {{-- NEW FILES PICKER --}}
-                    <label class="opcrf-dropzone opcrf-dropzone--compact {{ $errors->has('newFiles.*') || $errors->has('newFiles') ? 'has-error' : '' }}">
-                        <input
-                            type="file"
-                            multiple
-                            accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.zip"
-                            wire:model="newFiles"
-                            wire:loading.attr="disabled"
-                            wire:target="newFiles"
-                            class="opcrf-file-input"
-                            aria-label="Choose MOV files to attach"
-                        >
-
-                        <span class="opcrf-dropzone-inner" wire:loading.remove wire:target="newFiles">
-                            <span class="opcrf-dropzone-badge" aria-hidden="true">
-                                <x-icon name="upload" :size="18" />
-                            </span>
-                            <span class="opcrf-dropzone-title">Click to choose MOV files</span>
-                            <span class="opcrf-dropzone-sub">You can pick several at once</span>
-                        </span>
-
-                        <span class="opcrf-dropzone-inner" wire:loading wire:target="newFiles">
-                            <span class="opcrf-dropzone-badge" aria-hidden="true">
-                                <x-icon name="paperclip" :size="18" />
-                            </span>
-                            <span class="opcrf-dropzone-title">Uploading…</span>
-                            <span class="opcrf-dropzone-sub">Storing your files securely</span>
-                        </span>
-                    </label>
-                    @error('newFiles') <div class="error-text">{{ $message }}</div> @enderror
-                    @error('newFiles.*') <div class="error-text">{{ $message }}</div> @enderror
-
-                    {{-- FILES QUEUED (temp-uploaded, not saved yet) --}}
-                    @if (!empty($newFiles))
-                        <div class="opcrf-movs-queue">
-                            <div class="opcrf-movs-queue-head">
-                                <span>{{ count($newFiles) }} file{{ count($newFiles) === 1 ? '' : 's' }} ready to attach</span>
-                                <button type="button" class="btn-primary btn-primary--small" wire:click="saveMovs" wire:loading.attr="disabled" wire:target="saveMovs">
-                                    <span wire:loading.remove wire:target="saveMovs">Attach file{{ count($newFiles) === 1 ? '' : 's' }}</span>
-                                    <span wire:loading wire:target="saveMovs">Attaching…</span>
-                                </button>
-                            </div>
-                            <ul class="opcrf-movs-list">
-                                @foreach ($newFiles as $queued)
-                                    <li class="opcrf-movs-item" wire:key="queued-{{ $loop->index }}-{{ $queued->getClientOriginalName() }}">
-                                        <x-icon name="paperclip" :size="14" class="opcrf-movs-item-icon" />
-                                        <span class="opcrf-movs-item-name">{{ $queued->getClientOriginalName() }}</span>
-                                        <span class="badge badge-muted">new</span>
-                                    </li>
-                                @endforeach
-                            </ul>
+                <div class="modal-form">
+                    <div class="opcrf-action-required-remarks opcrf-revise-remarks">
+                        <div class="opcrf-action-required-remarks-label">
+                            Superadmin Remarks @if ($this->resubmitSubmission->latestReview?->reviewer)
+                                — {{ $this->resubmitSubmission->latestReview->reviewer->username }}@endif
                         </div>
-                    @endif
-
-                    {{-- ALREADY ATTACHED --}}
-                    <div class="opcrf-movs-attached">
-                        <div class="opcrf-movs-attached-head">Attached files</div>
-                        @if ($this->existingMovs->isEmpty())
-                            <p class="opcrf-movs-empty">No MOVs attached yet for this submission.</p>
-                        @else
-                            <ul class="opcrf-movs-list">
-                                @foreach ($this->existingMovs as $mov)
-                                    <li class="opcrf-movs-item" wire:key="mov-{{ $mov->id }}">
-                                        <x-icon name="file-spreadsheet" :size="14" class="opcrf-movs-item-icon" />
-                                        <a class="opcrf-movs-item-name" href="{{ route('opcrf.movs.download', $mov) }}">{{ $mov->original_name }}</a>
-                                        <span class="opcrf-movs-item-size">{{ $mov->human_size }}</span>
-                                        <button
-                                            type="button"
-                                            class="users-action users-action--danger users-action--tiny"
-                                            wire:click="deleteMov({{ $mov->id }})"
-                                            wire:loading.attr="disabled"
-                                            wire:target="deleteMov({{ $mov->id }})"
-                                            title="Remove {{ $mov->original_name }}"
-                                        >
-                                            <x-icon name="trash" :size="12" />
-                                        </button>
-                                    </li>
-                                @endforeach
-                            </ul>
-                        @endif
+                        <p class="opcrf-action-required-remarks-text">
+                            {{ $this->resubmitSubmission->latestReview?->remarks !== null && trim((string) $this->resubmitSubmission->latestReview?->remarks) !== ''
+                                ? $this->resubmitSubmission->latestReview->remarks
+                                : 'No remarks were provided — please review your submission and correct any missing or inconsistent details.' }}
+                        </p>
                     </div>
 
+                    <p class="opcrf-review-note">
+                        Attach your corrected <strong>OPCRF .xlsx</strong> below
+                        (the returned copy is kept as a version), then resubmit
+                        it back to
+                        <strong>{{ $this->resubmitSubmission->returningReviewer()?->username ?? 'the superadmin' }}</strong>
+                        for review.
+                    </p>
+
+                    <form wire:submit.prevent class="opcrf-upload-form">
+                        <label class="opcrf-dropzone {{ $errors->has('revisionFile') ? 'has-error' : '' }}">
+                            <input
+                                type="file"
+                                accept=".xlsx"
+                                wire:model="revisionFile"
+                                wire:loading.attr="disabled"
+                                wire:target="revisionFile"
+                                class="opcrf-file-input"
+                                aria-label="Upload your revised OPCRF xlsx file"
+                            >
+
+                            <span class="opcrf-dropzone-inner" wire:loading.remove wire:target="revisionFile">
+                                <span class="opcrf-dropzone-badge" aria-hidden="true">
+                                    <x-icon name="upload" :size="20" />
+                                </span>
+                                <span class="opcrf-dropzone-title">Click to choose your revised OPCRF file</span>
+                                <span class="opcrf-dropzone-sub">.xlsx · the returned copy is preserved as Version {{ max(1, $this->resubmitSubmission->versions()->count() + 1) }} · resubmitting without a new file keeps the current one</span>
+                            </span>
+
+                            <span class="opcrf-dropzone-inner" wire:loading wire:target="revisionFile">
+                                <span class="opcrf-dropzone-badge" aria-hidden="true">
+                                    <x-icon name="file-spreadsheet" :size="20" />
+                                </span>
+                                <span class="opcrf-dropzone-title">Uploading your revision…</span>
+                                <span class="opcrf-dropzone-sub">Storing the revised workbook</span>
+                            </span>
+                        </label>
+
+                        @error('revisionFile') <div class="error-text">{{ $message }}</div> @enderror
+                    </form>
+
                     <div class="modal-actions">
-                        <button type="button" class="btn-ghost" wire:click="closeMovs">Close</button>
+                        <button type="button" class="btn-ghost" wire:click="closeRevise">Cancel</button>
+                        <button
+                            type="button"
+                            class="btn-primary"
+                            wire:click="confirmResubmit"
+                            wire:loading.attr="disabled"
+                            wire:target="confirmResubmit"
+                        >
+                            <x-icon name="send" :size="14" />
+                            <span wire:loading.remove wire:target="confirmResubmit">Resubmit for Review</span>
+                            <span wire:loading wire:target="confirmResubmit">Resubmitting…</span>
+                        </button>
                     </div>
                 </div>
             </div>

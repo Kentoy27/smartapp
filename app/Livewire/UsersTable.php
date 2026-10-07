@@ -2,6 +2,8 @@
 
 namespace App\Livewire;
 
+use App\Models\District;
+use App\Models\School;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Rule;
@@ -56,15 +58,55 @@ class UsersTable extends Component
 
     public string $deleteUsername = '';
 
+    /**
+     * The employee's real name.
+     *
+     * Not decoration: an OPCRF upload is matched against this exact string,
+     * so an account without one can never submit — and it is also what the
+     * personalized template is written from. A superadmin can correct it in
+     * the add/edit modal, which is the only route a wrong or missing name
+     * ever gets fixed.
+     */
     public string $name = '';
 
-    public string $employee_id = '';
+    /**
+     * The account's school assignment: division picked first, then the
+     * school within it — the school's own School ID fills the read-only
+     * field. Null school_id = no school (superadmins typically).
+     */
+    public string $school_division = '';
+
+    public string $school_id_choice = '';
 
     public string $username = '';
+
+    /**
+     * The School ID this form last filled into $username for the superadmin.
+     *
+     * Picking a school prefills the login with that school's ID. Keeping
+     * track of what we wrote is what lets a later change of school refresh
+     * the default while leaving a login the superadmin typed by hand alone.
+     */
+    public string $usernamePrefill = '';
 
     public string $email = '';
 
     public string $password = '';
+
+    /**
+     * Does this form set the password itself?
+     *
+     * An SH's account is keyed to their school: the school's DepEd ID is both
+     * the login and the starting password, so the superadmin never types one
+     * and the field is not rendered at all. It is decided by the ROLE alone —
+     * the field must not reappear just because no school has been picked yet.
+     * (An SH whose school has no ID on record cannot be saved; createUser says
+     * so instead of quietly making an account nobody can sign in to.)
+     */
+    public function hasAutoPassword(): bool
+    {
+        return $this->isSchoolHead();
+    }
 
     /**
      * Role selection in the add/edit modal. Only superadmins may set or
@@ -88,13 +130,26 @@ class UsersTable extends Component
     protected function rules(): array
     {
         $editing = $this->editingUserId !== null;
+        $schoolHead = $this->isSchoolHead();
+        $autoPassword = $this->hasAutoPassword();
 
         return [
-            'name' => ['nullable', 'string', 'max:255'],
-            'employee_id' => [
-                'nullable', 'string', 'max:50',
-                Rule::unique('users', 'employee_id')->ignore($this->editingUserId),
-            ],
+            // Only a School Head belongs to a school. For the other roles the
+            // cascade is not even rendered, so it must not be required here
+            // either — and a crafted request cannot smuggle a school in.
+            'school_division' => $schoolHead ? ['required', 'string'] : ['nullable', 'string'],
+            // The school must belong to the selected division (the dropdown
+            // only offers those, but the rule is the real boundary).
+            'school_id_choice' => $schoolHead ? [
+                'required', 'string',
+                Rule::in(School::query()
+                    ->where('district_id', $this->school_division)
+                    ->pluck('id')
+                    ->map(fn ($id) => (string) $id)
+                    ->push('')
+                    ->all()),
+            ] : ['nullable', 'string'],
+            'name' => ['required', 'string', 'max:255'],
             'username' => [
                 'required', 'string', 'max:255', 'alpha_dash',
                 Rule::unique('users', 'username')->ignore($this->editingUserId),
@@ -103,8 +158,9 @@ class UsersTable extends Component
                 'required', 'string', 'email', 'max:255',
                 Rule::unique('users', 'email')->ignore($this->editingUserId),
             ],
-            // Required when creating; optional when editing (blank = keep).
-            'password' => $editing
+            // Required when creating — unless the form derives it from the
+            // school's School ID. Optional when editing (blank = keep).
+            'password' => $editing || $autoPassword
                 ? ['nullable', 'string', 'min:8']
                 : ['required', 'string', 'min:8'],
             'role' => ['required', Rule::in(['user', 'viewer', 'superadmin'])],
@@ -119,8 +175,9 @@ class UsersTable extends Component
     protected function validationAttributes(): array
     {
         return [
-            'name' => 'real name',
-            'employee_id' => 'employee ID',
+            'school_division' => 'school division',
+            'school_id_choice' => 'school',
+            'name' => 'name',
             'username' => 'username',
             'email' => 'email',
             'password' => 'password',
@@ -146,9 +203,11 @@ class UsersTable extends Component
         $this->resetForm();
         $this->resetValidation();
         $this->editingUserId = $user->id;
+        $this->school_division = (string) ($user->school?->district_id ?? '');
+        $this->school_id_choice = (string) ($user->school_id ?? '');
         $this->name = (string) $user->name;
-        $this->employee_id = (string) $user->employee_id;
         $this->username = (string) $user->username;
+        $this->usernamePrefill = ''; // the stored login is theirs, not our default
         $this->email = (string) $user->email;
         $this->password = ''; // blank = keep the current password
         $this->isSuperadmin = (bool) $user->is_superadmin;
@@ -245,9 +304,11 @@ class UsersTable extends Component
 
     private function resetForm(): void
     {
+        $this->school_division = '';
+        $this->school_id_choice = '';
         $this->name = '';
-        $this->employee_id = '';
         $this->username = '';
+        $this->usernamePrefill = '';
         $this->email = '';
         $this->password = '';
         $this->isSuperadmin = false;
@@ -274,9 +335,28 @@ class UsersTable extends Component
         $this->isSuperadmin = $role === 'superadmin';
     }
 
+    /**
+     * Is the form building a School Head? That role is the only one with a
+     * school, so it alone drives the Division → School → School ID cascade
+     * (and the rule that the login defaults to the School ID).
+     */
+    public function isSchoolHead(): bool
+    {
+        return $this->role === 'user';
+    }
+
     public function updatedRole(string $role): void
     {
         $this->isSuperadmin = $role === 'superadmin';
+
+        // Switching away from SH hides the cascade, so drop whatever it held —
+        // otherwise a hidden selection would silently attach the account to a
+        // school on save.
+        if ($role !== 'user') {
+            $this->school_division = '';
+            $this->school_id_choice = '';
+            $this->usernamePrefill = '';
+        }
     }
 
     /**
@@ -301,12 +381,30 @@ class UsersTable extends Component
             ? ($this->isSuperadmin ? 'superadmin' : $validated['role'])
             : 'user';
 
+        // An SH's password IS their school's DepEd ID. A school without one
+        // has nothing to hand out, so stop here rather than mint an account
+        // nobody could sign in to.
+        if ($selectedRole === 'user' && $this->selectedSchoolId === '') {
+            $this->addError(
+                'school_id_choice',
+                "This school has no School ID on record, so it cannot be used as the account password. Set the school's ID first."
+            );
+
+            return;
+        }
+
         $user = User::create([
-            'name' => $validated['name'] ?? null,
-            'employee_id' => $validated['employee_id'] ?? null,
+            'school_id' => $selectedRole === 'user' && $validated['school_id_choice'] !== ''
+                ? (int) $validated['school_id_choice']
+                : null,
+            'name' => $validated['name'],
             'username' => $validated['username'],
             'email' => $validated['email'],
-            'password' => $validated['password'], // hashed by the model cast
+            // No password typed (the SH case): the school's DepEd ID is the
+            // starting password, matching the login it already defaults to.
+            'password' => ($validated['password'] ?? '') !== ''
+                ? $validated['password']
+                : $this->selectedSchoolId, // hashed by the model cast
             'role' => $selectedRole,
             'is_superadmin' => $selectedRole === 'superadmin',
         ]);
@@ -341,8 +439,10 @@ class UsersTable extends Component
             ? $validated['role']
             : 'user';
 
-        $user->name = $validated['name'] ?? null;
-        $user->employee_id = $validated['employee_id'] ?? null;
+        $user->school_id = $selectedRole === 'user' && $validated['school_id_choice'] !== ''
+            ? (int) $validated['school_id_choice']
+            : null;
+        $user->name = $validated['name'];
         $user->username = $validated['username'];
         $user->email = $validated['email'];
         if ($this->canAssignRoles() && ! $user->is($this->authenticatedUser())) {
@@ -384,16 +484,116 @@ class UsersTable extends Component
         return 'livewire.users.partials.pagination';
     }
 
+    /**
+     * The district list powering the School Division dropdown — straight
+     * from the districts table (never hardcoded).
+     */
+    #[Computed]
+    public function divisions()
+    {
+        return District::query()->orderBy('name')->get();
+    }
+
+    /**
+     * The schools inside the selected division — the School dropdown's
+     * options, each carrying its School ID for the read-only field.
+     */
+    #[Computed]
+    public function divisionSchools()
+    {
+        if ($this->school_division === '') {
+            return collect();
+        }
+
+        return School::query()
+            ->where('district_id', $this->school_division)
+            ->orderBy('name')
+            ->get(['id', 'name', 'school_id']);
+    }
+
+    /**
+     * The selected school's DepEd School ID, shown read-only in the form —
+     * it always comes from the school record, never typed by hand.
+     */
+    #[Computed]
+    public function selectedSchoolId(): string
+    {
+        if ($this->school_id_choice === '') {
+            return '';
+        }
+
+        return (string) ($this->divisionSchools
+            ->firstWhere('id', (int) $this->school_id_choice)
+            ?->school_id ?? '');
+    }
+
+    /**
+     * The school record behind the current selection (its School ID is
+     * saved on the user; the choice field holds the school's id).
+     */
+    #[Computed]
+    public function selectedSchool(): ?School
+    {
+        if ($this->school_id_choice === '') {
+            return null;
+        }
+
+        return School::find((int) $this->school_id_choice);
+    }
+
+    /**
+     * Division changed: drop the school choice (it belonged to the old
+     * division) so the School dropdown starts fresh.
+     */
+    public function updatedSchoolDivision(): void
+    {
+        $this->school_id_choice = '';
+        $this->resetValidation(['school_id_choice']);
+    }
+
+    /**
+     * School changed: the school's DepEd School ID becomes the default login.
+     *
+     * An SH signs in with their school's ID, so picking the school is enough
+     * to fill the Username field in. The field stays editable — the superadmin
+     * can type another login over it — and a login they already typed survives
+     * a later change of school: the prefill only takes the field back while it
+     * still holds the default we wrote (or nothing at all).
+     */
+    public function updatedSchoolIdChoice(): void
+    {
+        $this->resetValidation(['username']);
+
+        $schoolId = $this->selectedSchoolId;
+
+        if ($schoolId === '') {
+            // This school has no ID to default to, so the last school's ID
+            // is now a stale prefill: drop it, but only the one we wrote
+            // ourselves — a login the superadmin typed stays theirs.
+            if ($this->username === $this->usernamePrefill) {
+                $this->username = '';
+            }
+
+            $this->usernamePrefill = '';
+
+            return;
+        }
+
+        if ($this->username === '' || $this->username === $this->usernamePrefill) {
+            $this->username = $schoolId;
+            $this->usernamePrefill = $schoolId;
+        }
+    }
+
     #[Computed]
     public function rows()
     {
         return User::query()
             ->when($this->search !== '', function ($query) {
-                $term = '%' . str_replace('%', '\%', $this->search) . '%';
+                $term = '%'.str_replace('%', '\%', $this->search).'%';
 
                 $query->where(function ($query) use ($term) {
                     $query->where('username', 'like', $term)
-                        ->orWhere('employee_id', 'like', $term)
                         ->orWhere('email', 'like', $term)
                         ->orWhere('name', 'like', $term);
                 });

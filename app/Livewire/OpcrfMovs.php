@@ -2,27 +2,27 @@
 
 namespace App\Livewire;
 
-use App\Models\OpcrfMov;
 use App\Models\OpcrfSubmission;
-use Illuminate\Support\Collection;
+use App\Support\OpcrfTemplatePersonalizer;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 use Livewire\Component;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Livewire\WithFileUploads;
 use Livewire\WithPagination;
 
 /**
- * "Your OPCRF submissions" table + "Upload your MOVs" modal.
+ * "Your OPCRF submissions" table.
  *
  * The table lists this staff member's submissions (newest first,
- * paginated); each row's MOVs button opens the manager modal for that
- * submission. MOVs (Means of
- * Verification) are the evidence documents behind a form — the template's
- * column R (reports, signed forms, ACRs, memoranda…). The modal lists
- * what's already attached, accepts several new files at once (stored on
- * the local disk, never public), and deletes individual files. Every
- * action re-checks ownership server-side.
+ * paginated) with their review status; an approved submission with an
+ * archived workbook offers the download of the official copy. A submission
+ * returned for revision raises an "Action Required" banner (the reviewer's
+ * remarks front and center) with a Revise & Resubmit flow: the staff member
+ * uploads their corrected workbook, and the same submission goes back into
+ * review as 'resubmitted' — routed to the superadmin who returned it, with
+ * the previous workbook archived as a version and the full history intact.
  */
 class OpcrfMovs extends Component
 {
@@ -30,58 +30,13 @@ class OpcrfMovs extends Component
     use WithPagination;
 
     /**
-     * Modal state: which submission's MOVs are being managed.
+     * Submissions and their MOV evidence belong to the signed-in account,
+     * and a revision here rewrites an existing submission — so a guest is
+     * refused here rather than part way through a write.
      */
-    public bool $showModal = false;
-
-    public ?int $submissionId = null;
-
-    public string $submissionLabel = '';
-
-    /**
-     * Newly-picked files (multiple). Livewire temp-uploads them; they are
-     * moved into permanent storage on save.
-     */
-    public $newFiles = [];
-
-    /**
-     * Info line after saving/removing (popped as a SweetAlert toast).
-     */
-    public ?string $successMessage = null;
-
-    /**
-     * The submission being managed. Null unless the modal is open AND the
-     * signed-in user owns it — this is the authorization boundary for
-     * every render.
-     */
-    public function currentSubmission(): ?OpcrfSubmission
+    public function mount(): void
     {
-        if ($this->submissionId === null) {
-            return null;
-        }
-
-        $submission = OpcrfSubmission::find($this->submissionId);
-
-        if ($submission === null || ! $submission->canBeManagedBy(Auth::user())) {
-            return null;
-        }
-
-        return $submission;
-    }
-
-    /**
-     * Fired by the upload window once a submission is confirmed, and by the
-     * superadmin's review modal once a submission is approved or deleted —
-     * the table below shows the new row / the approval badge / drops the
-     * deleted one right away (no reload).
-     */
-    #[On('opcrf-submission-created')]
-    #[On('opcrf-submission-approved')]
-    #[On('opcrf-submission-deleted')]
-    #[On('opcrf-submission-forwarded')]
-    public function refreshSubmissions(): void
-    {
-        // Recomputed on render; nothing else to do.
+        abort_unless(Auth::check(), 404);
     }
 
     /**
@@ -89,6 +44,24 @@ class OpcrfMovs extends Component
      * does the /opcrf page — full history instead of a “latest 5” cut).
      */
     public int $perPage = 10;
+
+    /**
+     * The returned submission being revised (the Revise & Resubmit modal).
+     */
+    public ?int $resubmittingId = null;
+
+    /**
+     * The staff member's revised workbook (.xlsx), replacing the returned
+     * one. Optional: resubmitting without a new file keeps the current
+     * workbook and just flips the status back into review.
+     */
+    public $revisionFile;
+
+    /**
+     * Set after a successful resubmission so the view pops a SweetAlert
+     * (same pattern as the upload flow's $successMessage).
+     */
+    public ?string $successMessage = null;
 
     /**
      * Match the app's own table look instead of Tailwind's.
@@ -100,148 +73,125 @@ class OpcrfMovs extends Component
     }
 
     /**
+     * Fired by the upload window once a submission is confirmed, and by the
+     * superadmin's review modal once a submission is approved, forwarded or
+     * deleted — the table below shows the new row / the approval badge /
+     * drops the deleted one right away (no reload).
+     */
+    #[On('opcrf-submission-created')]
+    #[On('opcrf-submission-approved')]
+    #[On('opcrf-submission-deleted')]
+    #[On('opcrf-submission-forwarded')]
+    public function refreshSubmissions(): void
+    {
+        // Recomputed on render; nothing else to do.
+    }
+
+    /**
      * The signed-in user's submissions for the table (fresh on every
-     * render, so MOV counts stay live).
+     * render).
      */
     #[Computed]
     public function submissions()
     {
         return OpcrfSubmission::where('user_id', Auth::id())
-            ->withCount('movs')
+            ->with('latestReview.reviewer')
             ->orderByDesc('submitted_at')
             ->orderByDesc('id')
             ->paginate($this->perPage);
     }
 
     /**
-     * Files already attached to the open submission.
-     *
-     * @return Collection<int, OpcrfMov>
+     * The returned submission under revision — owner-only, and only while
+     * it actually waits for revision.
      */
     #[Computed]
-    public function existingMovs()
+    public function resubmitSubmission(): ?OpcrfSubmission
     {
-        $submission = $this->currentSubmission();
+        if ($this->resubmittingId === null) {
+            return null;
+        }
 
-        return $submission
-            ? $submission->movs()->get()
-            : collect();
+        return OpcrfSubmission::where('user_id', Auth::id())
+            ->whereKey($this->resubmittingId)
+            ->first();
     }
 
     /**
-     * Open the modal for a submission (row button). Non-owners get a
-     * silently-closed modal — the data simply never renders (belt and
-     * braces: currentSubmission() gates the render AND every action).
+     * Clicked "Revise & Resubmit" on a returned row: open the revise modal
+     * showing the reviewer's remarks.
      */
-    public function openMovs(int $submissionId): void
+    public function openRevise(int $submissionId): void
     {
-        abort_if(Auth::user()?->is_superadmin, 404);
+        $submission = OpcrfSubmission::where('user_id', Auth::id())->find($submissionId);
 
-        $submission = OpcrfSubmission::find($submissionId);
+        // Only the owner, and only a submission that actually waits for
+        // their revision — anything else is not revisable.
+        abort_unless($submission !== null && $submission->status === OpcrfSubmission::STATUS_RETURNED, 404);
 
-        // Only the owner may open this modal.
-        if ($submission === null || ! $submission->canBeManagedBy(Auth::user())) {
-            $this->showModal = false;
-            $this->submissionId = null;
-
-            return;
-        }
-
-        $this->submissionId = $submission->id;
-        $this->submissionLabel = $submission->review_period;
-        $this->newFiles = [];
+        $this->resubmittingId = $submission->id;
+        $this->revisionFile = null;
         $this->resetValidation();
-        $this->showModal = true;
     }
 
-    public function closeMovs(): void
+    public function closeRevise(): void
     {
-        $this->showModal = false;
-        $this->submissionId = null;
-        $this->submissionLabel = '';
-        $this->newFiles = [];
+        $this->resubmittingId = null;
+        $this->revisionFile = null;
         $this->resetValidation();
     }
 
     /**
-     * Validate + persist the newly-picked files into permanent storage.
+     * Confirmed inside the revise modal: the revised workbook (when given)
+     * replaces the current one — the previous upload is archived as a
+     * version — and the submission returns to review as 'resubmitted',
+     * routed to the superadmin who returned it.
      */
-    public function saveMovs(): void
+    public function confirmResubmit(): void
     {
-        abort_if(Auth::user()?->is_superadmin, 404);
+        $submission = $this->resubmitSubmission();
 
-        $submission = $this->currentSubmission();
-
-        if ($submission === null) {
-            abort(403);
-        }
+        abort_unless($submission !== null && $submission->status === OpcrfSubmission::STATUS_RETURNED, 404);
 
         $this->validate([
-            'newFiles' => ['required', 'array', 'min:1', 'max:10'],
-            'newFiles.*' => [
-                'file',
-                'max:10240',
-                'extensions:pdf,doc,docx,xls,xlsx,ppt,pptx,jpg,jpeg,png,zip',
-            ],
+            'revisionFile' => ['nullable', 'file', 'max:'.(int) config('opcrf.template.max_kb', 10240), 'extensions:xlsx'],
         ], [
-            'newFiles.required' => 'Choose at least one MOV file first.',
-            'newFiles.max' => 'Attach up to 10 files at a time.',
-            'newFiles.*.max' => 'Each file must be 10 MB or smaller.',
-            'newFiles.*.extensions' => 'Allowed: PDF, Word, Excel, PowerPoint, images, and ZIP.',
+            'revisionFile.extensions' => 'The revised OPCRF must be the .xlsx template file.',
+            'revisionFile.max' => 'The file is too large (10 MB maximum).',
         ]);
 
-        $saved = 0;
+        $archivedPath = null;
+        $originalName = null;
 
-        foreach ($this->newFiles as $file) {
-            $path = $file->storeAs(
-                'opcrf-movs/'.$submission->id,
-                uniqid().'-'.$file->getClientOriginalName(),
-                'local'
+        if ($this->revisionFile instanceof TemporaryUploadedFile) {
+            // A revision is an upload like any other. Reading the workbook
+            // records what it says about itself; it never refuses. The
+            // archive and the previous-version filing below are reached
+            // whatever the file contains, so a revision is never held up by
+            // anything but its format and size.
+            OpcrfTemplatePersonalizer::verify(
+                $this->revisionFile->getRealPath(),
+                Auth::user()
             );
 
-            $submission->movs()->create([
-                'original_name' => $file->getClientOriginalName(),
-                'stored_path' => $path,
-                'size_bytes' => $file->getSize(),
-            ]);
-
-            $saved++;
+            $archivedPath = $this->revisionFile->storeAs(
+                'opcrf-submissions/'.Auth::id(),
+                uniqid().'-'.$this->revisionFile->getClientOriginalName(),
+                'local'
+            );
+            $originalName = $this->revisionFile->getClientOriginalName();
         }
 
-        $this->newFiles = [];
-        $this->resetValidation();
-        unset($this->existingMovs); // recompute on the next render
+        $submission->resubmit($archivedPath, $originalName);
 
-        $this->successMessage = $saved === 1
-            ? '1 MOV file attached.'
-            : $saved.' MOV files attached.';
-    }
+        $this->closeRevise();
 
-    /**
-     * Remove one attached file (row + stored file).
-     */
-    public function deleteMov(int $movId): void
-    {
-        abort_if(Auth::user()?->is_superadmin, 404);
+        $this->successMessage = 'Revised OPCRF submitted — it is back with '
+            .($submission->returningReviewer()?->username ?? 'the superadmin').' for review.';
 
-        $submission = $this->currentSubmission();
-
-        if ($submission === null) {
-            abort(403);
-        }
-
-        // Scope to this submission — ids from other users' MOVs do nothing.
-        $mov = $submission->movs()->whereKey($movId)->first();
-
-        if ($mov === null) {
-            return;
-        }
-
-        $name = $mov->original_name;
-        $mov->delete(); // model hook removes the stored file
-        unset($this->existingMovs);
-
-        $this->successMessage = "Removed {$name}.";
+        // The reviewer's list and sidebar badge pick the resubmission up
+        // without a reload; this table's status badge refreshes too.
+        $this->dispatch('opcrf-submission-created');
     }
 
     public function clearSuccess(): void

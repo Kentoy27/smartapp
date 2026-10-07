@@ -5,7 +5,24 @@ return [
     'env' => env('APP_ENV', 'production'),
     'debug' => (bool) env('APP_DEBUG', false),
     'url' => env('APP_URL', 'http://localhost'),
-    'timezone' => 'UTC',
+    /*
+     | The application's clock.
+     |
+     | Every date the app shows a user — an OPCRF access window, when a
+     | submission arrived, when a superadmin moved a deadline — is decided
+     | against this one zone, so the superadmin's calendar and the staff
+     | member's countdown can never disagree. Manila is the default because
+     | the people using this are in the Philippines; override it with
+     | APP_TIMEZONE rather than editing this line, so the setting is visible
+     | in one place with the rest of the environment.
+     |
+     | NOTE: timestamps in the database are stored as bare "Y-m-d H:i:s"
+     | strings in whatever zone was active when they were written. Changing
+     | this therefore re-reads existing rows in the new zone rather than
+     | converting them — see the timezone note in the README before doing so
+     | on a database with history in it.
+     */
+    'timezone' => env('APP_TIMEZONE', 'Asia/Manila'),
     'locale' => 'en',
     'fallback_locale' => 'en',
     'faker_locale' => 'en_US',

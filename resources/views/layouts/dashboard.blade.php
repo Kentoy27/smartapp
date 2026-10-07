@@ -36,6 +36,10 @@
             --bg: #f1f5f9;
             --bg-panel: #ffffff;
             --bg-elevated: #ffffff;
+            /* Surface for text inputs. Several rules already referenced this
+               token before it existed, so their inputs were rendering with a
+               transparent background and reading as raw textboxes. */
+            --bg-input: #ffffff;
             --bg-muted: #e2e8f0;
             --bg-hover: #e2e8f0;
             --bg-active: #dbeafe;
@@ -62,6 +66,7 @@
             --bg: #0f172a;
             --bg-panel: #1e293b;
             --bg-elevated: #24334a;
+            --bg-input: #24334a;
             --bg-muted: #0f172a;
             --bg-hover: #273549;
             --bg-active: #273549;
@@ -480,6 +485,277 @@
             display: none;
         }
 
+        /* ---------- SIDEBAR DROPDOWN ---------- */
+        /* An item that carries `children` is itself the disclosure: the whole
+           row opens and closes what is under it, chevron included. A button
+           rather than a link, so opening it never navigates — the tree below
+           holds the links. The sub-items are indented and marked with a dot
+           rather than an icon: they are the same destination at a different
+           depth, not another destination. */
+        .sidebar .nav-item--toggle {
+            width: 100%;
+            border-top: 0;
+            border-right: 0;
+            border-bottom: 0;
+            background: transparent;
+            font-family: inherit;
+            font-size: 0.9375rem;
+            text-align: left;
+            cursor: pointer;
+        }
+
+        .sidebar .nav-item--toggle:hover {
+            background: var(--bg-hover);
+            color: var(--text-strong);
+        }
+
+        .sidebar .nav-item--toggle:focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: -2px;
+        }
+
+        .sidebar .nav-item-chevron {
+            display: inline-flex;
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+            margin-left: auto;
+            padding-left: 8px;
+            box-sizing: content-box;
+            color: var(--text-faint);
+            transition: transform 0.15s;
+        }
+
+        /* Open reads as pointing at the list it just revealed. */
+        .sidebar .nav-item--toggle[aria-expanded='true'] .nav-item-chevron {
+            color: var(--primary);
+            transform: rotate(180deg);
+        }
+
+        /* With a badge on the row the free space belongs to the badge, so the
+           chevron sits beside it rather than pushing it to the middle. */
+        .sidebar .nav-item--toggle .nav-badge + .nav-item-chevron {
+            margin-left: 0;
+        }
+
+        .sidebar .nav-subnav {
+            padding-bottom: 4px;
+        }
+
+        /* A collapsed rail has no room for a second level: the tree is the
+           whole of what is under the item there, so it is not shown. */
+        .layout.collapsed .sidebar .nav-subnav {
+            display: none;
+        }
+
+        /* ---------- SIDEBAR MOV TREE (Part → Category → MOV) ----------
+           Three levels of navigation in a 220px column, so the levels are
+           told apart by indentation and a guide rule rather than by an icon
+           each: a Part is a bold row, a category a smaller one, a MOV a
+           status dot and its title. The whole nav scrolls inside the
+           sidebar's own height — a checklist is longer than any screen. */
+        .sidebar-nav {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            scrollbar-width: thin;
+        }
+
+        /* THE EMPTY CATALOGUE NOTE: the one thing the dropdown says when the
+           checklist it walks has nothing in it. */
+        .sidebar .nav-mov-note {
+            margin: 4px 18px 10px;
+            font-size: 0.71875rem;
+            line-height: 1.45;
+            color: var(--text-muted);
+        }
+
+        .sidebar .nav-mov-note code {
+            font-size: 0.6875rem;
+        }
+
+        /* THE LEVELS: each step in and carries a guide rule, so Part →
+           category → MOV reads without hovering anything. */
+        .sidebar .nav-tree--1 {
+            padding-left: 8px;
+        }
+
+        .sidebar .nav-tree--2,
+        .sidebar .nav-tree--3 {
+            margin-left: 12px;
+            padding-left: 8px;
+            border-left: 1px solid var(--border);
+        }
+
+        .sidebar .nav-tree-row {
+            display: flex;
+            align-items: stretch;
+        }
+
+        .sidebar .nav-tree-toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex: 1;
+            min-width: 0;
+            padding: 6px 4px;
+            border: 0;
+            border-radius: 6px;
+            background: none;
+            color: var(--text);
+            font: inherit;
+            font-size: 0.8125rem;
+            font-weight: 600;
+            text-align: left;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .sidebar .nav-tree-toggle:hover {
+            background: var(--bg-hover);
+        }
+
+        .sidebar .nav-tree-toggle:focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: -2px;
+        }
+
+        /* ▶ collapsed, ▼ expanded: the chevron turns, so the row keeps its
+           width and its place. */
+        .sidebar .nav-tree-chevron {
+            display: inline-flex;
+            flex-shrink: 0;
+            color: var(--text-faint);
+        }
+
+        .sidebar .nav-tree-chevron .icon {
+            display: inline-flex;
+            width: 14px;
+            height: 14px;
+            transform: rotate(-90deg);
+            transition: transform 0.15s ease;
+        }
+
+        .sidebar .nav-tree-chevron.is-open .icon {
+            transform: rotate(0deg);
+        }
+
+        .sidebar .nav-tree-label {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .sidebar .nav-tree-count {
+            flex-shrink: 0;
+            font-size: 0.6875rem;
+            font-weight: 600;
+            color: var(--text-faint);
+        }
+
+        /* A MOV: the deepest level, and a step further in again so three
+           levels do not read as two. The dot is the signed-in person's own
+           upload state, in the application's own four states. */
+        .sidebar .nav-tree--2 > .nav-mov {
+            margin-left: 14px;
+        }
+
+        .sidebar .nav-mov {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            margin: 1px 0;
+            padding: 6px 8px;
+            border-radius: 6px;
+            color: var(--text);
+            text-decoration: none;
+            transition: background 0.15s;
+        }
+
+        .sidebar .nav-mov:hover {
+            background: var(--bg-hover);
+        }
+
+        .sidebar .nav-mov:focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: -2px;
+        }
+
+        .sidebar .nav-mov.is-active {
+            background: var(--bg-active);
+            box-shadow: inset 2px 0 0 var(--primary);
+        }
+
+        .sidebar .nav-mov-dot {
+            width: 8px;
+            height: 8px;
+            margin-top: 4px;
+            flex-shrink: 0;
+            border-radius: 50%;
+            background: var(--bg-muted);
+            box-shadow: inset 0 0 0 1px var(--text-faint);
+        }
+
+        .sidebar .nav-mov-dot--pending {
+            background: var(--primary);
+            box-shadow: none;
+        }
+
+        .sidebar .nav-mov-dot--review {
+            background: var(--warn);
+            box-shadow: none;
+        }
+
+        .sidebar .nav-mov-dot--ok {
+            background: var(--ok);
+            box-shadow: none;
+        }
+
+        .sidebar .nav-mov-dot--returned {
+            background: var(--danger);
+            box-shadow: none;
+        }
+
+        .sidebar .nav-mov-body {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            min-width: 0;
+        }
+
+        .sidebar .nav-mov-label {
+            font-size: 0.8125rem;
+            font-weight: 600;
+            color: var(--text-strong);
+            overflow-wrap: anywhere;
+        }
+
+        .sidebar .nav-mov-optional {
+            margin-left: 4px;
+            font-size: 0.625rem;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+            color: var(--text-faint);
+        }
+
+        /* Titles run long — the full text is in the row's tooltip. Two
+           lines, then an ellipsis, and a break inside a word so nothing
+           pushes the sidebar wider. */
+        .sidebar .nav-mov-title {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            overflow-wrap: anywhere;
+            font-size: 0.6875rem;
+            line-height: 1.4;
+            color: var(--text-muted);
+        }
+
         /* ---------- USERS PAGE (live table) ---------- */
         .users-toolbar {
             flex-wrap: wrap;
@@ -556,16 +832,8 @@
             padding-left: 18px;
         }
 
-        /* Action buttons sit in one right-aligned row with consistent gaps */
-        .users-actions-row {
-            display: flex;
-            align-items: center;
-            justify-content: flex-end;
-            gap: 6px;
-            width: 100%;
-            margin-left: auto;
-        }
-
+        /* A single action still shows as a button (see MOVs); two or more
+           collapse into the .row-menu trigger below. */
         .users-action {
             border: 1px solid var(--border);
             background: var(--bg-elevated);
@@ -605,6 +873,171 @@
         }
 
         .users-action:disabled {
+            opacity: 0.5;
+            cursor: wait;
+        }
+
+        /* ---------- ROW "MORE ACTIONS" MENU ----------
+           Rows with more than one action collapse them behind one kebab
+           trigger (see components/row-menu). The menu itself is positioned
+           on the viewport by Alpine, so it escapes the scrolling table
+           wrapper it is rendered inside and flips above when the row is low
+           on screen. */
+        .row-menu {
+            position: relative;
+            display: inline-flex;
+            justify-content: flex-end;
+        }
+
+        .row-menu-trigger {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 30px;
+            height: 30px;
+            padding: 0;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            background: transparent;
+            color: var(--text-faint);
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s, color 0.15s;
+        }
+
+        /* The three dots turn a quarter turn as the menu opens — the same
+           gesture every other overflow trigger uses. */
+        .row-menu-trigger svg {
+            transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        .row-menu-trigger.is-open svg {
+            transform: rotate(90deg);
+        }
+
+        .row-menu-trigger:hover,
+        .row-menu-trigger:focus-visible,
+        .row-menu-trigger.is-open {
+            background: var(--bg-elevated);
+            border-color: var(--border);
+            color: var(--text-strong);
+        }
+
+        .row-menu-trigger:focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: 1px;
+        }
+
+        .row-menu-list {
+            position: fixed;
+            z-index: 120;
+            min-width: 172px;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            padding: 5px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            box-shadow: var(--shadow-dropdown);
+            /* Hidden with visibility rather than display, so the menu keeps
+               its layout box: Alpine measures it to place it, and a
+               display:none menu measures 0x0 and lands in the wrong corner. */
+            visibility: hidden;
+            opacity: 0;
+            transform: translateY(-6px) scale(0.96);
+            transform-origin: top right;
+            pointer-events: none;
+            /* visibility flips only once the fade-out has run, so the menu
+               does not vanish mid-animation. */
+            transition:
+                opacity 0.13s ease,
+                transform 0.13s ease,
+                visibility 0s linear 0.13s;
+        }
+
+        /* Opening upwards (a row low on screen): grow from the bottom edge. */
+        .row-menu-list.is-above {
+            transform: translateY(6px) scale(0.96);
+            transform-origin: bottom right;
+        }
+
+        .row-menu-list.is-open {
+            visibility: visible;
+            opacity: 1;
+            transform: translateY(0) scale(1);
+            pointer-events: auto;
+            transition:
+                opacity 0.13s ease,
+                transform 0.16s cubic-bezier(0.22, 1, 0.36, 1),
+                visibility 0s;
+        }
+
+        .row-menu-item {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            width: 100%;
+            padding: 7px 10px;
+            border: 0;
+            border-radius: 6px;
+            background: transparent;
+            color: var(--text);
+            font: inherit;
+            font-size: 0.8125rem;
+            font-weight: 500;
+            text-align: left;
+            text-decoration: none;
+            cursor: pointer;
+            /* Fades in just behind the panel's own entrance, so the menu
+               arrives as one movement instead of a snap plus a fade. */
+            opacity: 0;
+            transform: translateY(-4px);
+            transition:
+                background 0.15s,
+                color 0.15s,
+                opacity 0.12s ease,
+                transform 0.12s ease;
+        }
+
+        .row-menu-list.is-above .row-menu-item {
+            transform: translateY(4px);
+        }
+
+        .row-menu-list.is-open .row-menu-item {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .row-menu-list.is-open .row-menu-item:nth-child(1) { transition-delay: 0.02s; }
+        .row-menu-list.is-open .row-menu-item:nth-child(2) { transition-delay: 0.05s; }
+        .row-menu-list.is-open .row-menu-item:nth-child(3) { transition-delay: 0.08s; }
+
+        .row-menu-item svg {
+            flex-shrink: 0;
+        }
+
+        .row-menu-item:hover,
+        .row-menu-item:focus-visible {
+            background: var(--bg-hover);
+            color: var(--text-strong);
+        }
+
+        .row-menu-item:focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: -2px;
+        }
+
+        .row-menu-item--danger {
+            color: var(--danger);
+        }
+
+        .row-menu-item--danger:hover,
+        .row-menu-item--danger:focus-visible {
+            background: var(--danger-soft);
+            color: var(--danger);
+        }
+
+        .row-menu-item:disabled {
             opacity: 0.5;
             cursor: wait;
         }
@@ -849,6 +1282,14 @@
             margin-top: 4px;
         }
 
+        /* Quiet helper line under a field — explains a value the form filled
+           in for the user (e.g. the login defaulting to the School ID). */
+        .field-hint {
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            margin-top: 4px;
+        }
+
         /* Password eye toggle inside the modal (same pattern as login) */
         .modal-form .password-wrap {
             position: relative;
@@ -1077,65 +1518,54 @@
             transform: translateY(1px);
         }
 
-        /* ---------- LOCKED OPCR CARD (OPCRF + MOVs already submitted) ---------- */
-        .opcr-card-locked {
-            opacity: 0.92;
+        /* ---------- OPCRF PARTS GRID (staff: open / locked / completed) ----------
+   One card per Part of the form. A locked Part is shown, never hidden —
+   the point is that the user can see it exists and when it opens — so the
+   tone colours the card and the badge rather than removing anything. */
+        .opcrf-parts {
+            margin-bottom: 22px;
         }
 
-        .opcr-file-badge--locked {
-            background: var(--warn-soft);
-            color: var(--warn);
+        .opcrf-parts-head {
+            margin-bottom: 14px;
         }
 
-        .opcr-locked-pill {
-            flex: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 8px 14px;
-            border-radius: 8px;
-            background: var(--warn-soft);
-            color: var(--warn);
-            font-size: 0.8125rem;
+        .opcrf-parts-title {
+            font-size: 1.125rem;
             font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
+            color: var(--text-strong);
         }
 
-        /* ---------- OPCR UPLOAD BUTTON (beside the card's download button) ---------- */
-        .opcrf-upload-btn {
-            flex: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 9px 18px;
-            border-radius: 8px;
-            border: 1px solid var(--primary);
-            background: transparent;
-            color: var(--primary);
-            font: inherit;
+        .opcrf-parts-sub {
             font-size: 0.875rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+            color: var(--text-muted);
+            margin-top: 3px;
         }
 
-        .opcrf-upload-btn:hover {
-            background: var(--primary-soft);
+        .opcrf-parts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 14px;
         }
 
-        .opcrf-upload-btn:active {
-            transform: translateY(1px);
+        .opcrf-part-card {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 16px;
+            border: 1px solid var(--border);
+            border-left-width: 4px;
+            border-radius: 10px;
+            background: var(--bg-panel);
+            box-shadow: var(--shadow-card);
         }
 
-        .opcrf-upload-btn:focus-visible {
-            outline: 2px solid var(--primary);
-            outline-offset: 2px;
+        .opcrf-part-card--open {
+            border-left-color: var(--ok);
         }
 
-        .opcrf-upload-btn.has-error {
-            border-color: #ef4444;
-            color: #ef4444;
+        .opcrf-part-card--scheduled {
+            border-left-color: var(--primary);
         }
 
         /* ---------- WFP (Work and Financial Plan) module ---------- */
@@ -1274,6 +1704,507 @@
             color: var(--text-muted);
             font-weight: 600;
             text-align: center;
+        }
+
+        /* ---------- OPCRF SUBMISSION FORM (staff /opcrf page) ---------- */
+        .opcrf-card-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+        .opcrf-part-card--closed {
+            border-left-color: var(--text-faint);
+            opacity: 0.88;
+        }
+
+        .opcrf-part-card--disabled,
+        .opcrf-part-card--completed {
+            border-left-color: var(--ok);
+        }
+
+        .opcrf-part-card-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .opcrf-part-name {
+            font-weight: 700;
+            color: var(--text-strong);
+        }
+
+        .opcrf-part-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 10px;
+            border-radius: 999px;
+            font-size: 0.71875rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .opcrf-part-badge--open,
+        .opcrf-part-badge--completed {
+            background: var(--ok-soft);
+            color: var(--ok);
+        }
+
+        .opcrf-part-badge--scheduled {
+            background: var(--primary-soft);
+            color: var(--primary-strong);
+        }
+
+        .opcrf-part-badge--closed {
+            background: var(--bg-muted);
+            color: var(--text-muted);
+        }
+
+        .opcrf-part-badge--disabled {
+            background: var(--warn-soft);
+            color: var(--warn);
+        }
+
+        .opcrf-part-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+
+        .opcrf-part-message {
+            font-size: 0.9375rem;
+            font-weight: 600;
+            color: var(--text-strong);
+            line-height: 1.5;
+        }
+
+        .opcrf-part-detail,
+        .opcrf-part-instructions {
+            font-size: 0.8125rem;
+            color: var(--text-muted);
+            line-height: 1.55;
+        }
+
+        .opcrf-part-countdown {
+            font-size: 0.75rem;
+            color: var(--text-faint);
+        }
+
+        .opcrf-part-countdown strong {
+            color: var(--text-muted);
+        }
+
+        .opcrf-part-action {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-top: auto;
+            padding: 9px 16px;
+            border-radius: 8px;
+            border: 1px solid var(--primary);
+            background: var(--primary);
+            color: #fff;
+            font-size: 0.875rem;
+            font-weight: 600;
+            text-decoration: none;
+            transition: background 0.15s ease;
+        }
+
+        .opcrf-part-action:hover {
+            background: var(--primary-strong);
+        }
+
+        /* The locked state is a label, not a button: it must not be focusable
+           or clickable, so there is nothing to trick the page into. */
+        .opcrf-part-action--locked {
+            background: var(--bg-muted);
+            border-color: var(--border);
+            color: var(--text-faint);
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        .opcrf-part-back {
+            margin-top: 18px;
+        }
+
+        .opcrf-part-back a {
+            font-size: 0.875rem;
+            color: var(--primary);
+            text-decoration: none;
+        }
+
+        /* ---------- OPCRF SCHEDULE (superadmin calendar) ---------- */
+        .schedule-years {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 14px;
+        }
+
+        .schedule-year {
+            padding: 7px 14px;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            background: var(--bg-elevated);
+            color: var(--text-muted);
+            font: inherit;
+            font-size: 0.8125rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s, border-color 0.15s;
+        }
+
+        .schedule-year:hover {
+            background: var(--bg-hover);
+            color: var(--text-strong);
+        }
+
+        .schedule-year.is-active {
+            background: var(--primary);
+            border-color: var(--primary);
+            color: #fff;
+        }
+
+        .schedule-when {
+            display: block;
+            font-size: 0.8125rem;
+            color: var(--text-muted);
+        }
+
+        .schedule-actions-col {
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        .schedule-actions {
+            display: inline-flex;
+            gap: 6px;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+        }
+
+        .schedule-note-row td {
+            padding-top: 0;
+            border-top: none;
+            font-size: 0.8125rem;
+            color: var(--text-muted);
+        }
+
+        .schedule-note-label {
+            font-weight: 700;
+            color: var(--text-faint);
+            margin-right: 6px;
+        }
+
+        .schedule-footnote {
+            margin-top: 12px;
+            font-size: 0.75rem;
+            color: var(--text-faint);
+        }
+
+        .schedule-change-old {
+            color: var(--text-faint);
+            text-decoration: line-through;
+            margin-right: 8px;
+        }
+
+        .schedule-change-new {
+            color: var(--text-strong);
+            font-weight: 600;
+        }
+
+        .schedule-log-card {
+            margin-top: 18px;
+        }
+
+        .modal--schedule {
+            max-width: 520px;
+        }
+
+        .schedule-form textarea {
+            width: 100%;
+            padding: 9px 12px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-strong);
+            font-family: inherit;
+            font-size: 0.875rem;
+            line-height: 1.5;
+            resize: vertical;
+        }
+
+        .schedule-form textarea:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        .schedule-field-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        @media (max-width: 480px) {
+            .schedule-field-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .schedule-enabled {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 11px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg-elevated);
+            cursor: pointer;
+        }
+
+        .schedule-enabled input {
+            width: auto;
+            margin-top: 3px;
+            accent-color: var(--primary);
+        }
+
+        .schedule-enabled span {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .schedule-enabled small {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            line-height: 1.45;
+        }
+
+        /* ---------- LOCKED OPCR CARD (OPCRF + MOVs already submitted) ---------- */
+        .opcr-card-locked {
+            opacity: 0.92;
+        }
+
+        .opcr-file-badge--locked {
+            background: var(--warn-soft);
+            color: var(--warn);
+        }
+
+        .opcr-locked-pill {
+            flex: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 14px;
+            border-radius: 8px;
+            background: var(--warn-soft);
+            color: var(--warn);
+            font-size: 0.8125rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        /* ---------- OPCR UPLOAD BUTTON (beside the card's download button) ---------- */
+        .opcrf-upload-btn {
+            flex: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 9px 18px;
+            border-radius: 8px;
+            border: 1px solid var(--primary);
+            background: transparent;
+            color: var(--primary);
+            font: inherit;
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+        }
+
+        .opcrf-upload-btn:hover {
+            background: var(--primary-soft);
+        }
+
+        .opcrf-upload-btn:active {
+            transform: translateY(1px);
+        }
+
+        .opcrf-upload-btn:focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: 2px;
+        }
+
+        .opcrf-upload-btn.has-error {
+            border-color: #ef4444;
+            color: #ef4444;
+        }
+
+        /* ---------- PERSONALIZED TEMPLATE: STATUS PANEL ----------
+           What this account's OPCRF is actually doing, read from the recorded
+           template and submission (never from component state): which file was
+           generated and when, what was submitted, where it stands, and every
+           version that came before the current one. */
+        .opcr-status {
+            margin-top: 16px;
+            padding: 14px 16px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: var(--bg-elevated);
+        }
+
+        .opcr-status-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .opcr-status-title {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+        }
+
+        .opcr-status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 10px 22px;
+            margin-top: 12px;
+        }
+
+        .opcr-status-row {
+            min-width: 0;
+        }
+
+        .opcr-status-row dt {
+            font-size: 0.6875rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--text-faint);
+        }
+
+        .opcr-status-row dd {
+            margin-top: 2px;
+            font-size: 0.875rem;
+            color: var(--text-strong);
+            overflow-wrap: anywhere;
+        }
+
+        /* Every submitted copy is kept — the version list is the record that
+           a revision replaced a file rather than erasing it. */
+        .opcr-status-versions {
+            margin-top: 14px;
+            padding-top: 12px;
+            border-top: 1px dashed var(--border);
+        }
+
+        .opcr-status-versions-label {
+            font-size: 0.6875rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--text-faint);
+        }
+
+        .opcr-status-versions ul {
+            list-style: none;
+            margin-top: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .opcr-status-versions li {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            font-size: 0.8125rem;
+            color: var(--text-muted);
+        }
+
+        .opcr-status-versions li strong {
+            color: var(--text-strong);
+        }
+
+        .opcr-status-hint {
+            margin-top: 10px;
+            font-size: 0.8125rem;
+            line-height: 1.55;
+            color: var(--text-muted);
+        }
+
+        .opcr-status-link {
+            display: inline-block;
+            margin-top: 12px;
+            font-size: 0.8125rem;
+            font-weight: 600;
+            color: var(--primary);
+            text-decoration: none;
+        }
+
+        .opcr-status-link:hover {
+            text-decoration: underline;
+        }
+
+        /* File requirements under the upload window's heading, so the
+           accepted format and size are stated before a file is chosen. */
+        .opcrf-upload-requirements {
+            list-style: none;
+            margin: 10px 22px 0;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .opcrf-upload-requirements li {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            line-height: 1.5;
+        }
+
+        .opcrf-upload-requirements strong {
+            color: var(--text-strong);
+        }
+
+        /* What the name check could tell from the workbook. A match reads as
+           a confirmation; anything else is advisory only — the upload is
+           never held up over a name, so it wears the softer warning tone
+           rather than the success green. */
+        .opcrf-verified {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            margin: 10px 22px 0;
+            padding: 10px 12px;
+            border-radius: 8px;
+            background: var(--ok-soft);
+            color: var(--ok);
+            font-size: 0.8125rem;
+            line-height: 1.5;
+        }
+
+        .opcrf-verified--note {
+            background: var(--warn-soft);
+            color: var(--warn);
+        }
+
+        .opcrf-verified svg {
+            flex-shrink: 0;
+            margin-top: 2px;
         }
 
         /* ---------- OPCRF SUBMISSION FORM (staff /opcrf page) ---------- */
@@ -1503,12 +2434,100 @@
             color: var(--text-strong);
         }
 
-        /* ---------- EXCEL-STYLE SHEET (uploaded OPCRF review modal) ----------
-           Mirrors the real Excel template's design: navy title banner,
-           header block rows, bordered objectives table with criteria /
-           accomplishments / rating columns. */
+        /* ---------- LANDSCAPE EXCEL-WINDOW MODAL ----------
+           The review modals open wide (landscape) and frame the workbook
+           like an Excel window: sticky grid headers, a frozen header
+           block, and a bottom sheet-tab strip. */
         .modal--opcrf-sheet {
-            max-width: 860px;
+            max-width: min(1240px, calc(100vw - 32px));
+            width: 100%;
+        }
+
+        @media (min-width: 900px) {
+            .modal--opcrf-sheet {
+                max-height: calc(100vh - 48px);
+            }
+        }
+
+        /* The sheet area scrolls; the tab strip stays pinned under it. */
+        .opcrf-excelwin {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        .opcrf-excelwin-sheets [data-sheet] {
+            display: block;
+        }
+
+        /* Sheet-tab filtering (Alpine sets data-active on the wrapper):
+           exactly one sheet shows at a time — no combined view. */
+        .opcrf-excelwin .opcrf-excelwin-sheets [data-sheet] {
+            display: none;
+        }
+
+        .opcrf-excelwin[data-active="part1"] [data-sheet="part1"],
+        .opcrf-excelwin[data-active="part2"] [data-sheet="part2"],
+        .opcrf-excelwin[data-active="part3"] [data-sheet="part3"],
+        .opcrf-excelwin[data-active="part4"] [data-sheet="part4"],
+        .opcrf-excelwin[data-active^="extra"] [data-sheet="extra"] {
+            display: block;
+        }
+
+        /* Excel's bottom tab bar. */
+        .opcrf-excelwin-tabs {
+            display: flex;
+            align-items: stretch;
+            gap: 2px;
+            padding: 6px 10px;
+            background: #e8edf5;
+            border-top: 1px solid var(--border);
+            overflow-x: auto;
+        }
+
+        .opcrf-excelwin-tab {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            border: 1px solid var(--border);
+            border-bottom: none;
+            border-radius: 6px 6px 0 0;
+            background: #d7e0ee;
+            color: #1f3864;
+            font-size: 0.6875rem;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+            padding: 6px 12px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .opcrf-excelwin-tab:hover {
+            background: #c3d0e6;
+        }
+
+        .opcrf-excelwin-tab.is-active {
+            background: #ffffff;
+            border-color: #1f3864;
+            color: #1f3864;
+        }
+
+        .opcrf-excelwin-tab:focus-visible {
+            outline: 2px solid #1f3864;
+            outline-offset: -2px;
+        }
+
+        /* Sticky in-grid headers: the column captions stay visible while
+           a long part scrolls (the Excel freeze-panes feel). */
+        .opcrf-sheet-tablewrap {
+            max-height: min(58vh, 620px);
+            overflow: auto;
+        }
+
+        .opcrf-sheet-table thead th {
+            position: sticky;
+            top: 0;
+            z-index: 2;
         }
 
         .opcrf-review-summary--sheet {
@@ -1638,6 +2657,28 @@
             font-size: 0.78rem;
         }
 
+        /* The template's own two column-band headings — "TO BE ACCOMPLISHED
+           DURING PLANNING" / "TO BE FILLED DURING EVALUATION" — read out of
+           the workbook rather than assumed, so a revision that renames them
+           shows as the revision words them. */
+        .opcrf-sheet-bandnote {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px 16px;
+            padding: 6px 12px;
+            background: var(--bg-muted);
+            border-bottom: 1px solid var(--border);
+            font-size: 0.625rem;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+
+        .opcrf-sheet-band {
+            white-space: nowrap;
+        }
+
         .opcrf-sheet-partnote {
             font-size: 0.6875rem;
             color: var(--text-faint);
@@ -1705,6 +2746,28 @@
             overflow-x: auto;
         }
 
+        /* The workbook partial's extra tabs, stacked under the main
+           PART I sheet with a small gap between them. */
+        .opcrf-sheet--tab {
+            margin-top: 14px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .opcrf-sheet-avg {
+            display: block;
+            margin-top: 4px;
+            font-size: 0.6875rem;
+            font-weight: 400;
+            color: var(--text-muted);
+        }
+
+        .opcrf-sheet-xscell {
+            display: inline-block;
+            margin: 0 10px 4px 0;
+        }
+
         .opcrf-sheet-table {
             width: 100%;
             border-collapse: collapse;
@@ -1762,6 +2825,47 @@
 
         .opcrf-sheet-acc {
             width: 33%;
+        }
+
+        /* Slim numeric columns (weight, per-block average/weighted). */
+        .opcrf-sheet-wcol {
+            width: 52px;
+            text-align: center !important;
+            white-space: nowrap;
+        }
+
+        /* The 5-level Rating Scale column: each level its own line. */
+        .opcrf-sheet-scale {
+            width: 22%;
+            font-size: 0.6875rem;
+        }
+
+        .opcrf-sheet-scalelevel {
+            display: block;
+            padding: 1px 0;
+        }
+
+        .opcrf-sheet-scalelevel b {
+            display: inline-block;
+            min-width: 12px;
+            color: #1f3864;
+        }
+
+        /* Block-level planning details typed inside the Objectives cell
+           (KRA, attribution, target, MOVs) — a small stacked list under
+           the objective text. */
+        .opcrf-sheet-cellsub {
+            display: block;
+            margin-top: 5px;
+            padding-top: 4px;
+            border-top: 1px dashed var(--border);
+            font-size: 0.6875rem;
+            color: var(--text-muted);
+        }
+
+        .opcrf-sheet-cellsub strong {
+            color: #1f3864;
+            font-weight: 700;
         }
 
         .opcrf-sheet-rate {
@@ -1941,6 +3045,16 @@
         .btn-primary--small {
             padding: 6px 12px;
             font-size: 0.75rem;
+        }
+
+        .btn-ghost--small,
+        .btn-danger--small {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 10px;
+            font-size: 0.75rem;
+            text-decoration: none;
         }
 
         .opcrf-movs-attached-head {
@@ -2169,6 +3283,156 @@
             margin-bottom: 14px;
         }
 
+        /* ---------- REVIEW DECISION CARDS (redesigned modal sections) ----------
+            Clean cards: Review Decision / Forward / Review History. */
+        .opcrf-review-card {
+            margin-top: 14px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: var(--bg-elevated);
+            padding: 14px 16px 16px;
+        }
+
+        .opcrf-review-card-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            font-size: 0.6875rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-faint);
+            margin-bottom: 6px;
+        }
+
+        .opcrf-review-card-head span:first-child {
+            color: var(--text-strong);
+            font-size: 0.8125rem;
+        }
+
+        .opcrf-review-card-head .badge {
+            text-transform: none;
+            letter-spacing: normal;
+        }
+
+        .opcrf-review-card-desc {
+            margin: 0 0 12px;
+            font-size: 0.78125rem;
+            color: var(--text-muted);
+        }
+
+        .opcrf-remarks-textarea {
+            width: 100%;
+            min-height: 140px;
+            resize: vertical;
+            font: inherit;
+            font-size: 0.8125rem;
+            line-height: 1.5;
+        }
+
+        .opcrf-decision-actions {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        .opcrf-decision-actions .btn-ghost {
+            color: var(--text-muted);
+        }
+
+        /* The history timeline: a dot per entry, connected by a line. */
+        .opcrf-history-timeline {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            margin-top: 4px;
+        }
+
+        .opcrf-history-entry {
+            position: relative;
+            display: flex;
+            gap: 10px;
+            padding: 8px 0 14px 2px;
+        }
+
+        .opcrf-history-entry:not(:last-child)::before {
+            content: '';
+            position: absolute;
+            left: 7px;
+            top: 24px;
+            bottom: 2px;
+            width: 2px;
+            background: var(--border);
+            border-radius: 1px;
+        }
+
+        .opcrf-history-dot {
+            flex: none;
+            width: 10px;
+            height: 10px;
+            margin-top: 5px;
+            border-radius: 50%;
+            background: var(--primary);
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
+        }
+
+        .opcrf-history-dot--muted {
+            background: var(--text-faint);
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-faint) 18%, transparent);
+        }
+
+        .opcrf-history-body {
+            min-width: 0;
+            font-size: 0.8125rem;
+        }
+
+        .opcrf-history-action {
+            font-weight: 700;
+            color: var(--text-strong);
+        }
+
+        .opcrf-history-meta {
+            margin-top: 2px;
+            font-size: 0.78125rem;
+            color: var(--text-muted);
+        }
+
+        .opcrf-history-meta strong {
+            color: var(--text-strong);
+            font-weight: 600;
+        }
+
+        .opcrf-history-remarks {
+            margin-top: 4px;
+            padding: 6px 10px;
+            border-left: 3px solid var(--border-strong, var(--border));
+            background: var(--bg-panel, var(--bg-elevated));
+            border-radius: 0 6px 6px 0;
+            font-size: 0.78125rem;
+            color: var(--text);
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+
+        .opcrf-history-empty-text {
+            margin: 2px 0 0;
+            font-size: 0.8125rem;
+            color: var(--text-muted);
+        }
+
+        /* The "Version 2 · 1 archived" pill on the review modal's form header */
+        .opcrf-version-pill {
+            font-size: 0.6875rem;
+            font-weight: 600;
+            color: var(--text-faint);
+            text-transform: none;
+            letter-spacing: normal;
+        }
+
         /* ---------- APPROVAL PANEL (superadmin review outcome) ---------- */
         .opcrf-approval {
             margin-top: 14px;
@@ -2211,6 +3475,35 @@
             color: var(--text-faint);
         }
 
+        /* The "route onward" checkbox under the review decision buttons */
+        .opcrf-review-route-check {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            margin-top: 10px;
+            font-size: 0.78125rem;
+            color: var(--text-muted);
+            cursor: pointer;
+        }
+
+        .opcrf-review-route-check input {
+            margin-top: 2px;
+            accent-color: var(--primary);
+        }
+
+        /* The review modal's history table — tighter than the page tables */
+        .opcrf-history-table {
+            font-size: 0.78125rem;
+        }
+
+        .opcrf-history-table th {
+            white-space: nowrap;
+        }
+
+        .opcrf-history-table td {
+            vertical-align: top;
+        }
+
         .opcrf-approval-actions {
             display: flex;
             align-items: center;
@@ -2220,6 +3513,338 @@
         }
 
         /* ---------- DISTRICT MANAGER (superadmin dashboard modal) ---------- */
+        .district-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+            gap: 12px;
+        }
+
+        .district-card {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 6px;
+            padding: 12px 14px;
+            text-align: left;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: var(--text);
+            font: inherit;
+            cursor: pointer;
+            transition: border-color 0.15s, transform 0.15s;
+        }
+
+        .district-card:hover {
+            border-color: var(--primary);
+            transform: translateY(-1px);
+        }
+
+        .district-card-icon {
+            display: inline-flex;
+            color: var(--primary);
+        }
+
+        .district-card-name {
+            font-size: 0.875rem;
+            font-weight: 700;
+            color: var(--text-strong);
+        }
+
+        .district-card-count {
+            font-size: 0.75rem;
+            color: var(--text-faint);
+        }
+
+        /* Modal: clickable district list with expandable schools panels */
+        .district-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .district-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            width: 100%;
+            padding: 10px 12px;
+            text-align: left;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            font: inherit;
+            cursor: pointer;
+            transition: border-color 0.15s;
+        }
+
+        .district-toggle:hover,
+        .district-toggle.is-selected {
+            border-color: var(--primary);
+        }
+
+        .district-toggle-name {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.875rem;
+            font-weight: 700;
+            color: var(--text-strong);
+        }
+
+        .district-caret {
+            transition: transform 0.15s;
+            color: var(--text-faint);
+        }
+
+        .district-toggle.is-selected .district-caret {
+            transform: rotate(0deg);
+        }
+
+        .district-toggle .district-caret {
+            transform: rotate(-90deg);
+        }
+
+        .district-caret--up {
+            transform: rotate(180deg) !important;
+        }
+
+        .district-toggle-count {
+            font-size: 0.75rem;
+            color: var(--text-faint);
+            white-space: nowrap;
+        }
+
+        .district-schools-panel {
+            margin: 6px 0 4px 14px;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg-panel, var(--bg-elevated));
+        }
+
+        .district-schools-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+
+        .district-schools-title {
+            font-size: 0.6875rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-faint);
+        }
+
+        .district-schools-tools {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .district-school-search {
+            padding: 6px 10px;
+            font: inherit;
+            font-size: 0.78125rem;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg);
+            color: var(--text);
+        }
+
+        .district-school-table {
+            font-size: 0.8125rem;
+        }
+
+        .is-readonly {
+            background: var(--bg-panel, var(--bg-elevated));
+            color: var(--text-muted);
+            cursor: not-allowed;
+        }
+
+        /* Add School and Edit School are the same panel — one header row, one
+           field grid, one action row — so they share every rule here. They
+           live outside .modal-form (which styles the app's other inputs), so
+           without this they render as raw browser textboxes. */
+        .school-add-panel,
+        .school-edit-form {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            margin-top: 14px;
+            padding: 16px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: var(--bg-elevated);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+        }
+
+        .school-form-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .school-form-title {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            color: var(--text-strong);
+            font-size: 0.875rem;
+            font-weight: 700;
+        }
+
+        .school-form-title svg {
+            color: var(--primary);
+        }
+
+        /* The district the school belongs to — context, not an editable field. */
+        .school-form-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 10px;
+            border-radius: 999px;
+            background: var(--primary-soft);
+            color: var(--primary-strong);
+            font-size: 0.75rem;
+            font-weight: 600;
+            max-width: 100%;
+        }
+
+        .school-form-chip span {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .school-form-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+            gap: 14px;
+        }
+
+        .school-form-grid .field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        /* The two fields carry the app's standard form treatment — the same
+           input, label and focus ring as the Add District / Add User forms —
+           plus a leading icon so they read as designed fields rather than raw
+           textboxes (they sit outside .modal-form, which styles none of it). */
+        .school-add-panel label,
+        .school-edit-form label {
+            display: block;
+            font-size: 0.8125rem;
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .school-add-panel .input-icon,
+        .school-edit-form .input-icon {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .school-add-panel .input-icon > svg,
+        .school-edit-form .input-icon > svg {
+            position: absolute;
+            left: 11px;
+            color: var(--text-faint);
+            pointer-events: none;
+            transition: color 0.2s;
+        }
+
+        .school-add-panel .input-icon:focus-within > svg,
+        .school-edit-form .input-icon:focus-within > svg {
+            color: var(--primary);
+        }
+
+        .school-add-panel input,
+        .school-edit-form input {
+            width: 100%;
+            padding: 10px 12px 10px 36px; /* left room for the icon */
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-strong);
+            font: inherit;
+            font-size: 0.875rem;
+            transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+        }
+
+        .school-add-panel input::placeholder,
+        .school-edit-form input::placeholder {
+            color: var(--text-faint);
+        }
+
+        .school-add-panel input:focus,
+        .school-edit-form input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+
+        .school-add-panel input.error,
+        .school-edit-form input.error {
+            border-color: var(--danger);
+        }
+
+        /* A DepEd School ID is a code, not prose — set it like one. */
+        .school-add-panel #schoolId,
+        .school-edit-form input[id^="editSchoolId"] {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            letter-spacing: 0.04em;
+        }
+
+        .school-add-panel .school-edit-actions,
+        .school-edit-form .school-edit-actions {
+            margin-top: 0;
+            padding-top: 12px;
+            border-top: 1px solid var(--border);
+        }
+
+        .school-add-panel .btn-primary,
+        .school-edit-form .btn-primary {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* One column once the two fields would be too narrow to use. */
+        @media (max-width: 520px) {
+            .school-form-grid {
+                grid-template-columns: minmax(0, 1fr);
+            }
+        }
+
+        .school-edit-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .district-panel-foot {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+        }
+
         .district-view-btn {
             display: inline-flex;
             align-items: center;
@@ -2355,11 +3980,6 @@
         .school-dot {
             color: var(--text-faint);
             flex-shrink: 0;
-        }
-
-        .district-actions-row {
-            display: inline-flex;
-            gap: 6px;
         }
 
         .district-action {
@@ -2591,6 +4211,120 @@
             margin-top: 4px;
         }
 
+        /* ---------- OPCRF ANALYTICS (superadmin dashboard card) ----------
+           The numbers reuse .stats-grid / .stat-card above; these rules cover
+           the two parts they don't: the stacked status bar and the list of
+           the latest submissions. Status tones are one class per workflow
+           status, shared by the bar segments and the legend dots so a colour
+           always means the same thing. */
+        .opcrf-analytics .stats-grid {
+            /* Five tiles read better packed tighter than the shared 200px
+               minimum, which would strand the last one on its own row. */
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .opcrf-analytics .stat-card {
+            padding: 16px;
+        }
+
+        .opcrf-analytics-section + .opcrf-analytics-section {
+            margin-top: 20px;
+        }
+
+        .opcrf-analytics-section-title {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 10px;
+        }
+
+        .opcrf-analytics-bar {
+            display: flex;
+            height: 10px;
+            border-radius: 999px;
+            overflow: hidden;
+            background: var(--bg-muted);
+        }
+
+        .opcrf-analytics-seg {
+            display: block;
+            height: 100%;
+            /* Slices sit flush: no gaps, so a 1% sliver is still visible. */
+            min-width: 2px;
+        }
+
+        .opcrf-analytics-seg--pending { background: var(--text-faint); }
+        .opcrf-analytics-seg--resubmitted { background: color-mix(in srgb, var(--primary) 35%, transparent); }
+        .opcrf-analytics-seg--forwarded { background: var(--primary); }
+        .opcrf-analytics-seg--for_compliance { background: var(--ok); }
+        .opcrf-analytics-seg--approved { background: color-mix(in srgb, var(--ok) 55%, var(--primary)); }
+        .opcrf-analytics-seg--returned { background: var(--warn); }
+
+        .opcrf-analytics-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px 18px;
+            margin-top: 12px;
+        }
+
+        .opcrf-analytics-legend-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .opcrf-analytics-legend-item strong {
+            color: var(--text-strong);
+            font-weight: 700;
+        }
+
+        .opcrf-analytics-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .opcrf-analytics-recent {
+            list-style: none;
+        }
+
+        .opcrf-analytics-recent li {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 9px 0;
+            border-top: 1px solid var(--border);
+            font-size: 0.875rem;
+        }
+
+        .opcrf-analytics-recent li:first-child {
+            border-top: 0;
+            padding-top: 0;
+        }
+
+        .opcrf-analytics-who {
+            font-weight: 600;
+            color: var(--text-strong);
+            /* Long names ellipsis instead of pushing the badge off the row. */
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .opcrf-analytics-when {
+            margin-left: auto;
+            color: var(--text-faint);
+            font-size: 0.75rem;
+            white-space: nowrap;
+        }
+
         .card {
             background: var(--bg-panel);
             border-radius: 10px;
@@ -2634,6 +4368,111 @@
         .badge--ok {
             background: var(--ok-soft);
             color: var(--ok);
+        }
+
+        /* Returned-for-revision marker (review workflow) */
+        .badge--warn {
+            background: var(--warn-soft);
+            color: var(--warn);
+        }
+
+        /* Resubmitted marker (revision workflow) */
+        .badge--info {
+            background: color-mix(in srgb, var(--primary) 12%, transparent);
+            color: var(--primary);
+        }
+
+        /* ---------- ACTION REQUIRED (returned OPCRF, staff dashboard) ---------- */
+        .opcrf-action-required {
+            border-color: var(--warn);
+            border-width: 1px;
+            margin-bottom: 16px;
+        }
+
+        .opcrf-action-required-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .opcrf-action-required-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            background: var(--warn-soft);
+            color: var(--warn);
+            flex: none;
+        }
+
+        .opcrf-action-required-title {
+            font-size: 0.9375rem;
+            font-weight: 700;
+            color: var(--text-strong);
+        }
+
+        .opcrf-action-required-head .badge {
+            margin-left: auto;
+        }
+
+        .opcrf-action-required-text {
+            margin: 0 0 10px;
+            font-size: 0.8125rem;
+            color: var(--text-muted);
+        }
+
+        .opcrf-action-required-remarks {
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--warn);
+            border-radius: 8px;
+            background: var(--bg-elevated);
+            padding: 10px 12px;
+            margin-bottom: 12px;
+        }
+
+        .opcrf-action-required-remarks-label {
+            font-size: 0.6875rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-faint);
+            margin-bottom: 4px;
+        }
+
+        .opcrf-action-required-remarks-text {
+            margin: 0;
+            font-size: 0.875rem;
+            color: var(--text);
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+
+        .opcrf-action-required-foot {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .opcrf-revise-remarks {
+            margin-bottom: 14px;
+        }
+
+        .modal--opcr-revise {
+            width: 100%;
+            max-width: 560px;
+            max-height: min(88vh, 720px);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .modal--opcr-revise .modal-form {
+            overflow-y: auto;
         }
 
         /* Stat values holding text (e.g. an email) rather than a number */
@@ -2815,6 +4654,994 @@
         }
 
         /* ---------- THEME TOGGLE ---------- */
+        /* ---------- MOV CHECKLIST (Upload MOV) ----------
+           Part → Category → MOV. Two levels collapse; a MOV is a flat card so
+           opening a category never introduces a third level to think about.
+           The part and category headers reuse the button chrome, not a new
+           visual language. */
+        .mov-progress {
+            margin-bottom: 16px;
+        }
+
+        .mov-progress-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 12px;
+        }
+
+        .mov-progress-head .card-title {
+            margin-bottom: 4px;
+        }
+
+        .mov-progress-count {
+            margin: 0;
+            font-size: 0.875rem;
+            color: var(--text-muted);
+        }
+
+        .mov-progress-count strong {
+            color: var(--text-strong);
+            font-size: 1.125rem;
+        }
+
+        .mov-progress-percent {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary-strong);
+            line-height: 1;
+        }
+
+        .mov-progress-track {
+            height: 10px;
+            border-radius: 999px;
+            background: var(--bg-muted);
+            overflow: hidden;
+        }
+
+        .mov-progress-fill {
+            display: block;
+            height: 100%;
+            border-radius: 999px;
+            background: var(--primary);
+            transition: width 0.3s ease;
+        }
+
+        .mov-progress-note {
+            margin: 10px 0 0;
+            font-size: 0.8125rem;
+            color: var(--text-muted);
+        }
+
+        .mov-progress-optional {
+            display: block;
+            margin-top: 2px;
+            color: var(--text-faint);
+        }
+
+
+        /* ---------- MOV RAIL ----------
+           The Upload MOV page is a rail plus a checklist: progress and
+           navigation share one left column, so "how far along am I" and
+           "which slice am I looking at" are read in the same glance. The
+           rail items reuse the app sidebar's nav-item chrome (hover, active
+           fill, 3px left edge) — it is navigation, so it should look like
+           navigation — and the negative margins let the active fill run the
+           full width of the card instead of stopping at its padding. */
+        .mov-layout {
+            display: grid;
+            grid-template-columns: 264px minmax(0, 1fr);
+            gap: 16px;
+            align-items: start;
+        }
+
+        /* min-width:0 lets the MOV cards shrink instead of forcing the grid
+           column wider than 1fr allows. */
+        .mov-main {
+            min-width: 0;
+        }
+
+        .mov-rail {
+            position: sticky;
+            top: 16px;
+        }
+
+        .mov-rail .mov-progress {
+            margin-bottom: 0;
+            /* Room for the active item's 3px left edge to sit flush. */
+            padding-left: 21px;
+            padding-right: 21px;
+        }
+
+        .mov-rail-nav {
+            margin: 14px -21px 0;
+            padding-bottom: 6px;
+            border-top: 1px solid var(--border);
+        }
+
+        .mov-rail-group {
+            padding: 12px 21px 4px;
+            font-size: 0.6875rem;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--text-faint);
+        }
+
+        .mov-rail-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            padding: 8px 21px;
+            border: 0;
+            border-left: 3px solid transparent;
+            background: transparent;
+            color: var(--text-faint);
+            font: inherit;
+            font-size: 0.9375rem;
+            text-align: left;
+            /* The entries are links to /movs?category=N — the same ones the
+               sidebar's dropdown offers — so they must not read as body
+               text with an underline. */
+            text-decoration: none;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+        }
+
+        /* Categories sit under their Part, so they are indented past the
+           icon rather than repeating it: the grouping already says "A is
+           under Part 1". */
+        .mov-rail-item--nested {
+            padding-left: 34px;
+        }
+
+        .mov-rail-item:hover {
+            background: var(--bg-hover);
+            color: var(--text-strong);
+        }
+
+        .mov-rail-item:focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: -2px;
+        }
+
+        .mov-rail-item.is-active {
+            background: var(--bg-active);
+            border-left-color: var(--primary);
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        .mov-rail-item .icon {
+            display: inline-flex;
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
+        }
+
+        .mov-rail-label {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .mov-rail-count {
+            margin-left: auto;
+            padding-left: 8px;
+            font-size: 0.75rem;
+            font-variant-numeric: tabular-nums;
+            color: var(--text-faint);
+        }
+
+        .mov-rail-item.is-active .mov-rail-count {
+            color: var(--primary-strong);
+        }
+
+        .mov-rail-empty,
+        .mov-rail-searching {
+            margin: 0;
+            padding: 8px 21px 0;
+            font-size: 0.8125rem;
+            color: var(--text-faint);
+        }
+
+        .mov-rail-searching {
+            padding-top: 10px;
+        }
+
+        .mov-scope-line {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin: 0 0 16px;
+            font-size: 0.875rem;
+            color: var(--text-muted);
+        }
+
+        .mov-scope-line strong {
+            color: var(--text-strong);
+        }
+
+        .mov-scope-line .btn-ghost--small {
+            margin-left: auto;
+        }
+
+        /* Below the two-column threshold the rail stacks above the
+           checklist, so it stops sticking — a sticky rail that is taller
+           than the viewport would trap the page. */
+        @media (max-width: 900px) {
+            .mov-layout {
+                grid-template-columns: minmax(0, 1fr);
+            }
+
+            .mov-rail {
+                position: static;
+            }
+
+            .mov-scope-line .btn-ghost--small {
+                margin-left: 0;
+            }
+        }
+        .mov-search {
+            padding: 14px 24px;
+            margin-bottom: 16px;
+        }
+
+        .mov-search-field {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 0 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg-input);
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }
+
+        .mov-search-field:focus-within {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
+        }
+
+        .mov-search-icon {
+            display: inline-flex;
+            color: var(--text-faint);
+        }
+
+        .mov-search-field input {
+            flex: 1;
+            border: 0;
+            background: transparent;
+            padding: 10px 0;
+            font: inherit;
+            font-size: 0.875rem;
+            color: var(--text-strong);
+        }
+
+        .mov-search-field input:focus {
+            outline: none;
+        }
+
+        .mov-search-hint {
+            margin: 8px 0 0;
+            font-size: 0.75rem;
+            color: var(--text-faint);
+        }
+
+        .mov-part {
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: var(--bg-panel);
+            box-shadow: var(--shadow-card);
+            margin-bottom: 12px;
+            overflow: hidden;
+        }
+
+        .mov-part-head,
+        .mov-category-head {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            padding: 14px 16px;
+            border: 0;
+            background: transparent;
+            color: var(--text-strong);
+            font: inherit;
+            text-align: left;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .mov-part-head:hover,
+        .mov-category-head:hover {
+            background: var(--bg-hover);
+        }
+
+        .mov-part-name {
+            font-size: 0.9375rem;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+        }
+
+        .mov-category-name {
+            font-size: 0.875rem;
+            font-weight: 700;
+            color: var(--text-strong);
+        }
+
+        .mov-category-trail {
+            font-size: 0.75rem;
+            color: var(--text-faint);
+        }
+
+        .mov-remove-btn {
+            color: var(--text-faint);
+        }
+
+        .mov-remove-btn:hover {
+            color: var(--danger);
+            border-color: var(--danger);
+        }
+
+        .mov-part-count {
+            margin-left: auto;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: var(--bg-muted);
+            color: var(--text-muted);
+            font-size: 0.6875rem;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .mov-chevron {
+            display: inline-flex;
+            color: var(--text-faint);
+            transform: rotate(-90deg);
+            transition: transform 0.18s ease;
+        }
+
+        .mov-chevron.is-open {
+            transform: rotate(0deg);
+        }
+
+        .mov-part-body {
+            padding: 4px 16px 16px;
+            border-top: 1px solid var(--border);
+        }
+
+        .mov-category {
+            margin-top: 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg-elevated);
+        }
+
+        .mov-category-head {
+            padding: 10px 14px;
+        }
+
+        .mov-category-body {
+            padding: 4px 14px 14px;
+        }
+
+        .mov-card {
+            padding: 14px 0;
+            border-top: 1px dashed var(--border);
+        }
+
+        .mov-card:first-child {
+            border-top: 0;
+        }
+
+        /* ARRIVING ON A MOV from the sidebar's tree: the card is marked for
+           a few seconds and then lets go. Added and removed by the browser
+           on arrival, so a later re-render never re-flashes it. */
+        @keyframes mov-focus-flash {
+            0%, 70% {
+                box-shadow: 0 0 0 3px var(--primary-soft);
+                border-radius: 8px;
+            }
+            100% {
+                box-shadow: 0 0 0 3px transparent;
+                border-radius: 8px;
+            }
+        }
+
+        .mov-card {
+            scroll-margin-top: 90px;
+        }
+
+        .mov-card.is-mov-focused {
+            animation: mov-focus-flash 5s ease-out forwards;
+        }
+
+        .mov-card-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+
+        .mov-label {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--primary-strong);
+        }
+
+        .mov-required,
+        .mov-optional {
+            padding: 2px 7px;
+            border-radius: 999px;
+            font-size: 0.625rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .mov-required {
+            background: var(--primary-soft);
+            color: var(--primary-strong);
+        }
+
+        .mov-optional {
+            background: var(--bg-muted);
+            color: var(--text-muted);
+        }
+
+        .mov-title {
+            margin: 0;
+            font-size: 0.9375rem;
+            font-weight: 600;
+            color: var(--text-strong);
+            line-height: 1.45;
+        }
+
+        .mov-description {
+            margin: 4px 0 0;
+            font-size: 0.8125rem;
+            color: var(--text-muted);
+            line-height: 1.5;
+        }
+
+        .mov-empty-category {
+            margin: 0;
+            padding: 14px 0 4px;
+            font-size: 0.8125rem;
+            color: var(--text-faint);
+        }
+
+        /* UPLOADED PICTURES: a MOV holds any number of them, each listed with
+           its own review state. */
+        .mov-summary {
+            margin: 12px 0 8px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-muted);
+        }
+
+        /* EACH MOV'S OWN TABLE: what is on file for that MOV, and the row that adds
+           to it. One table per card, so a photo is never ambiguous about which
+           requirement it answers. */
+        .mov-picture-table {
+            width: 100%;
+            margin-top: 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            border-collapse: collapse;
+            background: var(--bg-panel);
+            font-size: 0.875rem;
+        }
+
+        .mov-picture-caption {
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-muted);
+            font-size: 0.6875rem;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            text-align: left;
+        }
+
+        .mov-picture-table th {
+            padding: 7px 12px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-muted);
+            font-size: 0.6875rem;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            text-align: left;
+        }
+
+        .mov-picture-table td {
+            padding: 10px 12px;
+            border-top: 1px solid var(--border);
+            vertical-align: top;
+        }
+
+        .mov-summary-row td {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            background: var(--bg-muted);
+        }
+
+        /* A returned picture is the one thing on this page that needs
+           something done about it, so its row is marked, not just its badge. */
+        .mov-picture.is-returned {
+            background: var(--warn-soft);
+        }
+
+        .mov-picture-empty td {
+            color: var(--text-muted);
+        }
+
+        .mov-picture__what {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            min-width: 0;
+        }
+
+        .mov-picture__thumb {
+            display: inline-flex;
+            flex-shrink: 0;
+        }
+
+        .mov-picture__meta {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 0;
+        }
+
+        .mov-picture__when {
+            color: var(--text-muted);
+            white-space: nowrap;
+        }
+
+        .mov-picture__status {
+            white-space: nowrap;
+        }
+
+        .mov-picture__status .mov-file-reviewer {
+            display: block;
+            margin-top: 4px;
+            white-space: normal;
+        }
+
+        .mov-picture__actions {
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        .mov-picture__actions .mov-remove-confirm {
+            display: inline-flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+
+        /* THE UPLOAD ROW: the last row of the MOV's own table, tinted so it
+           reads as the way in rather than as another picture. */
+        .mov-upload-row td {
+            background: var(--primary-soft);
+        }
+
+        .mov-upload-row__head {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 6px 12px;
+            margin-bottom: 10px;
+        }
+
+        .mov-upload-row__title {
+            font-size: 0.6875rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--primary-strong);
+        }
+
+        .mov-upload-row__trail {
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            color: var(--text-strong);
+        }
+
+        .mov-upload-row__note {
+            margin: 10px 0 0;
+            font-size: 0.75rem;
+            line-height: 1.5;
+            color: var(--text-muted);
+        }
+
+        .mov-upload-row .mov-file-input {
+            max-width: 420px;
+        }
+
+        /* The picture itself, so the card reads as evidence at a glance
+           rather than as a list of filenames. */
+        .mov-thumb {
+            width: 44px;
+            height: 44px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            object-fit: cover;
+            background: var(--bg-muted);
+            flex-shrink: 0;
+        }
+
+        .mov-file-size {
+            display: block;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .mov-file-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 34px;
+            height: 34px;
+            border-radius: 8px;
+            background: var(--primary-soft);
+            color: var(--primary-strong);
+            flex-shrink: 0;
+        }
+
+        .mov-file-name {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--text-strong);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .mov-file-reviewer,
+        .mov-file-remarks,
+        .mov-file-missing {
+            margin: 0;
+            font-size: 0.8125rem;
+            color: var(--text-muted);
+        }
+
+        .mov-file-remarks {
+            padding: 6px 8px;
+            border-radius: 6px;
+            background: var(--warn-soft);
+            color: var(--warn);
+        }
+
+        .mov-file-missing {
+            color: var(--danger);
+        }
+
+        .mov-file-actions {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+
+        .mov-remove-confirm {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.8125rem;
+            color: var(--text-muted);
+        }
+
+        /* The upload area is styled as a formal field block rather than a
+           loose inset: the squarer corners and the letter-spaced label are
+           deliberate — this is a document being filed against a checklist,
+           not a quick attachment. */
+
+        /* The upload area is styled as a formal field block rather than a
+           loose inset: a head that states what is being attached and where it
+           lands, a body that holds the one field, and a foot that commits. The
+           squarer corners and the letter-spaced label are deliberate — this is
+           a document being filed against a checklist, not a quick attachment. */
+
+        .mov-file-input {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .mov-file-input__label {
+            font-size: 0.6875rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text);
+        }
+
+        .mov-file-input input {
+            font: inherit;
+            font-weight: 400;
+            padding: 8px 10px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: var(--bg-input);
+            color: var(--text);
+        }
+
+        .mov-file-input input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px var(--primary-soft);
+        }
+
+        .mov-file-input__spec {
+            font-size: 0.75rem;
+            font-weight: 400;
+            color: var(--text-muted);
+        }
+
+        /* A committed boundary between the field and the actions, so the
+           buttons read as the foot of the form rather than more controls. */
+        .mov-upload-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 14px;
+            padding-top: 12px;
+            border-top: 1px solid var(--border);
+        }
+
+        .mov-no-results {
+            text-align: center;
+        }
+
+        /* ---------- TOPBAR NOTIFICATION CENTRE ----------
+           A bell in the header with an unread badge, and the panel it opens.
+           The panel is anchored to the right edge of the topbar and drops
+           over the page, like the account menu beside it. Unread lines carry
+           a tinted surface and a dot; read ones recede. */
+        .notif {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .notif-trigger {
+            position: relative;
+            background: none;
+            border: none;
+            color: var(--text-faint);
+            cursor: pointer;
+            padding: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            transition: color 0.15s, background 0.15s;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .notif-trigger:hover,
+        .notif-trigger.open {
+            color: var(--text-strong);
+            background: var(--bg-hover);
+        }
+
+        .notif-badge {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            min-width: 16px;
+            height: 16px;
+            padding: 0 4px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 999px;
+            background: var(--danger);
+            color: #fff;
+            font-size: 0.625rem;
+            font-weight: 700;
+            line-height: 1;
+            font-variant-numeric: tabular-nums;
+            border: 2px solid var(--bg-panel);
+        }
+
+        .notif-panel {
+            position: absolute;
+            top: calc(100% + 10px);
+            right: 0;
+            z-index: 200;
+            width: min(360px, calc(100vw - 24px));
+            display: none;
+            flex-direction: column;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            box-shadow: var(--shadow-dropdown);
+            overflow: hidden;
+        }
+
+        .notif-panel.open {
+            display: flex;
+        }
+
+        /* On a phone the bell sits near the left edge of the topbar, so a
+           panel anchored to it would hang off screen. Pin the panel to the
+           viewport instead — just under the 60px header, with the same
+           gutter the header uses. */
+        @media (max-width: 560px) {
+            .notif-panel {
+                position: fixed;
+                top: 60px;
+                left: 10px;
+                right: 10px;
+                width: auto;
+            }
+        }
+
+        .notif-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .notif-head-title {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+        }
+
+        .notif-markall {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background: none;
+            border: none;
+            padding: 4px 6px;
+            border-radius: 6px;
+            color: var(--primary-strong);
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .notif-markall:hover {
+            background: var(--primary-soft);
+        }
+
+        .notif-markall:disabled {
+            opacity: 0.6;
+            cursor: default;
+        }
+
+        .notif-list {
+            max-height: min(420px, 60vh);
+            overflow-y: auto;
+        }
+
+        .notif-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 12px 14px;
+            border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+            text-decoration: none;
+            color: inherit;
+            transition: background 0.15s;
+        }
+
+        .notif-item:hover {
+            background: var(--bg-hover);
+        }
+
+        .notif-item.is-unread {
+            background: color-mix(in srgb, var(--primary) 5%, var(--bg-elevated));
+        }
+
+        .notif-icon {
+            flex-shrink: 0;
+            width: 30px;
+            height: 30px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+        }
+
+        .notif-icon--ok { background: var(--ok-soft); color: var(--ok); }
+        .notif-icon--warn { background: var(--warn-soft); color: var(--warn); }
+        .notif-icon--info { background: var(--primary-soft); color: var(--primary-strong); }
+        .notif-icon--muted { background: var(--bg-muted); color: var(--text-muted); }
+
+        .notif-body {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+        }
+
+        .notif-title {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--text-strong);
+            line-height: 1.4;
+        }
+
+        .notif-item.is-unread .notif-title::after {
+            content: '';
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            margin-left: 6px;
+            border-radius: 50%;
+            background: var(--primary);
+            vertical-align: middle;
+        }
+
+        .notif-detail {
+            font-size: 0.8125rem;
+            line-height: 1.5;
+            color: var(--text-muted);
+            overflow-wrap: anywhere;
+        }
+
+        .notif-time {
+            font-size: 0.6875rem;
+            color: var(--text-faint);
+        }
+
+        .notif-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            padding: 28px 20px;
+            text-align: center;
+            font-size: 0.875rem;
+            color: var(--text-muted);
+        }
+
+        .notif-empty-icon {
+            color: var(--text-faint);
+            margin-bottom: 4px;
+        }
+
+        .notif-empty-sub {
+            font-size: 0.75rem;
+            color: var(--text-faint);
+        }
+
+        .notif-more {
+            padding: 10px 14px;
+            font-size: 0.75rem;
+            color: var(--text-faint);
+            text-align: center;
+            border-top: 1px solid var(--border);
+            background: var(--bg-panel);
+        }
+
         .theme-toggle {
             background: none;
             border: none;
@@ -2892,6 +5719,13 @@
             .theme-switching *::before,
             .theme-switching *::after {
                 transition: none !important;
+            }
+
+            /* The menu still has to open and close — it just arrives. */
+            .row-menu-list,
+            .row-menu-list * {
+                transition-duration: 0.01ms !important;
+                transition-delay: 0s !important;
             }
         }
 
@@ -3010,6 +5844,13 @@
             <!-- HEADER -->
             <header class="header" id="header">
                 <div class="user-info">
+                    {{-- The notification bell: what changed while the user was
+                         elsewhere, without them having to go looking. Sits
+                         beside the theme toggle and the account menu. --}}
+                    @auth
+                        <livewire:notifications-menu />
+                    @endauth
+
                     <button type="button" class="theme-toggle" id="themeToggle" title="Toggle light/dark mode" aria-label="Toggle light/dark mode">
                         <x-icon name="sun" :size="20" class="icon-sun" />
                         <x-icon name="moon" :size="20" class="icon-moon" />
