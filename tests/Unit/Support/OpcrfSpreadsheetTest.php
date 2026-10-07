@@ -120,6 +120,83 @@ class OpcrfSpreadsheetTest extends TestCase
         (new PurePhpZipReader($path))->readAll();
     }
 
+    public function test_hidden_rows_and_columns_are_excluded_from_the_analysis(): void
+    {
+        // The official template ships a fully-filled example objective
+        // block on HIDDEN rows 16–18 — timeline "January to December
+        // 2024", ratings 5/4/5. A staff member who clears every visible
+        // cell still uploads a workbook Excel reports as empty there, and
+        // the analyzer must agree: what is hidden is not user content.
+        $path = $this->buildOpcrfWorkbookWithSheets([
+            'OPCRF' => [
+                'B4' => 'Name of Employee:',
+                'F4' => 'Jane D. Doe',
+                'B6' => 'Review Period:',
+                'F6' => 'January to December 2026',
+                // The hidden example block (would previously be read).
+                'F16' => 'Objective 1: Ensured preparation of HR policies',
+                'H16' => 'January to December 2024',
+                'T16' => 5,
+                'T17' => 4,
+                'T18' => 5,
+                // The staff member's real, VISIBLE objective.
+                'F20' => 'Objective 2: Improved learner outcomes',
+                'H20' => 'June 2026',
+                'S20' => 'Raised MPS by 5 points',
+                'T20' => 4,
+            ],
+        ], [
+            'OPCRF' => ['hidden_rows' => [16, 17, 18]],
+        ]);
+
+        $data = (new OpcrfSpreadsheet($path))->analyze();
+
+        // The hidden block is gone: no ghost timeline, no ghost rating.
+        $this->assertSame('Objective 2: Improved learner outcomes', $data['objectives']);
+        $this->assertSame('June 2026', (new OpcrfSpreadsheet($path))->objectiveEntries()[0]['timeline']);
+        $this->assertSame([4.0], $data['ratings']);
+        $this->assertSame(4.0, $data['self_rating']);
+        $this->assertSame(1, $data['objective_rows']);
+    }
+
+    public function test_hidden_columns_are_excluded_from_the_analysis(): void
+    {
+        // Column H (Timeline) hidden entirely — its values must not leak
+        // into the analysis, exactly like hidden rows.
+        $path = $this->buildOpcrfWorkbookWithSheets([
+            'OPCRF' => [
+                'F16' => 'Objective 1: Improved learner outcomes',
+                'H16' => 'January to December 2024',
+                'T16' => 4,
+            ],
+        ], [
+            'OPCRF' => ['hidden_columns' => [8]], // column H
+        ]);
+
+        $entries = (new OpcrfSpreadsheet($path))->objectiveEntries();
+
+        $this->assertSame('Objective 1: Improved learner outcomes', $entries[0]['objectives']);
+        $this->assertSame('', $entries[0]['timeline']);
+    }
+
+    public function test_visible_rows_are_kept_even_when_other_rows_are_hidden(): void
+    {
+        // Hiding row 17 must not hide its row 16 neighbour's content.
+        $path = $this->buildOpcrfWorkbookWithSheets([
+            'OPCRF' => [
+                'F16' => 'Objective 1: A',
+                'F17' => 'Objective 2: B',
+            ],
+        ], [
+            'OPCRF' => ['hidden_rows' => [17]],
+        ]);
+
+        $data = (new OpcrfSpreadsheet($path))->analyze();
+
+        $this->assertSame('Objective 1: A', $data['objectives']);
+        $this->assertSame(1, $data['objective_rows']);
+    }
+
     public function test_ratings_stored_as_text_cells_are_still_averaged(): void
     {
         // Real Excel writes T-column ratings as text when a cell was
@@ -194,9 +271,11 @@ class OpcrfSpreadsheetTest extends TestCase
         $this->assertSame('COMMITMENT TO ORGANIZATIONAL OUTCOMES (60%)', $parts[0]['title']);
         // The template's own note text re-opens with the part label.
         $this->assertStringStartsWith('Part I-A. Commitment to Organizational Outcomes shall capture', $parts[0]['note']);
-        $this->assertCount(1, $parts[0]['entries']);
+        // Two objectives now live in Part I-A (the real template has many).
+        $this->assertCount(2, $parts[0]['entries']);
         $this->assertSame('Objective 1: Improved learner outcomes', $parts[0]['entries'][0]['objectives']);
         $this->assertSame('January to December 2026', $parts[0]['entries'][0]['timeline']);
+        $this->assertSame('Objective 2: Implemented the School Improvement Plan', $parts[0]['entries'][1]['objectives']);
         $this->assertSame(2.0, $parts[0]['total_score']);
         $this->assertTrue($parts[0]['has_total_row']);
 
@@ -288,13 +367,14 @@ class OpcrfSpreadsheetTest extends TestCase
 
         $entries = (new OpcrfSpreadsheet($path))->objectiveEntries();
 
-        $this->assertCount(3, $entries);
+        $this->assertCount(4, $entries);
         $this->assertSame(16, $entries[0]['row']); // Part I-A
-        $this->assertSame(83, $entries[1]['row']); // Part I-B
-        $this->assertSame(119, $entries[2]['row']); // Part I-C
+        $this->assertSame(19, $entries[1]['row']); // Part I-A, second objective
+        $this->assertSame(83, $entries[2]['row']); // Part I-B
+        $this->assertSame(119, $entries[3]['row']); // Part I-C
         // The whole-workbook blob keeps every objective, in order.
         $this->assertSame(
-            "Objective 1: Improved learner outcomes\nObjective: Conducted innovations and interventions\nObjective: Utilized budget allocation",
+            "Objective 1: Improved learner outcomes\nObjective 2: Implemented the School Improvement Plan\nObjective: Conducted innovations and interventions\nObjective: Utilized budget allocation",
             (new OpcrfSpreadsheet($path))->analyze()['objectives']
         );
     }
@@ -340,5 +420,180 @@ class OpcrfSpreadsheetTest extends TestCase
         $this->assertSame('Objective 2: Conducted action research', $entries[1]['objectives']);
         $this->assertCount(1, $entries[1]['criteria']);
         $this->assertSame('Completed one action research', $entries[1]['criteria'][0]['accomplishments']);
+    }
+
+    public function test_every_template_column_is_read_for_the_full_review(): void
+    {
+        $parts = (new OpcrfSpreadsheet($this->buildThreePartOpcrf()))->parts();
+
+        $first = $parts[0]['entries'][0];
+
+        // The planning band: KRA, attribution, weight, target, MOVs.
+        $this->assertSame('Education Human Resource Development Program', $first['kra']);
+        $this->assertSame('BEDP Pillar 1: Access', $first['attribution']);
+        $this->assertSame('0.35', $first['weight']);
+        $this->assertSame('2', $first['target_value']);
+        $this->assertSame('AIP activities aligned with the approved WFP', $first['target_description']);
+        $this->assertSame('Approved WFP and Annual Implementation Plan', $first['movs']);
+
+        // The per-block computed averages.
+        $this->assertSame(4.67, $first['average']);
+        $this->assertNull($first['weighted_average']); // not typed in the fixture
+
+        // The 5-level Rating Scale columns (M..Q) on the Quality row.
+        $quality = $first['criteria'][0];
+        $scale = $quality['scale'];
+        $this->assertCount(2, $scale);
+        $this->assertSame(['level' => 5, 'text' => 'Met all 5 indicators based on the established standards'], $scale[0]);
+        $this->assertSame(['level' => 1, 'text' => 'Only 1 out of 5 indicators is met'], $scale[1]);
+
+        // A second objective in the same part: its own KRA, weight and
+        // criteria — the first block never swallowed it.
+        $second = $parts[0]['entries'][1];
+        $this->assertSame('Objective 2: Implemented the School Improvement Plan', $second['objectives']);
+        $this->assertSame('School Leadership and Administration', $second['kra']);
+        $this->assertSame('0.05', $second['weight']);
+        $this->assertCount(1, $second['criteria']);
+        $this->assertSame('SIP implemented across all grade levels', $second['criteria'][0]['accomplishments']);
+        $this->assertSame(4.0, $second['criteria'][0]['rating']);
+    }
+
+    /**
+     * The shipped template's own header bands, as the workbook carries
+     * them: the two column-band headings and the column captions (with
+     * the Performance Targets sub-header that splits it into a value and
+     * a description).
+     *
+     * @return array<string, string>
+     */
+    private function realHeaderBands(): array
+    {
+        return [
+            // PART I-A (banner row 10, first objective row 16)
+            'B12' => 'TO BE ACCOMPLISHED DURING PLANNING',
+            'S12' => 'TO BE FILLED DURING EVALUATION',
+            'B14' => 'Key Result Areas (KRA) (Based on Office Mandate and Functions)',
+            'C14' => 'Organizational Outcome Attribution (Refer to the GAA Programs/Subprogram and BEDP Pillars)',
+            'F13' => 'Objectives (based on Office Functions)',
+            'H13' => 'Timeline',
+            'I13' => 'Weight Allocation',
+            'J13' => 'Performance Targets (Target Outcome/Output)',
+            'J14' => 'Value (numerical, statistical, trend)',
+            'K14' => 'Description (expected outcome/ output/service)',
+            'L13' => 'Performance Measure (Quality, Efficiency, Timeliness)',
+            'M13' => 'Rating Scale',
+            'R13' => 'Means of Verification (MOVs)',
+            'S13' => 'Actual Accomplishments',
+            'T13' => 'RATING (Q,E,T)',
+            'U13' => 'AVERAGE (QET)',
+            'V13' => 'WEIGHTED AVERAGE',
+        ];
+    }
+
+    public function test_the_parts_own_header_band_names_its_columns(): void
+    {
+        // The real template names its columns in a caption row above each
+        // part's data. Reading that band — instead of assuming one fixed
+        // layout for all three parts — is what keeps Part I-C's Timeline
+        // (column J) and Weight (column K) out of the Performance Target
+        // fields they would otherwise be mistaken for.
+        $parts = (new OpcrfSpreadsheet(
+            $this->buildThreePartOpcrf(array_merge($this->realHeaderBands(), [
+                'J16' => '2',
+                'K16' => 'AIP activities aligned with the approved WFP',
+                'B116' => 'TO BE FILLED IN DURING PLANNING',
+                'B117' => 'Organizational Effectiveness Area',
+                'F117' => 'Objectives',
+                'J117' => 'Timeline',
+                'K117' => 'Weight Allocation',
+                'L117' => 'Performance Measure (Quality, Efficiency, Timeliness)',
+                'M117' => 'RATING SCALE',
+                'R117' => 'Means of Verification (MOVs)',
+                'S117' => 'Actual Results/ Accomplishments',
+                'T117' => 'RATING (Q,E,T)',
+                'J119' => 'Quarterly',
+                'K119' => '0.05',
+            ]))
+        ))->parts();
+
+        // Part I-A: the Performance Targets block is the value/description
+        // pair its sub-header describes, and the band captions are the
+        // template's own wording.
+        $this->assertSame('2', $parts[0]['entries'][0]['target_value']);
+        $this->assertSame('AIP activities aligned with the approved WFP', $parts[0]['entries'][0]['target_description']);
+        $this->assertSame('TO BE ACCOMPLISHED DURING PLANNING', $parts[0]['bands']['planning']);
+        $this->assertSame('TO BE FILLED DURING EVALUATION', $parts[0]['bands']['evaluation']);
+        $this->assertSame('Timeline', $parts[0]['captions']['timeline']);
+        $this->assertSame('Performance Measure (Quality, Efficiency, Timeliness)', $parts[0]['captions']['measure']);
+
+        // Part I-C: Timeline in J, Weight in K, and no Performance Targets
+        // or AVERAGE columns at all — the fields the band does not name
+        // stay empty instead of picking up a neighbouring column's value.
+        $this->assertSame('Quarterly', $parts[2]['entries'][0]['timeline']);
+        $this->assertSame('0.05', $parts[2]['entries'][0]['weight']);
+        $this->assertSame('', $parts[2]['entries'][0]['target_value']);
+        $this->assertSame('', $parts[2]['entries'][0]['target_description']);
+        $this->assertArrayNotHasKey('average', $parts[2]['captions']);
+        // Its left-hand column is the Effectiveness Area, not a KRA.
+        $this->assertSame('Organizational Effectiveness Area', $parts[2]['captions']['area']);
+    }
+
+    public function test_a_part_without_a_header_band_keeps_the_shipped_columns(): void
+    {
+        // A workbook with no caption row (a plain fixture, an older
+        // template) falls back to the shipped layout's fixed letters, and
+        // column J is still read as a Timeline when it is not a number.
+        $parts = (new OpcrfSpreadsheet($this->buildThreePartOpcrf()))->parts();
+
+        $this->assertSame('January to December 2026', $parts[0]['entries'][0]['timeline']);
+        $this->assertSame('Within the rating period', $parts[2]['entries'][0]['timeline']);
+        $this->assertSame([], $parts[0]['captions']);
+    }
+
+    public function test_the_statement_of_purpose_is_read(): void
+    {
+        // Row 8 is the office's own narrative commitment — the longest
+        // piece of prose in the form, and previously not read at all.
+        $purpose = (new OpcrfSpreadsheet($this->buildThreePartOpcrf([
+            'B8' => 'Strand/Bureau/Center/Service/Region/Division Statement of Purpose:',
+            'F8' => 'Anchored on the Vision, Mission, and Core Values of the Department of Education.',
+        ])))->purposeStatement();
+
+        $this->assertSame('Anchored on the Vision, Mission, and Core Values of the Department of Education.', $purpose['value']);
+        $this->assertStringContainsString('Statement of Purpose', $purpose['label']);
+    }
+
+    public function test_an_empty_statement_of_purpose_reads_as_blank(): void
+    {
+        $purpose = (new OpcrfSpreadsheet($this->buildThreePartOpcrf()))->purposeStatement();
+
+        $this->assertSame('', $purpose['value']);
+    }
+
+    public function test_a_merged_kra_is_inherited_by_the_objectives_beneath_it(): void
+    {
+        // The real template merges the KRA cell down across an objective's
+        // rows, so a second objective in the same KRA band has no B cell of
+        // its own — it must inherit the KRA typed above it (what Excel
+        // shows spanning down). Row 19 carries its own KRA in the fixture;
+        // removing it proves the inheritance.
+        $parts = (new OpcrfSpreadsheet(
+            $this->buildThreePartOpcrf(['B19' => ''])
+        ))->parts();
+
+        $second = $parts[0]['entries'][1];
+
+        $this->assertSame('Education Human Resource Development Program', $second['kra']);
+    }
+
+    public function test_column_captions_never_read_as_kra_values(): void
+    {
+        // A caption cell ("Key Result Areas (KRA)") sitting in the B band
+        // must not be inherited as a KRA value.
+        $parts = (new OpcrfSpreadsheet(
+            $this->buildThreePartOpcrf(['B16' => 'Key Result Areas (KRA) (Based on Office Mandates)'])
+        ))->parts();
+
+        $this->assertSame('', $parts[0]['entries'][0]['kra']);
     }
 }

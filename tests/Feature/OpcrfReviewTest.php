@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Livewire\OpcrfMovs;
 use App\Livewire\OpcrfReview;
+use App\Livewire\OpcrfUpload;
 use App\Models\OpcrfSubmission;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -10,17 +12,18 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
+use Tests\Concerns\BuildsOpcrfWorkbooks;
 use Tests\TestCase;
 
 class OpcrfReviewTest extends TestCase
 {
+    use BuildsOpcrfWorkbooks;
     use RefreshDatabase;
-    use \Tests\Concerns\BuildsOpcrfWorkbooks;
 
-    private function staffUser(): User
+    private function staffUser(string $name = 'Staff Member'): User
     {
         return User::create([
-            'name' => 'Staff Member',
+            'name' => $name,
             'username' => 'staff',
             'email' => 'staff@example.com',
             'password' => Hash::make('password123'),
@@ -130,23 +133,28 @@ class OpcrfReviewTest extends TestCase
             ->call('openReview', $submission->id)
             ->assertSet('showReview', true)
             ->assertSee('Review submission')
-            // This submission has no archived document, so the modal says
-            // so instead of handing over a synthesized sheet.
-            ->assertSee('No original OPCRF on file for this submission')
+            // This submission has no archived document, so the modal falls
+            // back to the recorded summary — never a synthesized sheet.
+            ->assertSee('Submitted form')
             // The recorded summary: staff header block in the template's
-            // layout. The objectives table is not rendered in-app — the
-            // full contents are reviewed via the download.
+            // layout, shown because there is no workbook to render.
             ->assertSee('Jane D. Doe')
             ->assertSee('Teacher I')
             ->assertSee('Schools Division Office')
-            // The review's write step is right there in the modal.
-            ->assertSee('Not approved yet')
-            ->assertSee('Approve & save the official copy')
-            // The upload is mandatory before approval.
-            ->assertSee('required to approve')
+            // The review's write steps are right there in the modal —
+            // remarks, compliance, return — and no upload anywhere. Routing
+            // is automatic: there is no manual forwarding step.
+            ->assertSee('Review Decision')
+            ->assertSee('Approve / Compliance')
+            ->assertSee('Return for Revision')
+            ->assertSee('Review History')
+            ->assertSee('No review activity yet')
             ->assertDontSee('Objective 1: Improved learner outcomes')
             ->assertDontSee('Raised MPS by 5 points')
-            ->assertDontSee('Objective 2: Drafted HR policies');
+            ->assertDontSee('Objective 2: Drafted HR policies')
+            // The modal no longer offers a Download button — the whole
+            // workbook is reviewed in-app.
+            ->assertDontSee('>Download</span>', false);
     }
 
     public function test_the_review_modal_keeps_the_workbook_off_the_page(): void
@@ -173,28 +181,251 @@ class OpcrfReviewTest extends TestCase
             ->test(OpcrfReview::class)
             ->call('openReview', $submission->id)
             ->assertSet('showReview', true)
-            // The full workbook is reviewed by fetching it…
-            ->assertSee('Download')
-            // …and only the recorded summary is shown in-app — never the
-            // workbook's full contents (those live in the file itself).
+            // No Download action in the modal — everything is reviewed
+            // in-app, and the workbook's FULL contents are rendered as the
+            // Excel-style sheet: every part, objective, accomplishment,
+            // rating, total and signer.
+            ->assertDontSee('>Download</span>', false)
             ->assertSee('Submitted form')
-            ->assertDontSee('PART I-A')
-            ->assertDontSee('Signed after the review')
-            ->assertDontSee('RATEE')
-            // MOVs stay a view-only record with downloads.
-            ->assertSee('MOVs (view only)');
+            ->assertSee('PART I-A')
+            ->assertSee('PART I-B')
+            ->assertSee('PART I-C')
+            ->assertSee('Objective 1: Improved learner outcomes')
+            ->assertSee('Raised MPS by 5 points')
+            ->assertSee('Objective: Utilized budget allocation')
+            ->assertSee('Liquidation reports submitted')
+            ->assertSee('Signed after the review')
+            ->assertSee('RATEE')
+            // MOVs are gone from the review modal entirely.
+            ->assertDontSee('MOVs');
     }
 
-    public function test_the_review_component_accepts_only_the_approval_workbook(): void
+    public function test_the_review_shows_an_empty_field_as_empty_instead_of_inventing_one(): void
     {
-        // One upload slot exists — the corrected workbook attached while
-        // approving. A crafted client can reach nothing else: no MOV picker,
-        // no in-app sheet state.
+        Storage::fake('local');
+
+        $admin = $this->superadmin();
+        $staff = $this->staffUser();
+        $submission = $this->createSubmission($staff, [
+            'employee_name' => '',
+            'position' => '',
+            'review_period' => '',
+            'division_office' => '',
+        ]);
+        // A workbook whose fields are genuinely empty: no employee name,
+        // no timeline, no accomplishments and no ratings typed anywhere.
+        Storage::disk('local')->put(
+            'opcrf-submissions/'.$staff->id.'/blank.xlsx',
+            file_get_contents($this->buildThreePartOpcrf([
+                'F4' => '',
+                'H16' => '',
+                'S16' => '',
+                'T16' => '',
+            ]))
+        );
+        $submission->update([
+            'file_path' => 'opcrf-submissions/'.$staff->id.'/blank.xlsx',
+            'file_original_name' => 'OPCRF-TEMPLATE.xlsx',
+        ]);
+
+        Livewire::actingAs($admin)
+            ->test(OpcrfReview::class)
+            ->call('openReview', $submission->id)
+            ->assertOk()
+            // The heading falls back to the account the submission belongs
+            // to…
+            ->assertSee($staff->username, false)
+            // …while the form's own field rows report what it carries. A
+            // blank cell reads as the sheet's em-dash placeholder, styled
+            // .is-empty, exactly as it did on the submitter's screen.
+            ->assertSee('class="opcrf-sheet-headvalue is-empty"', false)
+            ->assertSee('<td class="opcrf-sheet-rate">—</td>', false)
+            // And nothing is filled in that the upload does not carry.
+            ->assertDontSee('January to December 2024');
+    }
+
+    public function test_the_review_reads_the_parts_own_column_layout(): void
+    {
+        Storage::fake('local');
+
+        $admin = $this->superadmin();
+        $staff = $this->staffUser();
+        $submission = $this->createSubmission($staff);
+
+        // The shipped header bands: Part I-C keeps its Timeline in column
+        // J and its Weight in K, and has no Performance Targets columns at
+        // all. Reading the band is what stops its weight being shown as a
+        // performance target.
+        Storage::disk('local')->put(
+            'opcrf-submissions/'.$staff->id.'/real.xlsx',
+            file_get_contents($this->buildThreePartOpcrf([
+                'B12' => 'TO BE ACCOMPLISHED DURING PLANNING',
+                'S12' => 'TO BE FILLED DURING EVALUATION',
+                'B14' => 'Key Result Areas (KRA) (Based on Office Mandate and Functions)',
+                'F13' => 'Objectives (based on Office Functions)',
+                'H13' => 'Timeline',
+                'I13' => 'Weight Allocation',
+                'L13' => 'Performance Measure (Quality, Efficiency, Timeliness)',
+                'R13' => 'Means of Verification (MOVs)',
+                'S13' => 'Actual Accomplishments',
+                'T13' => 'RATING (Q,E,T)',
+                'B116' => 'TO BE FILLED IN DURING PLANNING',
+                'B117' => 'Organizational Effectiveness Area',
+                'F117' => 'Objectives',
+                'J117' => 'Timeline',
+                'K117' => 'Weight Allocation',
+                'L117' => 'Performance Measure (Quality, Efficiency, Timeliness)',
+                'R117' => 'Means of Verification (MOVs)',
+                'S117' => 'Actual Results/ Accomplishments',
+                'T117' => 'RATING (Q,E,T)',
+                'J119' => 'Quarterly disbursement',
+                'K119' => '0.05',
+            ]))
+        );
+        $submission->update([
+            'file_path' => 'opcrf-submissions/'.$staff->id.'/real.xlsx',
+            'file_original_name' => 'OPCRF-TEMPLATE.xlsx',
+        ]);
+
+        Livewire::actingAs($admin)
+            ->test(OpcrfReview::class)
+            ->call('openReview', $submission->id)
+            ->assertOk()
+            // The template's own band captions head the table, in the
+            // template's own wording.
+            ->assertSee('TO BE ACCOMPLISHED DURING PLANNING')
+            ->assertSee('TO BE FILLED DURING EVALUATION')
+            // Part I-C's own wording for its left-hand column…
+            ->assertSee('Effectiveness Area')
+            // …and its Timeline and Weight read from J and K.
+            ->assertSee('Quarterly disbursement')
+            ->assertSee('0.05');
+    }
+
+    public function test_the_review_modal_renders_every_tab_of_the_workbook(): void
+    {
+        Storage::fake('local');
+
+        $admin = $this->superadmin();
+        $staff = $this->staffUser();
+        $submission = $this->createSubmission($staff);
+
+        // A full four-tab workbook: the review shows all of it, not just
+        // the PART I objectives sheet.
+        Storage::disk('local')->put(
+            'opcrf-submissions/'.$staff->id.'/full.xlsx',
+            file_get_contents($this->buildFullOpcrfWorkbook())
+        );
+        $submission->update([
+            'file_path' => 'opcrf-submissions/'.$staff->id.'/full.xlsx',
+            'file_original_name' => 'OPCRF-TEMPLATE.xlsx',
+        ]);
+
+        Livewire::actingAs($admin)
+            ->test(OpcrfReview::class)
+            ->call('openReview', $submission->id)
+            ->assertSet('showReview', true)
+            // PART I (the main partial)…
+            ->assertSee('PART I-A')
+            ->assertSee('Raised MPS by 5 points')
+            // …PART II (competencies), behind its own sheet tab…
+            ->assertSee('PART II-A')
+            ->assertSee('LEADERSHIP COMPETENCIES (2.5%)')
+            ->assertSee('Leading People')
+            ->assertSee('1. Uses basic persuasion techniques in a discussion.')
+            ->assertSee('Part II-A Total Score: Weighted Average (Average x 0.025)')
+            // …PART III (rating summary + agreement)…
+            ->assertSee('PART III: SUMMARY OF RATINGS')
+            ->assertSee('A.  Commitment to Organizational Outcomes')
+            ->assertSee('JUAN DELA CRUZ')
+            // …and PART IV (improvement + development plans).
+            ->assertSee('PART IV: IMPROVEMENT AND DEVELOPMENT PLANS')
+            ->assertSee('Weak ICT infrastructure')
+            ->assertSee('Procure tablets and offline content')
+            ->assertSee('Strong classroom management')
+            ->assertSee('Plans are achievable within the rating period.');
+    }
+
+    /**
+     * The reviewer reads the submission through the IDENTICAL partial the
+     * submitter saw on their own screen — the same Excel-window component,
+     * the same sheet partial, the same tab strip. Nothing can be approved in
+     * review that was not visible at submission, and the two views cannot
+     * quietly drift apart again.
+     */
+    public function test_the_review_renders_the_workbook_exactly_as_the_upload_review_did(): void
+    {
+        Storage::fake('local');
+
+        $admin = $this->superadmin();
+        $staff = $this->staffUser();
+        $submission = $this->createSubmission($staff);
+
+        // buildThreePartOpcrf() returns a staged PATH; read the bytes once
+        // and hand the identical workbook to both sides of the comparison.
+        $bytes = file_get_contents($this->buildThreePartOpcrf());
+
+        // The same bytes, archived as a submission…
+        Storage::disk('local')->put(
+            'opcrf-submissions/'.$staff->id.'/same.xlsx',
+            $bytes
+        );
+        $submission->update([
+            'file_path' => 'opcrf-submissions/'.$staff->id.'/same.xlsx',
+            'file_original_name' => 'OPCRF-TEMPLATE.xlsx',
+        ]);
+
+        $reviewHtml = Livewire::actingAs($admin)
+            ->test(OpcrfReview::class)
+            ->call('openReview', $submission->id)
+            ->html();
+
+        // …and picked as an upload by the same staff member.
+        $uploadHtml = Livewire::actingAs($staff)
+            ->test(OpcrfUpload::class)
+            ->call('openUpload')
+            ->set('file', UploadedFile::fake()->createWithContent('OPCRF-TEMPLATE.xlsx', $bytes))
+            ->html();
+
+        // Both render the workbook through the one shared sheet component.
+        foreach ([$reviewHtml, $uploadHtml] as $html) {
+            $this->assertStringContainsString('opcrf-excelwin', $html);
+            $this->assertStringContainsString('opcrf-excelwin-tabs', $html);
+            $this->assertStringContainsString('data-sheet="part1"', $html);
+        }
+
+        // The long-form document renderer — the review modal's own previous
+        // presentation — is gone; the reviewer sees the sheet, not an essay.
+        $this->assertStringNotContainsString('opcrf-doc', $reviewHtml);
+
+        // And the sheet body itself is identical between the two modals:
+        // everything inside the shared component, from the title banner
+        // down to the signer block. wire:key is dropped first — it exists
+        // only to namespace DOM ids per modal instance, and the two are
+        // deliberately suffixed differently.
+        $sheetOf = function (string $html): string {
+            $start = strpos($html, '<div class="opcrf-sheet">');
+            $end = strpos($html, '<div class="opcrf-excelwin-tabs"');
+            $sheet = substr($html, $start, $end - $start);
+
+            return preg_replace('/ wire:key="[^"]*"/', '', $sheet);
+        };
+
+        $this->assertNotSame('', $sheetOf($reviewHtml), 'The review modal renders a sheet body.');
+        $this->assertSame($sheetOf($uploadHtml), $sheetOf($reviewHtml));
+    }
+
+    public function test_the_review_accepts_no_uploads_at_all(): void
+    {
+        // The review is remark-and-route only: the component holds no file
+        // state at all — no corrected-workbook slot, no MOV picker, no
+        // writable sheet state (the read-only sheet is a computed property
+        // derived from the archived file, not client state).
         $reflection = new \ReflectionClass(OpcrfReview::class);
 
-        $this->assertTrue(
+        $this->assertFalse(
             $reflection->hasProperty('reviewFile'),
-            'The approval step accepts the corrected workbook.'
+            'The review requires no workbook upload — the submitted file is the record.'
         );
         $this->assertFalse(
             $reflection->hasProperty('movFiles'),
@@ -202,7 +433,7 @@ class OpcrfReviewTest extends TestCase
         );
         $this->assertFalse(
             $reflection->hasProperty('sheet'),
-            'The review modal shows no in-app sheet rendering.'
+            'The review modal holds no writable sheet state.'
         );
     }
 
@@ -257,12 +488,10 @@ class OpcrfReviewTest extends TestCase
     {
         $admin = $this->superadmin();
         $staff = $this->staffUser();
-        $submission = $this->createSubmission($staff);
-
-        // Submissions predating file archiving have no original document —
-        // the reviewer's download is the staff member's actual workbook,
-        // never a sheet synthesized from the recorded fields, so there is
-        // nothing to serve here (404) and the modal says so instead.
+        $submission = $this->createSubmission($staff);        // Submissions predating file archiving have no original document —
+        // the route 404s (the reviewer's download is the staff member's
+        // actual workbook, never a synthesized one), and the modal falls
+        // back to the recorded summary without any download link.
         $this->assertFalse($submission->hasFile());
 
         $this->actingAs($admin)
@@ -272,8 +501,7 @@ class OpcrfReviewTest extends TestCase
         Livewire::actingAs($admin)
             ->test(OpcrfReview::class)
             ->call('openReview', $submission->id)
-            ->assertSee('No original OPCRF on file for this submission')
-            ->assertSee('Upload the full OPCRF document')
+            ->assertSee('Submitted form')
             ->assertDontSee(route('opcrf.submission.download', $submission), false);
     }
 
@@ -301,7 +529,7 @@ class OpcrfReviewTest extends TestCase
 
         // Even once it is approved, a submission's workbook belongs to its
         // owner: another staff member never gets it.
-        $submission->approve($admin);
+        $submission->markCompliant($admin);
 
         $this->actingAs($other)
             ->get(route('opcrf.submission.download', $submission))
@@ -316,14 +544,15 @@ class OpcrfReviewTest extends TestCase
     {
         Storage::fake('local');
 
-        $user = $this->staffUser();
+        // Registered as the name the filled fixture carries: an upload is
+        // only accepted when the workbook's own name matches the account.
+        $user = $this->staffUser('Jane D. Doe');
         $chief = $this->superadmin();
         $path = $this->buildFilledOpcrf();
 
         Livewire::actingAs($user)
-            ->test(\App\Livewire\OpcrfUpload::class)
+            ->test(OpcrfUpload::class)
             ->set('file', $this->uploadedWorkbook($path))
-            ->set('reviewer_id', (string) $chief->id)
             ->call('confirmSubmit');
 
         $submission = OpcrfSubmission::firstOrFail();
@@ -338,39 +567,13 @@ class OpcrfReviewTest extends TestCase
         $this->assertStringStartsWith('opcrf-submissions/'.$user->id.'/', $submission->file_path);
     }
 
-    public function test_approving_without_the_updated_workbook_is_rejected(): void
+    public function test_compliance_needs_no_upload_and_records_the_history(): void
     {
         Storage::fake('local');
 
         $admin = $this->superadmin();
         $staff = $this->staffUser();
-        $submission = $this->createSubmission($staff);
-
-        // The approval always ships a document: with nothing attached the
-        // action is refused and the review stays open, untouched.
-        Livewire::actingAs($admin)
-            ->test(OpcrfReview::class)
-            ->call('openReview', $submission->id)
-            ->assertSee('Not approved yet')
-            ->call('approveSubmission')
-            ->assertHasErrors(['reviewFile'])
-            ->assertSet('showReview', true)
-            ->assertSet('reviewFile', null);
-
-        $submission->refresh();
-
-        $this->assertFalse($submission->isApproved());
-        $this->assertNull($submission->approved_at);
-        $this->assertNull($submission->approved_by);
-        $this->assertNull($submission->file_path);
-    }
-    public function test_approving_with_a_corrected_workbook_makes_it_the_official_copy(): void
-    {
-        Storage::fake('local');
-
-        $admin = $this->superadmin();
-        $staff = $this->staffUser();
-        $submission = $this->createSubmission($staff);
+        $submission = $this->createSubmission($staff, ['reviewer_id' => $admin->id]);
 
         // The staff member's original upload, archived when they submitted.
         Storage::disk('local')->put('opcrf-submissions/'.$staff->id.'/submitted.xlsx', 'submitted-bytes');
@@ -379,80 +582,183 @@ class OpcrfReviewTest extends TestCase
             'file_original_name' => 'OPCRF-TEMPLATE.xlsx',
         ]);
 
-        $corrected = $this->buildThreePartOpcrf();
-
+        // Nothing is attached — the reviewer adds remarks and marks the
+        // submitted OPCRF compliant as-is. The configured onward hop (SY)
+        // has no account in this test's database, so the mark stands alone.
         Livewire::actingAs($admin)
             ->test(OpcrfReview::class)
             ->call('openReview', $submission->id)
-            ->assertSee('Download')
-            ->set('reviewFile', $this->uploadedWorkbook($corrected, 'OPCRF-APPROVED.xlsx'))
-            ->assertSee('OPCRF-APPROVED.xlsx')
-            ->assertSee('Approve & save the official copy')
+            ->set('reviewRemarks', 'All objectives supported — compliant.')
             ->call('approveSubmission')
-            // The message is JSON-encoded into the sentinel, so assert on a
-            // plain-ASCII slice of it (the em dash arrives escaped).
-            ->assertSee('the updated workbook is now the official copy');
+            ->assertSet('showReview', false);
 
         $submission->refresh();
 
         $this->assertTrue($submission->isApproved());
+        $this->assertSame(OpcrfSubmission::STATUS_FOR_COMPLIANCE, $submission->status);
         $this->assertSame($admin->id, $submission->approved_by);
-        $this->assertSame('OPCRF-APPROVED.xlsx', $submission->file_original_name);
-        $this->assertNotNull($submission->file_updated_at);
-        $this->assertNotSame(
-            'opcrf-submissions/'.$staff->id.'/submitted.xlsx',
-            $submission->file_path,
-            'The corrected workbook replaces the submitted file.'
-        );
+        $this->assertNotNull($submission->approved_at);
 
-        // The corrected bytes are the archived copy, and the superseded
-        // submission is gone from storage.
-        Storage::disk('local')->assertExists($submission->file_path);
-        Storage::disk('local')->assertMissing('opcrf-submissions/'.$staff->id.'/submitted.xlsx');
-        $this->assertSame(
-            file_get_contents($corrected),
-            Storage::disk('local')->get($submission->file_path)
-        );
+        // The submitted file is untouched — byte for byte, same path.
+        $this->assertSame('opcrf-submissions/'.$staff->id.'/submitted.xlsx', $submission->file_path);
+        $this->assertSame('submitted-bytes', Storage::disk('local')->get($submission->file_path));
 
-        // Downloads now serve the approved workbook, named after the file
-        // the superadmin uploaded.
-        $this->actingAs($admin)
-            ->get(route('opcrf.submission.download', $submission))
-            ->assertOk()
-            ->assertDownload('Staff Member - OPCRF.xlsx');
-
-        // Re-opening the review shows the approved state and the new label.
-        Livewire::actingAs($admin)
-            ->test(OpcrfReview::class)
-            ->call('openReview', $submission->id)
-            ->assertSee('Approved by')
-            ->assertSee($admin->username)
-            ->assertSee('Download')
-            // The long label is gone from the button.
-            ->assertDontSee('Download the full submitted OPCRF')
-            ->assertDontSee('Download the official approved copy');
+        // The trail records the reviewer, the action, the remarks, when,
+        // and the routing (nowhere — the chain ends here).
+        $this->assertDatabaseHas('opcrf_reviews', [
+            'opcrf_submission_id' => $submission->id,
+            'reviewer_id' => $admin->id,
+            'action' => 'compliance',
+            'remarks' => 'All objectives supported — compliant.',
+            'from_id' => null,
+            'to_id' => null,
+        ]);
     }
 
-    public function test_a_non_workbook_attachment_is_rejected(): void
+    public function test_compliance_routes_onward_to_the_next_superadmin(): void
     {
-        Storage::fake('local');
-
-        $admin = $this->superadmin();
+        $first = $this->superadmin();
+        $next = $this->otherSuperadmin();
         $staff = $this->staffUser();
-        $submission = $this->createSubmission($staff);
+        $submission = $this->createSubmission($staff, ['reviewer_id' => $first->id]);
 
-        Livewire::actingAs($admin)
+        // The workflow's onward hop is configured by username (SY in
+        // production); the test names the second superadmin the same way.
+        config(['opcrf.next_reviewer' => $next->username]);
+
+        Livewire::actingAs($first)
             ->test(OpcrfReview::class)
             ->call('openReview', $submission->id)
-            ->set('reviewFile', UploadedFile::fake()->create('review-notes.pdf', 4))
-            ->call('approveSubmission')
-            ->assertHasErrors(['reviewFile'])
-            ->assertSet('showReview', true);
+            ->set('reviewRemarks', 'Compliant — on to the next review.')
+            ->call('approveSubmission');
 
         $submission->refresh();
 
+        // Marked compliant, and auto-routed onward: the next superadmin now
+        // holds the review step, the original reviewer keeps the record.
+        $this->assertSame(OpcrfSubmission::STATUS_FORWARDED, $submission->status);
+        $this->assertTrue($submission->isApproved());
+        $this->assertSame($first->id, $submission->reviewer_id);
+        $this->assertSame($next->id, $submission->assigned_to);
+
+        // The trail carries both steps: the compliance decision and the
+        // routing, each with the reviewer and the remarks.
+        $this->assertDatabaseCount('opcrf_reviews', 2);
+        $this->assertDatabaseHas('opcrf_reviews', [
+            'opcrf_submission_id' => $submission->id,
+            'reviewer_id' => $first->id,
+            'action' => 'compliance',
+            'to_id' => $next->id,
+        ]);
+        $this->assertDatabaseHas('opcrf_reviews', [
+            'opcrf_submission_id' => $submission->id,
+            'reviewer_id' => $first->id,
+            'action' => 'forward',
+            'from_id' => $first->id,
+            'to_id' => $next->id,
+        ]);
+
+        // The next superadmin sees it in their list, with the whole trail
+        // in the modal — the timeline names the recipient superadmin.
+        Livewire::actingAs($next)
+            ->test(OpcrfReview::class)
+            ->assertSee('Jane D. Doe')
+            ->call('openReview', $submission->id)
+            ->assertSee('Compliance / Approved')
+            ->assertSee('Compliant — on to the next review.')
+            ->assertSee('Forwarded to: <strong>'.$next->username.'</strong>', false);
+    }
+
+    public function test_the_configured_chain_ends_with_the_final_reviewer(): void
+    {
+        $first = $this->superadmin();
+        $final = $this->otherSuperadmin();
+        $submission = $this->createSubmission(
+            $this->staffUser(),
+            ['reviewer_id' => $final->id]
+        );
+
+        // The final reviewer IS the configured onward hop: marking
+        // compliant ends the chain — it never bounces back to the first.
+        config(['opcrf.next_reviewer' => $final->username]);
+
+        Livewire::actingAs($final)
+            ->test(OpcrfReview::class)
+            ->call('openReview', $submission->id)
+            ->call('approveSubmission');
+
+        $submission->refresh();
+
+        $this->assertSame($final->id, $submission->reviewer_id);
+        $this->assertSame(OpcrfSubmission::STATUS_FOR_COMPLIANCE, $submission->status);
+        $this->assertDatabaseCount('opcrf_reviews', 1);
+    }
+
+    public function test_the_history_table_shows_every_review_action(): void
+    {
+        $first = $this->superadmin();
+        $next = $this->otherSuperadmin();
+        $staff = $this->staffUser();
+        $submission = $this->createSubmission($staff, ['reviewer_id' => $first->id]);
+
+        $submission->forwardTo($first, $next, 'Please double-check the targets.');
+        $submission->returnForRevision($next, 'Add the missing accomplishments.');
+
+        // After the return the submission is back with the staff member;
+        // the original reviewer keeps the record — and its whole trail —
+        // visible.
+        Livewire::actingAs($first)
+            ->test(OpcrfReview::class)
+            ->call('openReview', $submission->id)
+            ->assertSee('Review History')
+            ->assertSee('Forwarded')
+            ->assertSee('Forwarded to: <strong>'.$next->username.'</strong>', false)
+            ->assertSee('Please double-check the targets.')
+            ->assertSee('Returned for Revision')
+            ->assertSee('Add the missing accomplishments.')
+            ->assertSee('Submission received');
+    }
+
+    public function test_returning_for_revision_needs_remarks_and_shows_them_to_the_staff_member(): void
+    {
+        $admin = $this->superadmin();
+        $staff = $this->staffUser();
+        $submission = $this->createSubmission($staff, ['reviewer_id' => $admin->id]);
+
+        // Remarks are what makes a return actionable — refused without.
+        Livewire::actingAs($admin)
+            ->test(OpcrfReview::class)
+            ->call('openReview', $submission->id)
+            ->call('returnSubmission')
+            ->assertHasErrors(['reviewRemarks']);
+
+        $this->assertSame(OpcrfSubmission::STATUS_PENDING, $submission->fresh()->status);
+
+        Livewire::actingAs($admin)
+            ->test(OpcrfReview::class)
+            ->call('openReview', $submission->id)
+            ->set('reviewRemarks', 'Complete the accomplishments column, then resubmit.')
+            ->call('returnSubmission')
+            ->assertSet('showReview', false);
+
+        $submission->refresh();
+
+        $this->assertSame(OpcrfSubmission::STATUS_RETURNED, $submission->status);
         $this->assertFalse($submission->isApproved());
-        $this->assertNull($submission->approved_at);
+        $this->assertDatabaseHas('opcrf_reviews', [
+            'opcrf_submission_id' => $submission->id,
+            'reviewer_id' => $admin->id,
+            'action' => 'return',
+            'remarks' => 'Complete the accomplishments column, then resubmit.',
+        ]);
+
+        // The staff member sees the status and the reviewer's remarks in
+        // their own table.
+        Livewire::actingAs($staff)
+            ->test(OpcrfMovs::class)
+            ->assertSee('Returned for Revision')
+            ->assertSee('Complete the accomplishments column, then resubmit.')
+            ->assertSee($admin->username);
     }
 
     public function test_approving_without_an_open_review_is_rejected(): void
@@ -495,7 +801,7 @@ class OpcrfReviewTest extends TestCase
         $this->assertFalse($submission->fresh()->isApproved());
     }
 
-    public function test_staff_can_fetch_their_own_copy_only_once_it_is_approved(): void
+    public function test_staff_can_always_fetch_their_own_submitted_copy(): void
     {
         Storage::fake('local');
 
@@ -509,13 +815,16 @@ class OpcrfReviewTest extends TestCase
             'file_original_name' => 'OPCR-APPROVED.xlsx',
         ]);
 
-        // Before approval the workbook is the superadmin's to review…
+        // The workbook is the staff member's own submission — they can
+        // fetch it at any time, review pending or not.
         $this->actingAs($staff)
             ->get(route('opcrf.submission.download', $submission))
-            ->assertNotFound();
+            ->assertOk()
+            ->assertDownload('Staff Member - OPCRF.xlsx');
 
-        // …after approval it is the staff member's official copy.
-        $submission->approve($admin);
+        // …and after the compliance mark it stays available, still the
+        // same bytes — reviews never replace the file.
+        $submission->markCompliant($admin);
 
         $this->actingAs($staff)
             ->get(route('opcrf.submission.download', $submission))
@@ -542,21 +851,21 @@ class OpcrfReviewTest extends TestCase
             'file_path' => 'opcrf-submissions/'.$staff->id.'/approved.xlsx',
             'file_original_name' => 'OPCR-APPROVED.xlsx',
         ]);
-        $approved->approve($admin);
+        $approved->markCompliant($admin);
 
         // Superadmin: the review table marks which submissions are done.
         Livewire::actingAs($admin)
             ->test(OpcrfReview::class)
-            ->assertSee('Approved')
-            ->assertSee('Pending review')
+            ->assertSee('For Compliance')
+            ->assertSee('Pending Review')
             ->assertSee('July to December 2026');
 
-        // Staff: their own table shows the approval, and offers the
+        // Staff: their own table shows the compliance mark, and offers the
         // download action for the approved submission only.
         Livewire::actingAs($staff)
-            ->test(\App\Livewire\OpcrfMovs::class)
-            ->assertSee('Approved')
-            ->assertSee('Pending review')
+            ->test(OpcrfMovs::class)
+            ->assertSee('For Compliance')
+            ->assertSee('Pending Review')
             ->assertSee(route('opcrf.submission.download', $approved), false)
             ->assertDontSee(route('opcrf.submission.download', $pending), false);
     }
@@ -702,7 +1011,7 @@ class OpcrfReviewTest extends TestCase
 
         $pendingForMe = $this->createSubmission($staff, ['reviewer_id' => $mine->id]);
         $approvedForMe = $this->createSubmission($staff, ['reviewer_id' => $mine->id]);
-        $approvedForMe->approve($mine);
+        $approvedForMe->markCompliant($mine);
 
         $this->createSubmission($staff, ['reviewer_id' => $theirs->id]);
         $this->createSubmission($staff, ['reviewer_id' => $theirs->id]);
@@ -893,37 +1202,7 @@ class OpcrfReviewTest extends TestCase
         $this->assertDatabaseMissing('opcrf_submissions', ['id' => $submission->id]);
     }
 
-    public function test_the_review_modal_lists_the_other_superadmins_to_forward_to(): void
-    {
-        $mine = $this->superadmin();
-        $other = $this->otherSuperadmin();
-        User::create([
-            'name' => 'Plain Staff',
-            'username' => 'plainstaffer',
-            'email' => 'plainstaffer@example.com',
-            'password' => Hash::make('password123'),
-            'is_superadmin' => false,
-        ]);
-
-        $submission = $this->createSubmission(
-            $this->staffUser(),
-            ['reviewer_id' => $mine->id]
-        );
-
-        Livewire::actingAs($mine)
-            ->test(OpcrfReview::class)
-            ->call('openReview', $submission->id)
-            // The hand-over picker exists…
-            ->assertSee('Forward to another superadmin')
-            ->assertSee('Hand this submission to')
-            // …offers the other superadmin…
-            ->assertSee('otheradmin', false)
-            // …never this account, and never a staff account.
-            ->assertDontSee('adminuser', escape: false)
-            ->assertDontSee('plainstaffer', escape: false);
-    }
-
-    public function test_the_forward_picker_says_so_when_you_are_the_only_superadmin(): void
+    public function test_the_review_modal_has_no_manual_forwarding_step(): void
     {
         $mine = $this->superadmin();
         $submission = $this->createSubmission(
@@ -931,178 +1210,179 @@ class OpcrfReviewTest extends TestCase
             ['reviewer_id' => $mine->id]
         );
 
+        // Routing is automatic: the reviewer never picks a next superadmin.
         Livewire::actingAs($mine)
             ->test(OpcrfReview::class)
             ->call('openReview', $submission->id)
-            ->assertSee('You are the only superadmin right now')
-            ->assertDontSee('Hand it over');
+            ->assertDontSee('Forward to Next Superadmin')
+            ->assertDontSee('Forward this submission to')
+            ->assertDontSee('>Forward</span>', false);
     }
 
-    public function test_forwarding_hands_the_submission_to_the_other_superadmin(): void
+    public function test_compliance_auto_routes_the_same_submission_to_the_next_superadmin(): void
     {
         Storage::fake('local');
 
-        $mine = $this->superadmin();
-        $other = $this->otherSuperadmin();
-        $submission = $this->createSubmission(
-            $this->staffUser(),
-            ['reviewer_id' => $mine->id]
-        );
+        $first = $this->superadmin();
+        $next = $this->otherSuperadmin();
+        $staff = $this->staffUser();
+        $submission = $this->createSubmission($staff, ['reviewer_id' => $first->id]);
 
-        Storage::disk('local')->put('opcrf-submissions/handoff.xlsx', 'handoff-bytes');
+        // The staff member's original upload, archived when they submitted.
+        Storage::disk('local')->put('opcrf-submissions/auto-route.xlsx', 'auto-route-bytes');
         $submission->update([
-            'file_path' => 'opcrf-submissions/handoff.xlsx',
+            'file_path' => 'opcrf-submissions/auto-route.xlsx',
             'file_original_name' => 'OPCRF-TEMPLATE.xlsx',
         ]);
 
-        Livewire::actingAs($mine)
+        // The workflow's onward hop is configured by username (SY in
+        // production); the test names the second superadmin the same way.
+        config(['opcrf.next_reviewer' => $next->username]);
+
+        Livewire::actingAs($first)
             ->test(OpcrfReview::class)
             ->call('openReview', $submission->id)
-            ->set('forward_to', (string) $other->id)
-            ->call('forwardSubmission')
-            ->assertSet('showReview', false)
-            ->assertSet('forward_to', '')
-            // The row is gone from this superadmin's list…
-            ->assertDontSee('Jane D. Doe')
-            ->assertSee('Submission handed to otheradmin for review.')
+            ->set('reviewRemarks', 'Compliant — on to the next review.')
+            ->call('approveSubmission')
             ->assertDispatched('opcrf-submission-forwarded');
 
         $submission->refresh();
 
-        $this->assertSame($other->id, $submission->reviewer_id);
+        // ONE submission row, still owned by the same staff member and the
+        // same workbook — only the assignment and the status moved.
+        $this->assertSame(1, OpcrfSubmission::count());
+        $this->assertSame($staff->id, $submission->user_id);
+        $this->assertSame($first->id, $submission->reviewer_id);
+        $this->assertSame($next->id, $submission->assigned_to);
+        $this->assertSame(OpcrfSubmission::STATUS_FORWARDED, $submission->status);
+        $this->assertTrue($submission->isApproved());
+        $this->assertSame($first->id, $submission->approved_by);
 
-        // …they see it and can fetch the workbook; this account can no longer.
-        Livewire::actingAs($other)
+        // The trail carries both steps: the compliance decision and the
+        // auto-routing, each with the reviewer and the remarks.
+        $this->assertDatabaseCount('opcrf_reviews', 2);
+        $this->assertDatabaseHas('opcrf_reviews', [
+            'opcrf_submission_id' => $submission->id,
+            'reviewer_id' => $first->id,
+            'action' => 'compliance',
+            'remarks' => 'Compliant — on to the next review.',
+            'to_id' => $next->id,
+        ]);
+        $this->assertDatabaseHas('opcrf_reviews', [
+            'opcrf_submission_id' => $submission->id,
+            'reviewer_id' => $first->id,
+            'action' => 'forward',
+            'from_id' => $first->id,
+            'to_id' => $next->id,
+        ]);
+
+        // The original reviewer keeps the record in their list — status
+        // "Forwarded to Superadmin …" — and keeps read access to the file.
+        Livewire::actingAs($first)
             ->test(OpcrfReview::class)
-            ->assertSee('Jane D. Doe');
+            ->assertSee('Jane D. Doe')
+            ->assertSee('Forwarded to Superadmin '.$next->username);
 
-        $this->actingAs($other)
+        $this->actingAs($first)
             ->get(route('opcrf.submission.download', $submission))
             ->assertOk();
 
-        $this->actingAs($mine)
-            ->get(route('opcrf.submission.download', $submission))
-            ->assertNotFound();
+        // The next superadmin finds the SAME submission in their queue —
+        // shown to them as "Pending Review".
+        Livewire::actingAs($next)
+            ->test(OpcrfReview::class)
+            ->assertSee('Jane D. Doe')
+            ->assertSee('Pending Review')
+            ->call('openReview', $submission->id)
+            ->assertSee('Compliance / Approved')
+            ->assertSee('Compliant — on to the next review.')
+            ->assertSee('Forwarded to: <strong>'.$next->username.'</strong>', false);
     }
 
-    public function test_the_new_recipient_can_update_and_approve_after_the_hand_over(): void
+    public function test_the_original_reviewer_cannot_act_once_the_submission_routed_onward(): void
     {
-        Storage::fake('local');
+        $first = $this->superadmin();
+        $next = $this->otherSuperadmin();
+        $submission = $this->createSubmission(
+            $this->staffUser(),
+            ['reviewer_id' => $first->id]
+        );
 
-        $mine = $this->superadmin();
-        $other = $this->otherSuperadmin();
+        config(['opcrf.next_reviewer' => $next->username]);
+
+        $submission->markCompliant($first, 'First-pass remarks.', $next);
+
+        // The original reviewer can still OPEN the record — read-only, with
+        // the routing note naming the superadmin it now sits with.
+        Livewire::actingAs($first)
+            ->test(OpcrfReview::class)
+            ->call('openReview', $submission->id)
+            ->assertSee('routed onward to')
+            ->assertSee($next->username)
+            ->assertDontSee('>Approve / Compliance</span>', false);
+
+        // …and neither review action goes through any more: the harness
+        // surfaces the abort as a failed response, so the decisive checks
+        // are the unchanged state and trail.
+        Livewire::actingAs($first)
+            ->test(OpcrfReview::class)
+            ->call('openReview', $submission->id)
+            ->set('reviewRemarks', 'Trying to act after the fact.')
+            ->call('approveSubmission');
+
+        Livewire::actingAs($first)
+            ->test(OpcrfReview::class)
+            ->call('openReview', $submission->id)
+            ->set('reviewRemarks', 'Trying to return it instead.')
+            ->call('returnSubmission');
+
+        $submission->refresh();
+
+        $this->assertSame($next->id, $submission->assigned_to);
+        $this->assertSame(OpcrfSubmission::STATUS_FORWARDED, $submission->status);
+        $this->assertDatabaseCount('opcrf_reviews', 2);
+    }
+
+    public function test_the_next_superadmin_completes_the_chain_after_the_auto_route(): void
+    {
+        $first = $this->superadmin();
+        $next = $this->otherSuperadmin();
         $staff = $this->staffUser();
-        $submission = $this->createSubmission($staff, ['reviewer_id' => $mine->id]);
+        $submission = $this->createSubmission($staff, ['reviewer_id' => $first->id]);
 
-        Storage::disk('local')->put('opcrf-submissions/before-handoff.xlsx', 'before-bytes');
-        $submission->update([
-            'file_path' => 'opcrf-submissions/before-handoff.xlsx',
-            'file_original_name' => 'OPCRF-TEMPLATE.xlsx',
-        ]);
+        // The chain ends with the onward hop: SY reviewing the submission
+        // SY already holds.
+        config(['opcrf.next_reviewer' => $next->username]);
+        $submission->markCompliant($first, 'First-pass remarks.', $next);
 
-        // Hand it over.
-        Livewire::actingAs($mine)
+        Livewire::actingAs($next)
             ->test(OpcrfReview::class)
             ->call('openReview', $submission->id)
-            ->set('forward_to', (string) $other->id)
-            ->call('forwardSubmission');
-
-        // The new recipient reviews, updates it with their own corrected
-        // workbook, and approves.
-        $corrected = $this->buildThreePartOpcrf();
-
-        Livewire::actingAs($other)
-            ->test(OpcrfReview::class)
-            ->call('openReview', $submission->id)
-            ->set('reviewFile', $this->uploadedWorkbook($corrected, 'OPCRF-B-APPROVED.xlsx'))
+            ->set('reviewRemarks', 'Final review — approved.')
             ->call('approveSubmission');
 
         $submission->refresh();
 
-        $this->assertTrue($submission->isApproved());
-        $this->assertSame($other->id, $submission->approved_by);
-        $this->assertSame('OPCRF-B-APPROVED.xlsx', $submission->file_original_name);
-        Storage::disk('local')->assertMissing('opcrf-submissions/before-handoff.xlsx');
+        // Same row; the chain ended with the final reviewer — no bounce.
+        $this->assertSame($first->id, $submission->reviewer_id);
+        $this->assertSame($next->id, $submission->assigned_to);
+        $this->assertSame(OpcrfSubmission::STATUS_FOR_COMPLIANCE, $submission->status);
+        $this->assertSame($next->id, $submission->approved_by);
 
-        // The staff member now gets the copy B approved.
-        $this->actingAs($staff)
-            ->get(route('opcrf.submission.download', $submission))
-            ->assertOk()
-            ->assertDownload('Staff Member - OPCRF.xlsx');
-    }
-
-    public function test_forwarding_an_approved_submission_reopens_it(): void
-    {
-        $mine = $this->superadmin();
-        $other = $this->otherSuperadmin();
-        $submission = $this->createSubmission(
-            $this->staffUser(),
-            ['reviewer_id' => $mine->id]
+        // The whole journey in one trail — compliance → auto-forward →
+        // final compliance — with the remarks intact.
+        $this->assertDatabaseCount('opcrf_reviews', 3);
+        $this->assertSame(
+            ['compliance', 'forward', 'compliance'],
+            $submission->reviews()->pluck('action')->all()
         );
-        $submission->approve($mine);
-
-        Livewire::actingAs($mine)
-            ->test(OpcrfReview::class)
-            ->call('openReview', $submission->id)
-            // The modal warns before it happens…
-            ->assertSee('forwarding reopens it for')
-            ->set('forward_to', (string) $other->id)
-            ->call('forwardSubmission')
-            ->assertSee('the earlier approval was cleared');
-
-        $submission->refresh();
-
-        $this->assertSame($other->id, $submission->reviewer_id);
-        $this->assertFalse($submission->isApproved());
-        $this->assertNull($submission->approved_by);
-    }
-
-    public function test_forwarding_needs_a_valid_recipient(): void
-    {
-        $mine = $this->superadmin();
-        $plain = User::create([
-            'name' => 'Plain Staff',
-            'username' => 'plainstaffer',
-            'email' => 'plainstaffer@example.com',
-            'password' => Hash::make('password123'),
-            'is_superadmin' => false,
-        ]);
-        $submission = $this->createSubmission(
-            $this->staffUser(),
-            ['reviewer_id' => $mine->id]
+        $this->assertSame(
+            ['First-pass remarks.', 'First-pass remarks.', 'Final review — approved.'],
+            $submission->reviews()->pluck('remarks')->all()
         );
-
-        // No choice made.
-        Livewire::actingAs($mine)
-            ->test(OpcrfReview::class)
-            ->call('openReview', $submission->id)
-            ->set('forward_to', '')
-            ->call('forwardSubmission')
-            ->assertHasErrors(['forward_to']);
-
-        // A crafted staff account id is rejected.
-        Livewire::actingAs($mine)
-            ->test(OpcrfReview::class)
-            ->call('openReview', $submission->id)
-            ->set('forward_to', (string) $plain->id)
-            ->call('forwardSubmission')
-            ->assertHasErrors(['forward_to']);
-
-        // Handing it to yourself is refused.
-        Livewire::actingAs($mine)
-            ->test(OpcrfReview::class)
-            ->call('openReview', $submission->id)
-            ->set('forward_to', (string) $mine->id)
-            ->call('forwardSubmission')
-            ->assertHasErrors(['forward_to']);
-
-        $submission->refresh();
-
-        $this->assertSame($mine->id, $submission->reviewer_id);
-        $this->assertSame(1, OpcrfSubmission::count());
     }
 
-    public function test_a_superadmin_cannot_forward_a_submission_routed_elsewhere(): void
+    public function test_a_superadmin_cannot_act_on_a_submission_routed_elsewhere(): void
     {
         $owner = $this->superadmin();
         $other = $this->otherSuperadmin();
@@ -1111,24 +1391,25 @@ class OpcrfReviewTest extends TestCase
             ['reviewer_id' => $owner->id]
         );
 
-        // A crafted call pointing the modal at someone else's row does
-        // nothing: the row is outside this superadmin's scope.
+        // A crafted call pointing the modal at someone else's row: the row
+        // is outside this superadmin's scope, so the action aborts (the
+        // harness surfaces it as a failed response) and nothing changes.
         Livewire::actingAs($other)
             ->test(OpcrfReview::class)
             ->set('reviewId', $submission->id)
             ->set('showReview', true)
-            ->set('forward_to', (string) $owner->id)
-            ->call('forwardSubmission');
+            ->call('approveSubmission');
 
         $submission->refresh();
 
-        $this->assertSame($owner->id, $submission->reviewer_id);
+        $this->assertSame(OpcrfSubmission::STATUS_PENDING, $submission->status);
+        $this->assertNull($submission->approved_at);
+        $this->assertDatabaseCount('opcrf_reviews', 0);
     }
 
-    public function test_a_regular_user_cannot_forward_a_submission(): void
+    public function test_a_regular_user_cannot_trigger_review_actions(): void
     {
         $staff = $this->staffUser();
-        $other = $this->superadmin();
         $submission = $this->createSubmission($staff, ['reviewer_id' => null]);
 
         $thrown = null;
@@ -1137,8 +1418,7 @@ class OpcrfReviewTest extends TestCase
             Livewire::actingAs($staff)
                 ->test(OpcrfReview::class)
                 ->set('reviewId', $submission->id)
-                ->set('forward_to', (string) $other->id)
-                ->call('forwardSubmission');
+                ->call('approveSubmission');
         } catch (\Throwable $e) {
             $thrown = $e;
         }
@@ -1219,9 +1499,7 @@ class OpcrfReviewTest extends TestCase
             ->call('openReview', $submission->id)
             // Real name first, username in brackets for the account.
             ->assertSee('Staff Member')
-            ->assertSee('(staff)')
-            ->assertSee('The file saves under this')
-            // The name typed into the workbook is still shown in its own row.
+            ->assertSee('(staff)')            // The name typed into the workbook is still shown in its own row.
             ->assertSee('Jane D. Doe');
     }
 

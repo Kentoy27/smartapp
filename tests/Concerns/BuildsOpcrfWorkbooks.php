@@ -18,42 +18,89 @@ trait BuildsOpcrfWorkbooks
      */
     private function buildOpcrfWorkbook(array $cells): string
     {
-        $byRow = [];
+        return $this->buildOpcrfWorkbookWithSheets(['OPCRF' => $cells]);
+    }
 
-        foreach ($cells as $ref => $value) {
-            preg_match('/^([A-Z]+)(\d+)$/', $ref, $m);
-            $byRow[(int) $m[2]][$m[1]] = $value;
-        }
+    /**
+     * A multi-tab workbook: each entry is a tab name → cell map, built
+     * into one package in the order given (rel-based manifest, so the
+     * analyzer must resolve tabs the way it does for real files).
+     *
+     * Optional per-sheet options (keyed by tab name):
+     *   - 'hidden_rows'    => int[]  rows emitted with hidden="1"
+     *   - 'hidden_columns' => int[]  1-based column indexes hidden via <cols>
+     *
+     * @param  array<string, array<string, string|int>>  $sheets
+     * @param  array<string, array{hidden_rows?: array<int, int>, hidden_columns?: array<int, int>}>  $sheetOptions
+     * @return string path to the built workbook
+     */
+    private function buildOpcrfWorkbookWithSheets(array $sheets, array $sheetOptions = []): string
+    {
+        $names = array_keys($sheets);
+        $sheetOverrides = '';
+        $relsEntries = '';
+        $contentOverrides = '';
+        $path = tempnam(sys_get_temp_dir(), 'opcrf-test-').'.xlsx';
+        $zip = new ZipArchive;
+        $zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE);
 
-        $rowsXml = '';
+        foreach ($names as $index => $name) {
+            $number = $index + 1;
+            $cells = $sheets[$name];
+            $byRow = [];
 
-        foreach ($byRow as $rowNumber => $rowCells) {
-            $cellsXml = '';
-
-            foreach ($rowCells as $column => $value) {
-                if (is_int($value)) {
-                    $cellsXml .= '<c r="'.$column.$rowNumber.'"><v>'.$value.'</v></c>';
-                } else {
-                    $escaped = htmlspecialchars($value, ENT_XML1);
-                    $cellsXml .= '<c r="'.$column.$rowNumber.'" t="inlineStr"><is><t xml:space="preserve">'.$escaped.'</t></is></c>';
-                }
+            foreach ($cells as $ref => $value) {
+                preg_match('/^([A-Z]+)(\d+)$/', $ref, $m);
+                $byRow[(int) $m[2]][$m[1]] = $value;
             }
 
-            $rowsXml .= '<row r="'.$rowNumber.'">'.$cellsXml.'</row>';
-        }
+            $rowsXml = '';
+            $hiddenRows = $sheetOptions[$name]['hidden_rows'] ?? [];
 
-        $sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            .'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-            .'<sheetData>'.$rowsXml.'</sheetData></worksheet>';
+            foreach ($byRow as $rowNumber => $rowCells) {
+                $cellsXml = '';
+
+                foreach ($rowCells as $column => $value) {
+                    if (is_int($value)) {
+                        $cellsXml .= '<c r="'.$column.$rowNumber.'"><v>'.$value.'</v></c>';
+                    } else {
+                        $escaped = htmlspecialchars($value, ENT_XML1);
+                        $cellsXml .= '<c r="'.$column.$rowNumber.'" t="inlineStr"><is><t xml:space="preserve">'.$escaped.'</t></is></c>';
+                    }
+                }
+
+                $rowsXml .= '<row r="'.$rowNumber.'"'
+                    .(in_array($rowNumber, $hiddenRows, true) ? ' hidden="1"' : '')
+                    .'>'.$cellsXml.'</row>';
+            }
+
+            $colsXml = '';
+
+            foreach ($sheetOptions[$name]['hidden_columns'] ?? [] as $columnIndex) {
+                $colsXml .= '<col min="'.$columnIndex.'" max="'.$columnIndex.'" width="9" hidden="1"/>';
+            }
+
+            $sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                .'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                .($colsXml !== '' ? '<cols>'.$colsXml.'</cols>' : '')
+                .'<sheetData>'.$rowsXml.'</sheetData></worksheet>';
+
+            $escapedName = htmlspecialchars($name, ENT_XML1);
+            $sheetOverrides .= '<sheet name="'.$escapedName.'" sheetId="'.$number.'" r:id="rId'.$number.'"/>';
+            $relsEntries .= '<Relationship Id="rId'.$number.'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet'.$number.'.xml"/>';
+            $contentOverrides .= '<Override PartName="/xl/worksheets/sheet'.$number.'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
+
+            $zip->addFromString('xl/worksheets/sheet'.$number.'.xml', $sheetXml);
+        }
 
         $workbookXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             .'<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
             .'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-            .'<sheets><sheet name="OPCRF" sheetId="1" r:id="rId1"/></sheets></workbook>';
+            .'<sheets>'.$sheetOverrides.'</sheets></workbook>';
 
         $relsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             .'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            .'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+            .$relsEntries
             .'</Relationships>';
 
         $contentTypesXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -61,16 +108,12 @@ trait BuildsOpcrfWorkbooks
             .'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
             .'<Default Extension="xml" ContentType="application/xml"/>'
             .'<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-            .'<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+            .$contentOverrides
             .'</Types>';
 
-        $path = tempnam(sys_get_temp_dir(), 'opcrf-test-').'.xlsx';
-        $zip = new ZipArchive();
-        $zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE);
         $zip->addFromString('[Content_Types].xml', $contentTypesXml);
         $zip->addFromString('_rels/.rels', $relsXml);
         $zip->addFromString('xl/workbook.xml', $workbookXml);
-        $zip->addFromString('xl/worksheets/sheet1.xml', $sheetXml);
         $zip->close();
 
         return $path;
@@ -141,17 +184,51 @@ trait BuildsOpcrfWorkbooks
     private function buildThreePartOpcrf(array $overrides = []): string
     {
         $cells = [
+            // ----- HEADER BLOCK (rows 2-7, as in the real template) -----
+            // Present because every personalized OPCRF carries it: the
+            // uploaded workbook's Name of Employee cell is what the upload
+            // gate reads, so a fixture without one is rejected outright.
+            'B2' => 'OFFICE PERFORMANCE COMMITMENT AND REVIEW FORM (OPCRF)',
+            'B4' => 'Name of Employee:',
+            'F4' => 'Jane D. Doe',
+            'B5' => 'Position/Designation:',
+            'F5' => 'Teacher I',
+            'B6' => 'Review Period:',
+            'F6' => 'January to December 2026',
+            'B7' => 'Strand/Bureau/Center/Service/Region/Division:',
+            'F7' => 'Schools Division Office',
             // ----- PART I-A (banner row 10, entries, total row 76) -----
             'B10' => "PART I-A: COMMITMENT TO ORGANIZATIONAL OUTCOMES (60%)\nPart I-A. Commitment to Organizational Outcomes shall capture office commitments.",
+            // Full planning band of the first objective (as in the real
+            // template): KRA, attribution column, weight, target, scale,
+            // MOVs and per-block average.
+            'B16' => 'Education Human Resource Development Program',
+            'D16' => 'BEDP Pillar 1: Access',
             'F16' => 'Objective 1: Improved learner outcomes',
             'H16' => 'January to December 2026',
+            'I16' => 0.35,
+            'J16' => 2,
+            'K16' => 'AIP activities aligned with the approved WFP',
+            'M16' => 'Met all 5 indicators based on the established standards',
+            'Q16' => 'Only 1 out of 5 indicators is met',
+            'R16' => 'Approved WFP and Annual Implementation Plan',
             'L16' => 'Quality',
             'S16' => 'Raised MPS by 5 points',
             'T16' => 5,
+            'U16' => 4.67,
             'L17' => 'Efficiency',
             'T17' => 4,
             'L18' => 'Timeliness',
             'T18' => 5,
+            // A second objective in the SAME part, with its own KRA —
+            // the block must split there, not swallow it.
+            'B19' => 'School Leadership and Administration',
+            'F19' => 'Objective 2: Implemented the School Improvement Plan',
+            'H19' => 'June 2025 to March 2026',
+            'I19' => 0.05,
+            'L19' => 'Quality',
+            'S19' => 'SIP implemented across all grade levels',
+            'T19' => 4,
             'B76' => 'Part I-A Total Score',
             'V76' => 2, // numeric total, as Excel caches it
 
@@ -191,6 +268,195 @@ trait BuildsOpcrfWorkbooks
     }
 
     /**
+     * The complete four-tab workbook: PART I (the three-part objectives
+     * sheet) plus the PART II competency tab, the PART III rating summary
+     * and the PART IV improvement plans — with ratings filled in, so the
+     * per-tab parsers can be asserted end to end.
+     *
+     * @return string path to the built workbook
+     */
+    private function buildFullOpcrfWorkbook(): string
+    {
+        return $this->buildOpcrfWorkbookWithSheets([
+            'PART I (CY 2025 & SY2025-2026)' => $this->threePartCells(),
+            'PART II' => [
+                'B3' => "PART II-A:  LEADERSHIP COMPETENCIES (2.5%)\nPart II-A. Leadership Competencies shall capture leadership.",
+                'B4' => 'Competencies',
+                'C4' => 'Behavioural Indicators',
+                'B6' => 'Leading People',
+                'C6' => '1. Uses basic persuasion techniques in a discussion.',
+                'I6' => 4,
+                'G6' => 'Persuaded the division during the budget hearing.',
+                'C7' => '2. Persuades, convinces or influences others.',
+                'I7' => 5,
+                'G7' => '',
+                // The tab's own rating legend, printed beside the table.
+                'L4' => 'DepEd Competencies Scale',
+                'L5' => 'Numerical Rating',
+                'M5' => 'Adjectival Rating',
+                'N5' => 'Definition',
+                'L6' => 5,
+                'M6' => 'Role Model',
+                'N6' => 'Behavioral indicator is consistently exhibited and is worthy of emulation.',
+                'L7' => 4,
+                'M7' => 'Consistently Demonstrated',
+                'N7' => 'Behavioral indicator is constantly shown.',
+                'L8' => 1,
+                'M8' => 'Rarely Demonstrated',
+                'N8' => 'Behavioral indicator is seldom shown.',
+                'B11' => 'People Performance Management',
+                'C11' => '1. Makes specific changes in the performance management system.',
+                'B16' => 'People Development',
+                'C16' => '1. Improves the skills and effectiveness of individuals.',
+                'B21' => 'Part II-A Total Score: Weighted Average (Average x 0.025)',
+                'J21' => 4.5,
+                'B22' => "PART II-B:  CORE BEHAVIOURAL COMPETENCIES (2.5%)\nPart II-B. Core Behavioral Competencies shall capture behavior.",
+                'B25' => 'Self-Management',
+                'C25' => '1. Sets personal goals and direction, needs and development.',
+                'B55' => 'Part II-B Total Score: Weighted Average (Average x 0.025)',
+                'J55' => 4.0,
+                'C68' => 'RATEE',
+                'G66' => 'EVA M. DOLLOSA RN',
+                'G68' => 'RATER',
+            ],
+            'PART III' => [
+                'C2' => 'PART III: SUMMARY OF RATINGS',
+                'C5' => 'Final Performance Components',
+                'E5' => 'Weight Allocation',
+                'F5' => 'Obtained Score',
+                'C7' => 'PART I',
+                'D7' => 'A.  Commitment to Organizational Outcomes',
+                'E7' => 0.6,
+                'F7' => 4.2,
+                'D8' => 'B.  Innovating and Intervening Accomplishments',
+                'E8' => 0.2,
+                'F8' => 3.8,
+                'D9' => 'C. Organizational Effectiveness',
+                'E9' => 0.15,
+                'F9' => 4.5,
+                'C10' => 'PART II',
+                'D10' => 'A.  Leadership Competencies',
+                'E10' => '2.5% (0.125)',
+                'F10' => 4.1,
+                'D11' => 'B.  Core Behavioural Competencies',
+                'E11' => '2.5% (0.125)',
+                'F11' => 4.0,
+                'C17' => 'Name of Employee: JUAN DELA CRUZ',
+                'F17' => 'Name of Superior: EVA M. DOLLOSA RN',
+                // The agreement block's signature and date lines.
+                'C19' => 'Signature:',
+                'C21' => 'Date: 2026-03-31',
+                'F19' => 'Signature: EVA M. DOLLOSA RN',
+                'F21' => 'Date:',
+                // The overall score and the RPMS rating beside it, plus the
+                // rating table that explains both.
+                'G7' => 4.25,
+                'H7' => 'Very Satisfactory',
+                'M6' => 'Range',
+                'N6' => 'Numerical Rating',
+                'O6' => 'Adjectival Rating',
+                'M7' => '4.500-5.000',
+                'N7' => 5,
+                'O7' => 'Outstanding',
+                'M8' => '3.500-4.499',
+                'N8' => 4,
+                'O8' => 'Very Satisfactory',
+            ],
+            'PART IV' => [
+                'C4' => 'PART IV: IMPROVEMENT AND DEVELOPMENT PLANS',
+                'C6' => 'Part IV-A: Office Improvement Plan',
+                'E7' => 'Action Plan',
+                'C8' => "Gap Analysis  \n(SWOT)",
+                'D8' => 'Improvement Area',
+                'E8' => 'General Objective',
+                'G8' => 'Recommended Improvement Intervention',
+                'I8' => 'Timeline',
+                'J8' => 'Resources Needed',
+                'C10' => 'Weak ICT infrastructure',
+                'D10' => 'Learning resources',
+                'E10' => 'Digitize learning materials',
+                'G10' => 'Procure tablets and offline content',
+                'I10' => 'June 2026',
+                'J10' => 'MOOE funds',
+                'C13' => 'Feedback:',
+                'C14' => 'Plans are achievable within the rating period.',
+                'C15' => 'Part IV-B: Individual Development Plan',
+                'E16' => 'Action Plan',
+                'C17' => 'Strengths',
+                'D17' => 'Improvement Needs',
+                'E17' => 'Learning Objective',
+                'G17' => 'Recommended Developmental Intervention',
+                'I17' => 'Timeline',
+                'J17' => 'Resources Needed',
+                'C19' => 'Strong classroom management',
+                'D19' => 'Research writing',
+                'E19' => 'Complete one action research',
+                'G19' => 'Attend writeshop',
+                'I19' => 'March 2027',
+                'J19' => 'Division training fund',
+                'F25' => 'EVA M. DOLLOSA RN',
+                'C26' => 'RATEE',
+                'F26' => 'RATER',
+            ],
+        ]);
+    }
+
+    /**
+     * The PART I cells of buildThreePartOpcrf, as an array (the
+     * multi-tab fixture reuses them for its first tab).
+     *
+     * @return array<string, string|int>
+     */
+    private function threePartCells(): array
+    {
+        return [
+            // ----- HEADER BLOCK -----
+            // The personalized template's identity cells. The upload gate
+            // reads F4 to confirm the form belongs to the signed-in
+            // account, so every multi-tab fixture needs it.
+            'B2' => 'OFFICE PERFORMANCE COMMITMENT AND REVIEW FORM (OPCRF)',
+            'B4' => 'Name of Employee:',
+            'F4' => 'Jane D. Doe',
+            'B5' => 'Position/Designation:',
+            'F5' => 'Teacher I',
+            // ----- PART I-A -----
+            'B10' => "PART I-A: COMMITMENT TO ORGANIZATIONAL OUTCOMES (60%)\nPart I-A. Commitment to Organizational Outcomes shall capture office commitments.",
+            'F16' => 'Objective 1: Improved learner outcomes',
+            'H16' => 'January to December 2026',
+            'L16' => 'Quality',
+            'S16' => 'Raised MPS by 5 points',
+            'T16' => 5,
+            'L17' => 'Efficiency',
+            'T17' => 4,
+            'L18' => 'Timeliness',
+            'T18' => 5,
+            'B76' => 'Part I-A Total Score',
+            'V76' => 2,
+            'B79' => "PART I-B: INNOVATING AND INTERVENING ACCOMPLISHMENTS (20%)\nPart I-B. Innovating and Intervening Accomplishments shall capture innovation.",
+            'F83' => 'Objective: Conducted innovations and interventions',
+            'H83' => 'June 2025 to March 2026',
+            'L83' => 'Quality',
+            'S83' => 'Innovation documents approved',
+            'T83' => 4,
+            'B112' => 'Part I-B Total Score',
+            'V112' => 1,
+            'B114' => "PART I-C: ORGANIZATIONAL EFFECTIVENESS (15%)\nPart I-C. Organizational Effectiveness shall capture accomplishments.",
+            'F119' => 'Objective: Utilized budget allocation',
+            'J119' => 'Within the rating period',
+            'L119' => 'Quality',
+            'S119' => 'Liquidation reports submitted',
+            'T119' => 5,
+            'B146' => 'Part I-C Total Score',
+            'V146' => 1,
+            'D153' => 'RATEE',
+            'I151' => 'EVA M. DOLLOSA RN',
+            'N151' => 'FERDINAND S. SY PhD, CESO VI',
+            'I153' => 'RATER',
+            'N153' => 'APPROVING AUTHORITY',
+        ];
+    }
+
+    /**
      * A workbook shaped like the official OPCRF-TEMPLATE.xlsx package: one
      * part per tab — "PART I (CY 2025 & SY2025-2026)", "PART II", "PART III",
      * "PART IV" — with the workbook-level relationships, the Part I print
@@ -219,6 +485,9 @@ trait BuildsOpcrfWorkbooks
         $defaults = [
             'B2' => 'OFFICE PERFORMANCE COMMITMENT AND REVIEW FORM (OPCRF)',
             'B4' => 'Name of Employee:',
+            // The personalized header: the upload gate reads this cell to
+            // confirm the form belongs to the signed-in account.
+            'F4' => 'Jane D. Doe',
         ];
 
         $bySheets = [];
@@ -315,7 +584,7 @@ trait BuildsOpcrfWorkbooks
             .'</Properties>';
 
         $path = tempnam(sys_get_temp_dir(), 'opcrf-multi-').'.xlsx';
-        $zip = new ZipArchive();
+        $zip = new ZipArchive;
         $zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE);
         $zip->addFromString('[Content_Types].xml', $contentTypesXml);
         $zip->addFromString('_rels/.rels',
@@ -374,7 +643,7 @@ trait BuildsOpcrfWorkbooks
             file_put_contents($path, $bytesOrPath);
         }
 
-        $zip = new ZipArchive();
+        $zip = new ZipArchive;
         $zip->open($path);
 
         $workbook = $zip->getFromName('xl/workbook.xml');

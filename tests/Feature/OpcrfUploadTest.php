@@ -15,8 +15,8 @@ use Tests\TestCase;
 
 class OpcrfUploadTest extends TestCase
 {
-    use RefreshDatabase;
     use BuildsOpcrfWorkbooks;
+    use RefreshDatabase;
 
     /**
      * The superadmin submissions are routed to by default (the picker
@@ -45,10 +45,19 @@ class OpcrfUploadTest extends TestCase
         ]);
     }
 
+    /**
+     * The staff member who files the OPCR.
+     *
+     * The registered name is "Jane D. Doe" — deliberately the same name the
+     * generated fixtures write into the form's Name of Employee cell. Every
+     * upload in this class is now gated on that name matching the account,
+     * so a fixture naming somebody else would be rejected before the review
+     * modal ever opened; the mismatch cases have their own tests below.
+     */
     private function staffUser(): User
     {
         return User::create([
-            'name' => 'Staff Member',
+            'name' => 'Jane D. Doe',
             'username' => 'staff',
             'email' => 'staff@example.com',
             'password' => Hash::make('password123'),
@@ -112,7 +121,7 @@ class OpcrfUploadTest extends TestCase
         $submission = OpcrfSubmission::firstOrFail();
 
         $this->assertSame($user->id, $submission->user_id);
-        // Routed to the superadmin the picker had selected.
+        // Routed automatically to the configured superadmin.
         $this->assertSame($this->reviewer->id, $submission->reviewer_id);
         $this->assertSame('Jane D. Doe', $submission->employee_name);
         $this->assertSame('Teacher I', $submission->position);
@@ -121,10 +130,12 @@ class OpcrfUploadTest extends TestCase
         $this->assertNotNull($submission->submitted_at);
     }
 
-    public function test_the_review_modal_offers_the_superadmins_to_send_to(): void
+    public function test_submissions_route_to_the_configured_superadmin_automatically(): void
     {
         $user = $this->staffUser();
-        $second = User::create([
+        // A second superadmin exists but is NOT the configured recipient:
+        // routing is the system's decision, never the staff member's.
+        User::create([
             'name' => 'Second Chief',
             'username' => 'chief2',
             'email' => 'chief2@example.com',
@@ -139,76 +150,56 @@ class OpcrfUploadTest extends TestCase
             'is_superadmin' => false,
         ]);
 
+        // The review modal never asks who to send it to.
         Livewire::actingAs($user)
             ->test(OpcrfUpload::class)
             ->set('file', $this->uploadedWorkbook($this->buildFilledOpcrf()))
-            // The picker names every superadmin account…
-            ->assertSee('Send this OPCR to (superadmin)')
-            ->assertSee('chief2', false)
-            ->assertSee('Second Chief', false)
-            // …and never a regular account.
-            ->assertDontSee('plainstaffer', escape: false);
+            ->assertSee('Review before submitting')
+            ->assertDontSee('Send this OPCR to (superadmin)')
+            ->assertDontSee('plainstaffer', escape: false)
+            ->call('confirmSubmit');
+
+        // …and every submission lands with the configured reviewer.
+        $this->assertSame($this->reviewer->id, OpcrfSubmission::firstOrFail()->reviewer_id);
     }
 
-    public function test_the_picker_preselects_the_first_superadmin_and_honours_a_change(): void
+    public function test_the_configured_recipient_is_matched_by_username_from_config(): void
     {
         $user = $this->staffUser();
-        $second = User::create([
-            'name' => 'Second Chief',
-            'username' => 'chief2',
-            'email' => 'chief2@example.com',
+        $eve = User::create([
+            'name' => 'Eve',
+            'username' => 'Eve',
+            'email' => 'eve@example.com',
             'password' => Hash::make('password123'),
             'is_superadmin' => true,
         ]);
 
-        // Ordered by username: 'chief' comes before 'chief2'.
-        $this->assertTrue('chief' < 'chief2');
+        // 'Eve' sorts before 'chief'? No — case-insensitive natural order
+        // puts chief first; the config name must win regardless.
+        config(['opcrf.review_route' => 'Eve']);
 
         Livewire::actingAs($user)
             ->test(OpcrfUpload::class)
-            ->call('openUpload')
-            ->assertSet('reviewer_id', (string) $this->reviewer->id)
             ->set('file', $this->uploadedWorkbook($this->buildFilledOpcrf()))
-            ->set('reviewer_id', (string) $second->id)
             ->call('confirmSubmit');
 
-        $this->assertSame($second->id, OpcrfSubmission::firstOrFail()->reviewer_id);
+        $this->assertSame($eve->id, OpcrfSubmission::firstOrFail()->reviewer_id);
     }
 
-    public function test_a_staff_account_cannot_be_the_recipient(): void
+    public function test_an_unknown_config_name_falls_back_to_the_first_superadmin(): void
     {
         $user = $this->staffUser();
-        $other = User::create([
-            'name' => 'Plain Staff',
-            'username' => 'plainstaffer',
-            'email' => 'plainstaffer@example.com',
-            'password' => Hash::make('password123'),
-            'is_superadmin' => false,
-        ]);
+
+        config(['opcrf.review_route' => 'Nobody-By-This-Name']);
 
         Livewire::actingAs($user)
             ->test(OpcrfUpload::class)
             ->set('file', $this->uploadedWorkbook($this->buildFilledOpcrf()))
-            // A crafted client sending a staff id is rejected server-side.
-            ->set('reviewer_id', (string) $other->id)
-            ->call('confirmSubmit')
-            ->assertHasErrors(['reviewer_id']);
+            ->call('confirmSubmit');
 
-        $this->assertDatabaseCount('opcrf_submissions', 0);
-    }
-
-    public function test_submitting_without_a_recipient_is_rejected(): void
-    {
-        $user = $this->staffUser();
-
-        Livewire::actingAs($user)
-            ->test(OpcrfUpload::class)
-            ->set('file', $this->uploadedWorkbook($this->buildFilledOpcrf()))
-            ->set('reviewer_id', '')
-            ->call('confirmSubmit')
-            ->assertHasErrors(['reviewer_id']);
-
-        $this->assertDatabaseCount('opcrf_submissions', 0);
+        // The fallback keeps the submission routable: the first superadmin
+        // by username receives it.
+        $this->assertSame($this->reviewer->id, OpcrfSubmission::firstOrFail()->reviewer_id);
     }
 
     public function test_submitting_is_blocked_when_no_superadmin_exists(): void
@@ -220,11 +211,9 @@ class OpcrfUploadTest extends TestCase
         Livewire::actingAs($user)
             ->test(OpcrfUpload::class)
             ->set('file', $this->uploadedWorkbook($this->buildFilledOpcrf()))
-            ->call('openUpload')
-            ->assertSet('reviewer_id', '')
-            ->assertSee('No superadmin account exists yet')
             ->call('confirmSubmit')
-            ->assertHasErrors(['reviewer_id']);
+            ->assertHasErrors(['file'])
+            ->assertSee('No superadmin account exists yet');
 
         $this->assertDatabaseCount('opcrf_submissions', 0);
     }
@@ -257,14 +246,15 @@ class OpcrfUploadTest extends TestCase
         $this->assertDatabaseCount('opcrf_submissions', 0);
     }
 
-    public function test_an_empty_template_is_approved_and_shown_for_review(): void
+    public function test_an_empty_template_is_uploaded_with_a_heads_up_instead_of_being_refused(): void
     {
         $user = $this->staffUser();
         // The shipped template's first page: header labels present, left
         // value band untouched, but the evaluator block on the right
-        // pre-fills the evaluator's own name in O4. Uploading it is
-        // approved: the review modal opens with all header fields blank
-        // (shown as dashes), ready to confirm.
+        // pre-fills the evaluator's own name in O4. There is no employee
+        // name to compare against — so the staff member is told so and
+        // allowed to file anyway, and the evaluator's name must never
+        // stand in for the missing one.
         $path = $this->buildOpcrfWorkbook([
             'B4' => 'Name of Employee:',
             'B5' => 'Position/Designation:',
@@ -278,19 +268,24 @@ class OpcrfUploadTest extends TestCase
             'N7' => 'Date of Review:',
         ]);
 
-        $component = Livewire::actingAs($user)
+        Livewire::actingAs($user)
             ->test(OpcrfUpload::class)
+            // The real path: open the window, then pick the file.
+            ->call('openUpload')
             ->set('file', $this->uploadedWorkbook($path))
-            ->assertSet('showUpload', false)
             ->assertSet('showReview', true)
-            ->assertSee('Review before submitting');
+            ->assertHasNoErrors()
+            ->assertSet('verifiedName', '')
+            ->assertSet('nameNote', fn (?string $note): bool => $note !== null
+                && str_contains($note, 'No name could be read'))
+            ->call('confirmSubmit')
+            ->assertHasNoErrors();
 
-        // Nothing from the evaluator block leaks into the staff fields.
-        $this->assertSame('', $component->get('employee_name'));
-        $this->assertSame('', $component->get('position'));
-        $this->assertSame('', $component->get('review_period'));
-        $this->assertSame('', $component->get('division_office'));
-        $this->assertSame('', $component->get('self_rating'));
+        $this->assertStringNotContainsString(
+            'DOLLOSA',
+            (string) OpcrfSubmission::firstOrFail()->employee_name
+        );
+        $this->assertSame('unreadable', OpcrfSubmission::firstOrFail()->upload_check);
     }
 
     public function test_the_pre_filled_evaluator_name_is_never_taken_as_the_employee_name(): void
@@ -316,11 +311,22 @@ class OpcrfUploadTest extends TestCase
 
         $component = Livewire::actingAs($user)
             ->test(OpcrfUpload::class)
+            ->call('openUpload')
             ->set('file', $this->uploadedWorkbook($path));
 
+        // No employee name was read at all. The upload goes through, but the
+        // form is filed with a blank name and the reviewer is told the header
+        // block said nothing — never the evaluator's name standing in for it.
         $this->assertSame('', (string) $component->get('employee_name'));
         $this->assertStringNotContainsString('DOLLOSA', (string) $component->get('employee_name'));
-        $this->assertSame('5', (string) $component->get('self_rating'));
+        $component->assertSet('showReview', true)
+            ->assertHasNoErrors();
+
+        $component->call('confirmSubmit')->assertHasNoErrors();
+
+        $submission = OpcrfSubmission::firstOrFail();
+        $this->assertSame('', $submission->employee_name);
+        $this->assertSame('unreadable', $submission->upload_check);
     }
 
     public function test_a_fullname_typed_in_the_left_band_is_recognized_over_the_evaluator_block(): void
@@ -398,6 +404,32 @@ class OpcrfUploadTest extends TestCase
             ->assertSee('APPROVING AUTHORITY');
     }
 
+    public function test_the_review_modal_shows_every_tab_of_the_workbook(): void
+    {
+        $user = $this->staffUser();
+        $path = $this->buildFullOpcrfWorkbook();
+
+        Livewire::actingAs($user)
+            ->test(OpcrfUpload::class)
+            ->set('file', $this->uploadedWorkbook($path))
+            ->assertSet('showReview', true)
+            // PART I on the main sheet, then the other tabs stacked under it.
+            ->assertSee('PART I-A')
+            ->assertSee('PART II-A: LEADERSHIP COMPETENCIES (2.5%)')
+            ->assertSee('Leading People')
+            ->assertSee('1. Uses basic persuasion techniques in a discussion.')
+            ->assertSee('PART II-B: CORE BEHAVIOURAL COMPETENCIES (2.5%)')
+            ->assertSee('Self-Management')
+            ->assertSee('Part II-B Total Score: Weighted Average (Average x 0.025)')
+            ->assertSee('PART III: SUMMARY OF RATINGS')
+            ->assertSee('B.  Innovating and Intervening Accomplishments')
+            ->assertSee('JUAN DELA CRUZ')
+            ->assertSee('PART IV: IMPROVEMENT AND DEVELOPMENT PLANS')
+            ->assertSee('Digitize learning materials')
+            ->assertSee('Complete one action research')
+            ->assertSee('Plans are achievable within the rating period.');
+    }
+
     public function test_a_workbook_with_no_ratings_still_confirms_with_a_zero_rating(): void
     {
         $user = $this->staffUser();
@@ -430,24 +462,33 @@ class OpcrfUploadTest extends TestCase
         $this->assertSame(0.0, $submission->self_rating);
     }
 
-    public function test_a_completely_empty_workbook_still_confirms_with_blank_fields(): void
+    public function test_a_completely_empty_workbook_is_uploaded_but_flagged_as_nameless(): void
     {
         $user = $this->staffUser();
-        // Even a workbook with nothing at all can be approved — blanks
-        // simply record as empty strings and a 0.00 rating.
+        // A workbook with nothing in it cannot be tied to anybody: there is
+        // no name to read. It is filed anyway — staff are not blocked over a
+        // name — but it is recorded as nameless so the reviewer is not left
+        // wondering whether the analyzer silently failed.
         $path = $this->buildOpcrfWorkbook([]);
 
         Livewire::actingAs($user)
             ->test(OpcrfUpload::class)
+            ->call('openUpload')
             ->set('file', $this->uploadedWorkbook($path))
             ->assertSet('showReview', true)
+            ->assertHasNoErrors()
+            ->assertSet('nameNote', fn (?string $note): bool => $note !== null
+                && str_contains($note, 'No name could be read'))
             ->call('confirmSubmit')
             ->assertHasNoErrors();
 
         $submission = OpcrfSubmission::firstOrFail();
         $this->assertSame('', $submission->employee_name);
-        $this->assertSame('', $submission->position);
-        $this->assertSame(0.0, $submission->self_rating);
+        $this->assertSame('unreadable', $submission->upload_check);
+        $this->assertFalse(
+            $submission->hasUploadCheckConcern(),
+            'A nameless file is context for the reviewer, not a flag they must act on.'
+        );
     }
 
     public function test_superadmins_are_blocked_from_uploading(): void
@@ -483,9 +524,11 @@ class OpcrfUploadTest extends TestCase
             ->assertSee('OPCRF Template')
             ->assertSee('Download')
             ->assertSee('Upload')
-            // The upload window itself stays closed until the button is clicked.
-            ->assertDontSee('Upload your OPCR in here')
-            ->assertDontSee('Click to choose your OPCR file');
+            // The upload window itself stays closed until the button is
+            // clicked — its own description is the marker for "open", since
+            // the trigger's label shares the heading's wording.
+            ->assertDontSee('Complete the OPCRF template you downloaded')
+            ->assertDontSee('Choose OPCRF File');
     }
 
     public function test_the_upload_button_opens_the_upload_window(): void
@@ -497,8 +540,12 @@ class OpcrfUploadTest extends TestCase
             ->assertSet('showUpload', false)
             ->call('openUpload')
             ->assertSet('showUpload', true)
-            ->assertSee('Upload your OPCR in here')
-            ->assertSee('Click to choose your OPCRF file')
+            ->assertSee('Upload Completed OPCRF')
+            ->assertSee('Complete the OPCRF template you downloaded')
+            // The accepted format and size are stated before a file is chosen.
+            ->assertSee('.xlsx')
+            ->assertSee('10 MB')
+            ->assertSee('Choose OPCRF File')
             ->assertDontSee('Review before submitting');
     }
 
@@ -512,7 +559,9 @@ class OpcrfUploadTest extends TestCase
             ->call('closeUpload')
             ->assertSet('showUpload', false)
             ->assertSet('file', null)
-            ->assertDontSee('Upload your OPCR in here');
+            // The window's own description is the marker for "it is open" —
+            // the button label is the same words and is always on the page.
+            ->assertDontSee('Complete the OPCRF template you downloaded');
 
         $this->assertDatabaseCount('opcrf_submissions', 0);
     }
@@ -528,7 +577,7 @@ class OpcrfUploadTest extends TestCase
             ->assertSet('showUpload', true)
             ->assertSet('showReview', false)
             ->assertHasErrors(['file'])
-            ->assertSee('Upload your OPCR in here');
+            ->assertSee('Complete the OPCRF template you downloaded');
 
         $this->assertDatabaseCount('opcrf_submissions', 0);
     }
@@ -550,7 +599,7 @@ class OpcrfUploadTest extends TestCase
             ->assertDontSee('OPCRF-TEMPLATE.xlsx');
     }
 
-    public function test_confirming_the_review_opens_the_locked_movs_window(): void
+    public function test_confirming_the_review_records_the_submission_and_closes_the_flow(): void
     {
         $user = $this->staffUser();
         $path = $this->buildFilledOpcrf();
@@ -559,119 +608,52 @@ class OpcrfUploadTest extends TestCase
             ->test(OpcrfUpload::class)
             ->set('file', $this->uploadedWorkbook($path))
             ->call('confirmSubmit')
-            // The locked "Upload your MOVs" window pops up right away.
-            ->assertSet('showMovsModal', true)
-            ->assertSee('Upload your MOVs')
-            ->assertSee('Required')
-            ->assertSee('This window is locked until you upload at least one MOV')
-            ->assertSee('Upload at least 1 MOV to continue')
-            ->assertSee('January to December 2026');
+            // The flow ends at the confirm: no MOVs window follows.
+            ->assertSet('showReview', false)
+            ->assertSet('showUpload', false)
+            ->assertSee('your form was analyzed and recorded.');
 
         $submission = OpcrfSubmission::firstOrFail();
         $this->assertSame($user->id, $submission->user_id);
     }
 
-    public function test_the_locked_movs_window_cannot_be_closed_without_a_mov(): void
-    {
-        $user = $this->staffUser();
-        $path = $this->buildFilledOpcrf();
-
-        // Continue without any MOV: the lock holds and an error explains why.
-        Livewire::actingAs($user)
-            ->test(OpcrfUpload::class)
-            ->set('file', $this->uploadedWorkbook($path))
-            ->call('confirmSubmit')
-            ->call('finishMovs')
-            ->assertSet('showMovsModal', true)
-            ->assertHasErrors(['movFiles'])
-            ->assertSee('Attach at least one MOV file to continue.');
-
-        $this->assertSame(1, OpcrfSubmission::count());
-    }
-
-    public function test_uploading_a_mov_inside_the_locked_window_persists_it_and_unlocks(): void
+    public function test_the_archived_workbook_survives_the_confirm(): void
     {
         Storage::fake('local');
 
         $user = $this->staffUser();
         $path = $this->buildFilledOpcrf();
 
-        $component = Livewire::actingAs($user)
+        Livewire::actingAs($user)
             ->test(OpcrfUpload::class)
             ->set('file', $this->uploadedWorkbook($path))
-            ->call('confirmSubmit')
-            ->set('movFiles', [
-                UploadedFile::fake()->createWithContent('ACR-buwan-ng-wika.pdf', '%PDF-1.4 test'),
-            ])
-            ->assertSee('1 MOV file attached to your OPCR.')
-            ->assertDontSee('Upload at least 1 MOV to continue');
+            ->call('confirmSubmit');
 
         $submission = OpcrfSubmission::firstOrFail();
-        $this->assertSame(1, $submission->movs()->count());
 
-        $mov = $submission->movs()->first();
-        $this->assertSame('ACR-buwan-ng-wika.pdf', $mov->original_name);
-        Storage::disk('local')->assertExists($mov->stored_path);
-        $this->assertStringStartsWith('opcrf-movs/'.$submission->id.'/', $mov->stored_path);
+        $this->assertNotNull($submission->file_path);
+        Storage::disk('local')->assertExists($submission->file_path);
+        $this->assertStringStartsWith('opcrf-submissions/'.$user->id.'/', $submission->file_path);
+    }
 
-        // The requirement is satisfied: Continue releases the lock and
-        // returns to the dashboard, whose OPCRF Template card re-renders
-        // locked (the submission now carries its MOVs).
-        $component->call('finishMovs')
-            ->assertSet('showMovsModal', false)
-            ->assertRedirect(route('home'));
+    public function test_a_confirmed_submission_locks_the_dashboard_card(): void
+    {
+        Storage::fake('local');
 
+        $user = $this->staffUser();
+        $path = $this->buildFilledOpcrf();
+
+        Livewire::actingAs($user)
+            ->test(OpcrfUpload::class)
+            ->set('file', $this->uploadedWorkbook($path))
+            ->call('confirmSubmit');
+
+        // The OPCRF alone completes the cycle now — the card locks without
+        // any MOV step.
         $this->actingAs($user)
             ->get(route('home'))
             ->assertOk()
             ->assertSee('OPCRF submitted — locked')
             ->assertDontSee('Click to choose your OPCRF file');
-    }
-
-    public function test_removing_the_last_mov_locks_the_window_again(): void
-    {
-        Storage::fake('local');
-
-        $user = $this->staffUser();
-        $path = $this->buildFilledOpcrf();
-
-        $component = Livewire::actingAs($user)
-            ->test(OpcrfUpload::class)
-            ->set('file', $this->uploadedWorkbook($path))
-            ->call('confirmSubmit')
-            ->set('movFiles', [
-                UploadedFile::fake()->createWithContent('proof.pdf', '%PDF-1.4 test'),
-            ])
-            ->assertSee('1 MOV file attached to your OPCR.');
-
-        $movId = OpcrfSubmission::firstOrFail()->movs()->first()->id;
-
-        // Removing the only MOV re-locks the window.
-        $component->call('removeMov', $movId)
-            ->assertSee('Removed proof.pdf')
-            ->assertSee('Upload at least 1 MOV to continue')
-            ->call('finishMovs')
-            ->assertSet('showMovsModal', true)
-            ->assertHasErrors(['movFiles']);
-
-        $this->assertSame(0, OpcrfSubmission::firstOrFail()->movs()->count());
-    }
-
-    public function test_the_locked_window_rejects_disallowed_mov_types(): void
-    {
-        Storage::fake('local');
-
-        $user = $this->staffUser();
-        $path = $this->buildFilledOpcrf();
-
-        Livewire::actingAs($user)
-            ->test(OpcrfUpload::class)
-            ->set('file', $this->uploadedWorkbook($path))
-            ->call('confirmSubmit')
-            ->set('movFiles', [UploadedFile::fake()->create('script.exe', 10)])
-            ->assertHasErrors(['movFiles.*'])
-            ->assertSet('showMovsModal', true);
-
-        $this->assertSame(0, OpcrfSubmission::firstOrFail()->movs()->count());
     }
 }

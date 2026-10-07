@@ -24,8 +24,8 @@
         </div>
         @if ($this->submissions->isEmpty())
             <p class="card-text">
-                Nothing to review yet — submissions appear here the moment
-                staff upload their OPCR and attach their MOVs.
+                Nothing to review yet — submissions appear here the moment a
+                staff member confirms their OPCR.
             </p>
         @else
             <div class="table-wrap">
@@ -38,7 +38,6 @@
                             <th scope="col">Review Period</th>
                             <th scope="col">Self Rating</th>
                             <th scope="col">Status</th>
-                            <th scope="col">MOVs</th>
                             <th scope="col" class="users-actions-col">Actions</th>
                         </tr>
                     </thead>
@@ -61,46 +60,36 @@
                                     <span class="badge">{{ $submission->self_rating > 0 ? number_format($submission->self_rating, 2) : '—' }}</span>
                                 </td>
                                 <td>
-                                    @if ($submission->isApproved())
-                                        <span class="badge badge--ok" title="Approved by {{ $submission->approvedBy?->username ?? 'superadmin' }} on {{ $submission->approved_at->format('M j, Y g:i A') }}">Approved</span>
-                                    @else
-                                        <span class="badge badge-muted">Pending review</span>
-                                    @endif
-                                </td>
-                                <td>
-                                    <span class="badge {{ $submission->movs_count === 0 ? 'badge-muted' : '' }}">
-                                        {{ $submission->movs_count }}
-                                    </span>
+                                    @php($latestReview = $submission->latestReview)
+                                    <span
+                                        class="badge {{ $submission->statusBadgeClass() }}"
+                                        @if ($latestReview !== null)
+                                            title="{{ $latestReview->reviewer?->username ?? 'Superadmin' }} · {{ $latestReview->actionLabel() }} · {{ $latestReview->reviewed_at->format('M j, Y g:i A') }}"
+                                        @endif
+                                    >{{ $submission->statusLabelFor(auth()->user()) }}</span>
                                 </td>
                                 <td class="users-actions-col">
-                                    <span class="users-actions-row">
-                                        <button
-                                            type="button"
-                                            class="users-action"
+                                    <x-row-menu :label="'More actions for the submission from '.$submission->submitted_at->format('M j, Y')">
+                                        <x-row-menu-item
                                             wire:click="openReview({{ $submission->id }})"
                                             wire:loading.attr="disabled"
                                             wire:target="openReview"
                                             title="Review the submission for {{ $submission->review_period }}"
                                         >
-                                            <span class="users-action-inner">
-                                                <x-icon name="eye" :size="14" />
-                                                <span>Review</span>
-                                            </span>
-                                        </button>
-                                        <button
-                                            type="button"
-                                            class="users-action users-action--danger"
+                                            <x-icon name="eye" :size="15" />
+                                            <span>Review</span>
+                                        </x-row-menu-item>
+                                        <x-row-menu-item
                                             wire:click="openDelete({{ $submission->id }})"
                                             wire:loading.attr="disabled"
                                             wire:target="openDelete"
                                             title="Delete the submission for {{ $submission->review_period }}"
+                                            danger
                                         >
-                                            <span class="users-action-inner">
-                                                <x-icon name="trash" :size="14" />
-                                                <span>Delete</span>
-                                            </span>
-                                        </button>
-                                    </span>
+                                            <x-icon name="trash" :size="15" />
+                                            <span>Delete</span>
+                                        </x-row-menu-item>
+                                    </x-row-menu>
                                 </td>
                             </tr>
                         @endforeach
@@ -112,11 +101,14 @@
         @endif
     </div>
 
-    {{-- REVIEW MODAL: the submission's recorded summary, a download of the
-         full submitted workbook, and the MOVs as a view-only record. Its
-         only write action is the review outcome — approve the submission,
-         optionally attaching the corrected workbook as the official copy;
-         nothing else can be edited, replaced, or deleted here. --}}
+    {{-- REVIEW MODAL: the full submitted workbook (read in-app, Excel
+         style) and the review-and-routing workflow: remarks, then a
+         compliance/approval mark — which auto-routes the same submission
+         onward to the next superadmin (SY), no manual forwarding step — or
+         a return for revision. Every action is recorded in the history
+         timeline. Nothing is ever uploaded here and the submitted file is
+         never replaced. A superadmin the submission has already moved on
+         from keeps a read-only view of the record. --}}
     @if ($showReview && $this->reviewSubmission())
         <div
             class="modal-backdrop is-open"
@@ -136,273 +128,248 @@
                     <strong>{{ $this->reviewSubmission()->realNameLabel() ?: ($this->reviewSubmission()->user?->username ?? '—') }}</strong>@if ($this->reviewSubmission()->user?->username && $this->reviewSubmission()->realNameLabel() !== $this->reviewSubmission()->user?->username)
                         ({{ $this->reviewSubmission()->user?->username }})@endif
                     on {{ $this->reviewSubmission()->submitted_at->format('M j, Y g:i A') }} —
-                    download the full submitted workbook to review it in Excel,
-                    then approve the submission below. The file saves under this
-                    staff member's real name.
+                    every part of the submitted workbook is below, in the
+                    form's own wording: the header block, the statement of
+                    purpose, each objective with its planning commitments and
+                    reported results, the competency ratings, the summary of
+                    ratings and both improvement plans. A field the staff
+                    member left empty says so instead of being filled in.
+                    Add remarks, then mark it compliant (the submission then
+                    routes onward to the next superadmin automatically) or
+                    return it for revision — the submitted file is never
+                    replaced.
                 </p>
 
+                {{-- UPLOAD CHECK: an upload is never held up over what the
+                     file says about itself, so this is context, not a
+                     verdict. It appears only when the file said something
+                     the account did not — the staff member saw the same note
+                     before submitting, and could submit regardless. --}}
+                @php($uploadCheckNote = $this->reviewSubmission()->uploadCheckNote())
+                @if ($uploadCheckNote !== null)
+                    <div class="opcrf-verified opcrf-verified--note">
+                        <x-icon name="alert-triangle" :size="14" />
+                        <span><strong>Upload check</strong> — {{ $uploadCheckNote }}</span>
+                    </div>
+                @endif
+
                 <div class="modal-form opcrf-review-body">
-                    <div class="opcrf-review-summary opcrf-review-summary--sheet">
-                        <div class="opcrf-review-toolbar">
-                            {{-- The literal original: the very workbook the
-                                 staff member uploaded (or the corrected copy
-                                 attached at approval). Never a synthesized
-                                 stand-in. --}}
-                            @if ($this->reviewSubmission()->hasFile())
-                                <a
-                                    class="btn-primary btn-primary--small"
-                                    href="{{ route('opcrf.submission.download', $this->reviewSubmission()) }}"
-                                    download
-                                    title="Download the staff member's OPCRF ({{ $this->reviewSubmission()->isApproved() ? 'official approved copy' : 'full submitted file' }})"
-                                >
-                                    <x-icon name="download" :size="14" />
-                                    <span>Download</span>
-                                </a>
-                            @else
-                                <span class="opcrf-review-nofile">
-                                    <x-icon name="file-spreadsheet" :size="14" />
-                                    <span>
-                                        No original OPCRF on file for this submission — attach the
-                                        full document below to make it the downloadable copy.
-                                    </span>
-                                </span>
-                            @endif
-                        </div>
-
-                        {{-- SUBMITTED FORM SUMMARY: the recorded values in
-                             the template's header layout — the full submitted
-                             workbook itself is reviewed by downloading it. --}}
+                    <div class="opcrf-review-summary opcrf-review-summary--sheet">                        {{-- THE SUBMITTED FORM: the staff member's own workbook,
+                             rendered through the identical partial the
+                             upload review modal uses. Falls back to the
+                             recorded summary when no original file exists or
+                             it cannot be read. --}}
                         <div class="opcrf-review-sheetblock">
-                            <div class="opcrf-movs-attached-head">Submitted form</div>
-
-                            <div class="opcrf-sheet-headerblock opcrf-sheet-headerblock--split">
-                                <div class="opcrf-sheet-headercol">
-                                    <div class="opcrf-sheet-headrow">
-                                        <span class="opcrf-sheet-headlabel">Name of Employee:</span>
-                                        <span class="opcrf-sheet-headvalue {{ $this->reviewSubmission()->employee_name === '' ? 'is-empty' : '' }}">
-                                            {{ $this->reviewSubmission()->employee_name !== '' ? $this->reviewSubmission()->employee_name : '—' }}
-                                        </span>
-                                    </div>
-                                    <div class="opcrf-sheet-headrow">
-                                        <span class="opcrf-sheet-headlabel">Position/Designation:</span>
-                                        <span class="opcrf-sheet-headvalue {{ $this->reviewSubmission()->position === '' ? 'is-empty' : '' }}">
-                                            {{ $this->reviewSubmission()->position !== '' ? $this->reviewSubmission()->position : '—' }}
-                                        </span>
-                                    </div>
-                                    <div class="opcrf-sheet-headrow">
-                                        <span class="opcrf-sheet-headlabel">Review Period:</span>
-                                        <span class="opcrf-sheet-headvalue {{ $this->reviewSubmission()->review_period === '' ? 'is-empty' : '' }}">
-                                            {{ $this->reviewSubmission()->review_period !== '' ? $this->reviewSubmission()->review_period : '—' }}
-                                        </span>
-                                    </div>
-                                    <div class="opcrf-sheet-headrow">
-                                        <span class="opcrf-sheet-headlabel">Strand/Bureau/Center/Service/Region/Division:</span>
-                                        <span class="opcrf-sheet-headvalue {{ $this->reviewSubmission()->division_office === '' ? 'is-empty' : '' }}">
-                                            {{ $this->reviewSubmission()->division_office !== '' ? $this->reviewSubmission()->division_office : '—' }}
-                                        </span>
-                                    </div>
-                                </div>
-
-                                <div class="opcrf-sheet-headercol opcrf-sheet-headercol--evaluator">
-                                    <div class="opcrf-sheet-headrow">
-                                        <span class="opcrf-sheet-headlabel">Evaluator:</span>
-                                        <span class="opcrf-sheet-headvalue is-empty">Pending review</span>
-                                    </div>
-                                    <div class="opcrf-sheet-headrow">
-                                        <span class="opcrf-sheet-headlabel">Position:</span>
-                                        <span class="opcrf-sheet-headvalue is-empty">—</span>
-                                    </div>
-                                    <div class="opcrf-sheet-headrow">
-                                        <span class="opcrf-sheet-headlabel">Approving Authority:</span>
-                                        <span class="opcrf-sheet-headvalue is-empty">—</span>
-                                    </div>
-                                    <div class="opcrf-sheet-headrow">
-                                        <span class="opcrf-sheet-headlabel">Date of Review:</span>
-                                        <span class="opcrf-sheet-headvalue is-empty">—</span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            @if (trim((string) $this->reviewSubmission()->remarks) !== '')
-                                <div class="opcrf-sheet-partnote">
-                                    <strong>Remarks:</strong> {{ $this->reviewSubmission()->remarks }}
-                                </div>
-                            @endif
-                        </div>
-
-                        {{-- MOVS — VIEW-ONLY RECORD: each file can be
-                             downloaded; nothing can be added or removed. --}}
-                        <div class="opcrf-movs-attached">
-                            <div class="opcrf-movs-attached-head">MOVs (view only)</div>
-                            @if ($this->reviewMovs->isEmpty())
-                                <p class="opcrf-movs-empty">No MOVs attached to this submission.</p>
-                            @else
-                                <ul class="opcrf-movs-list">
-                                    @foreach ($this->reviewMovs as $mov)
-                                        <li class="opcrf-movs-item" wire:key="review-mov-{{ $mov->id }}">
-                                            <x-icon name="paperclip" :size="14" class="opcrf-movs-item-icon" />
-                                            <a class="opcrf-movs-item-name" href="{{ route('opcrf.movs.download', $mov) }}">{{ $mov->original_name }}</a>
-                                            <span class="opcrf-movs-item-size">{{ $mov->human_size }}</span>
-                                            <a
-                                                class="users-action"
-                                                href="{{ route('opcrf.movs.download', $mov) }}"
-                                                title="Download {{ $mov->original_name }}"
-                                            >
-                                                <span class="users-action-inner">
-                                                    <x-icon name="download" :size="12" />
-                                                    <span>Download</span>
-                                                </span>
-                                            </a>
-                                        </li>
-                                    @endforeach
-                                </ul>
-                            @endif
-                        </div>
-
-                        {{-- APPROVAL: the review's write step. Marking the
-                             submission approved records who/when; attaching
-                             the corrected/filled workbook in the same step
-                             makes it the official copy, so the download at
-                             the top of this modal serves the approved file. --}}
-                        <div class="opcrf-approval">
-                            <div class="opcrf-movs-attached-head">Approval</div>
-
-                            @if ($this->reviewSubmission()->isApproved())
-                                <div class="opcrf-approval-state is-approved">
-                                    <x-icon name="shield" :size="15" />
-                                    <span>
-                                        Approved by
-                                        <strong>{{ $this->reviewSubmission()->approvedBy?->username ?? 'superadmin' }}</strong>
-                                        on {{ $this->reviewSubmission()->approved_at->format('M j, Y g:i A') }}
-                                        — the file downloaded from here is the official approved copy.
-                                    </span>
-                                </div>
-                            @else
-                                <div class="opcrf-approval-state">
-                                    <x-icon name="shield" :size="15" />
-                                    <span>Not approved yet — download the submission, review it in Excel, then attach the updated workbook below to approve it.</span>
-                                </div>
-                            @endif
-
-                            {{-- FILE LOADER: a button in the same design as
-                                 Download, not a big dropzone — it opens the
-                                 file picker and shows the picked name. The
-                                 updated workbook is required to approve. --}}
-                            <div class="opcrf-file-load">
-                                <label class="opcrf-file-load-btn {{ $errors->has('reviewFile') ? 'has-error' : '' }}">
-                                    <x-icon name="upload" :size="14" />
-                                    <span wire:loading.remove wire:target="reviewFile">
-                                        {{ $reviewFile
-                                            ? 'Change the file'
-                                            : ($this->reviewSubmission()->hasFile()
-                                                ? 'Upload the updated OPCRF'
-                                                : 'Upload the full OPCRF document') }}
-                                    </span>
-                                    <span wire:loading wire:target="reviewFile">Uploading…</span>
-
-                                    <input
-                                        type="file"
-                                        accept=".xlsx"
-                                        wire:model="reviewFile"
-                                        wire:loading.attr="disabled"
-                                        wire:target="reviewFile"
-                                        class="opcrf-file-input"
-                                        aria-label="Attach the updated OPCRF workbook to approve"
-                                    >
-                                </label>
-
-                                @if ($reviewFile)
-                                    <span class="opcrf-file-load-name">
-                                        <x-icon name="paperclip" :size="13" />
-                                        {{ $reviewFile->getClientOriginalName() }}
-                                    </span>
-                                @else
-                                    <span class="opcrf-file-load-hint">
-                                        .xlsx · required to approve · becomes the official copy · max 10 MB
+                            <div class="opcrf-review-card-head">
+                                <span>Submitted form</span>
+                                @if ($this->reviewVersions->isNotEmpty())
+                                    <span class="opcrf-version-pill" title="Archived versions from previous resubmissions">
+                                        Version {{ $this->reviewVersions->count() + 1 }} of {{ $this->reviewVersions->count() + 1 }} current
+                                        · {{ $this->reviewVersions->count() }} archived
                                     </span>
                                 @endif
                             </div>
 
-                            @error('reviewFile') <div class="error-text">{{ $message }}</div> @enderror
+                            @if ($this->reviewSheet !== null)
+                                {{-- THE SUBMITTED WORKBOOK, RENDERED EXACTLY
+                                     AS THE STAFF MEMBER SAW IT: the same
+                                     Excel-window partial, the same sheet-tab
+                                     strip, the same columns. The reviewer
+                                     reads the file as it was filed, not as a
+                                     re-interpretation of it — so nothing can
+                                     be approved here that the submitter could
+                                     not see on their own screen. --}}
+                                @include('livewire.opcrf.partials.opcrf-excelwin', [
+                                    'sheet' => $this->reviewSheet,
+                                    'rating' => $this->reviewSheetRating,
+                                    'full' => false,
+                                    'workbook' => $this->reviewWorkbook ?? ['tabs' => [], 'part_two' => ['sections' => [], 'total_rows' => [], 'signers' => [], 'scale' => ['title' => '', 'levels' => []]], 'part_three' => ['components' => [], 'agreement' => [], 'overall' => null, 'rating' => '', 'rating_table' => [], 'signatures' => []], 'part_four' => ['office_plan' => [], 'office_feedback' => '', 'development_plan' => [], 'development_feedback' => '', 'signers' => [], 'sections' => []], 'extra_sheets' => []],
+                                    'uid' => 'rv',
+                                ])
 
-                            <div class="opcrf-approval-actions">
-                                <button
-                                    type="button"
-                                    class="btn-ghost"
-                                    wire:click="closeReview"
-                                    title="Close without approving"
-                                >
-                                    Close
-                                </button>
-                                <button
-                                    type="button"
-                                    class="btn-primary btn-primary--small"
-                                    wire:click="approveSubmission"
-                                    wire:loading.attr="disabled"
-                                    wire:target="approveSubmission,reviewFile"
-                                >
-                                    <x-icon name="shield" :size="14" />
-                                    <span wire:loading.remove wire:target="approveSubmission">
-                                        {{ $this->reviewSubmission()->isApproved()
-                                            ? 'Save & update the official copy'
-                                            : 'Approve & save the official copy' }}
-                                    </span>
-                                    <span wire:loading wire:target="approveSubmission">Saving…</span>
-                                </button>
-                            </div>
+                                @if (trim((string) $this->reviewSubmission()->remarks) !== '')
+                                    <div class="opcrf-sheet-partnote">
+                                        <strong>Remarks:</strong> {{ $this->reviewSubmission()->remarks }}
+                                    </div>
+                                @endif
+                            @else
+                                <div class="opcrf-sheet-headerblock opcrf-sheet-headerblock--split">
+                                    <div class="opcrf-sheet-headercol">
+                                        <div class="opcrf-sheet-headrow">
+                                            <span class="opcrf-sheet-headlabel">Name of Employee:</span>
+                                            <span class="opcrf-sheet-headvalue {{ $this->reviewSubmission()->employee_name === '' ? 'is-empty' : '' }}">
+                                                {{ $this->reviewSubmission()->employee_name !== '' ? $this->reviewSubmission()->employee_name : '—' }}
+                                            </span>
+                                        </div>
+                                        <div class="opcrf-sheet-headrow">
+                                            <span class="opcrf-sheet-headlabel">Position/Designation:</span>
+                                            <span class="opcrf-sheet-headvalue {{ $this->reviewSubmission()->position === '' ? 'is-empty' : '' }}">
+                                                {{ $this->reviewSubmission()->position !== '' ? $this->reviewSubmission()->position : '—' }}
+                                            </span>
+                                        </div>
+                                        <div class="opcrf-sheet-headrow">
+                                            <span class="opcrf-sheet-headlabel">Review Period:</span>
+                                            <span class="opcrf-sheet-headvalue {{ $this->reviewSubmission()->review_period === '' ? 'is-empty' : '' }}">
+                                                {{ $this->reviewSubmission()->review_period !== '' ? $this->reviewSubmission()->review_period : '—' }}
+                                            </span>
+                                        </div>
+                                        <div class="opcrf-sheet-headrow">
+                                            <span class="opcrf-sheet-headlabel">Strand/Bureau/Center/Service/Region/Division:</span>
+                                            <span class="opcrf-sheet-headvalue {{ $this->reviewSubmission()->division_office === '' ? 'is-empty' : '' }}">
+                                                {{ $this->reviewSubmission()->division_office !== '' ? $this->reviewSubmission()->division_office : '—' }}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    <div class="opcrf-sheet-headercol opcrf-sheet-headercol--evaluator">
+                                        <div class="opcrf-sheet-headrow">
+                                            <span class="opcrf-sheet-headlabel">Evaluator:</span>
+                                            <span class="opcrf-sheet-headvalue is-empty">Pending review</span>
+                                        </div>
+                                        <div class="opcrf-sheet-headrow">
+                                            <span class="opcrf-sheet-headlabel">Position:</span>
+                                            <span class="opcrf-sheet-headvalue is-empty">—</span>
+                                        </div>
+                                        <div class="opcrf-sheet-headrow">
+                                            <span class="opcrf-sheet-headlabel">Approving Authority:</span>
+                                            <span class="opcrf-sheet-headvalue is-empty">—</span>
+                                        </div>
+                                        <div class="opcrf-sheet-headrow">
+                                            <span class="opcrf-sheet-headlabel">Date of Review:</span>
+                                            <span class="opcrf-sheet-headvalue is-empty">—</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                @if (trim((string) $this->reviewSubmission()->remarks) !== '')
+                                    <div class="opcrf-sheet-partnote">
+                                        <strong>Remarks:</strong> {{ $this->reviewSubmission()->remarks }}
+                                    </div>
+                                @endif
+                            @endif
                         </div>
 
-                        {{-- FORWARD: hand the submission to another superadmin.
-                             They become the only one who can review, update,
-                             download or approve it — this account loses the
-                             row, and a completed approval is reopened. --}}
-                        <div class="opcrf-approval">
-                            <div class="opcrf-movs-attached-head">Forward to another superadmin</div>
+                        {{-- REVIEW DECISION: the review's write step. The
+                             superadmin holding the review step adds remarks,
+                             then either marks the submission
+                             compliant/approved — which auto-routes the same
+                             submission onward to the workflow's next
+                             superadmin (SY), no manual forwarding step — or
+                             returns it to the staff member for revision.
+                             Nothing is uploaded — the staff member's
+                             submitted workbook is never replaced. A
+                             superadmin the submission has already moved on
+                             from (the original reviewer) sees a read-only
+                             note instead of actions. --}}
+                        <div class="opcrf-review-card">
+                            <div class="opcrf-review-card-head">
+                                <span>Review Decision</span>
+                                <span class="badge {{ $this->reviewSubmission()->statusBadgeClass() }}">{{ $this->reviewSubmission()->statusLabelFor(auth()->user()) }}</span>
+                            </div>
 
-                            @if ($this->forwardRecipients->isEmpty())
-                                <p class="opcrf-review-route-empty">
-                                    You are the only superadmin right now — there is nobody to
-                                    hand this submission to.
-                                </p>
-                            @else
-                                <label for="opcrfForwardTo">Hand this submission to</label>
-
-                                <select
-                                    id="opcrfForwardTo"
-                                    wire:model="forward_to"
-                                    @class(['error' => $errors->has('forward_to')])
-                                >
-                                    <option value="">Choose a superadmin…</option>
-                                    @foreach ($this->forwardRecipients as $recipient)
-                                        <option value="{{ $recipient->id }}">
-                                            {{ $recipient->username }}@if ($recipient->name !== '' && $recipient->name !== $recipient->username) — {{ $recipient->name }}@endif
-                                        </option>
-                                    @endforeach
-                                </select>
-
-                                <p class="opcrf-review-route-sub">
-                                    They become the only one who can open, review, update, or
-                                    approve this submission.
-                                    @if ($this->reviewSubmission()->isApproved())
-                                        <strong>It is approved now — forwarding reopens it for
-                                        their review.</strong>
-                                    @endif
+                            @if ($this->reviewSubmission()->isAssignedTo(auth()->user()))
+                                <p class="opcrf-review-card-desc">
+                                    Review the submission and choose an appropriate action.
+                                    Add remarks when necessary.
                                 </p>
 
-                                @error('forward_to') <div class="error-text">{{ $message }}</div> @enderror
+                                <label for="opcrfReviewRemarks">Remarks / Comments</label>
+                                <textarea
+                                    id="opcrfReviewRemarks"
+                                    class="opcrf-remarks-textarea"
+                                    wire:model="reviewRemarks"
+                                    rows="6"
+                                    placeholder="Enter remarks, compliance notes, or instructions for the next reviewer..."
+                                    @class(['error' => $errors->has('reviewRemarks')])
+                                ></textarea>
+                                @error('reviewRemarks') <div class="error-text">{{ $message }}</div> @enderror
 
-                                <div class="opcrf-approval-actions">
+                                <div class="opcrf-decision-actions">
                                     <button
                                         type="button"
-                                        class="btn-primary btn-primary--small"
-                                        wire:click="forwardSubmission"
+                                        class="btn-ghost"
+                                        wire:click="returnSubmission"
                                         wire:loading.attr="disabled"
-                                        wire:target="forwardSubmission"
+                                        wire:target="returnSubmission"
+                                        title="Send it back to the staff member for revision (remarks required)"
                                     >
-                                        <x-icon name="user-round" :size="14" />
-                                        <span wire:loading.remove wire:target="forwardSubmission">Hand it over</span>
-                                        <span wire:loading wire:target="forwardSubmission">Handing over…</span>
+                                        <x-icon name="undo-2" :size="14" />
+                                        <span wire:loading.remove wire:target="returnSubmission">Return for Revision</span>
+                                        <span wire:loading wire:target="returnSubmission">Returning…</span>
                                     </button>
+                                    <button
+                                        type="button"
+                                        class="btn-primary"
+                                        wire:click="approveSubmission"
+                                        wire:loading.attr="disabled"
+                                        wire:target="approveSubmission"
+                                    >
+                                        <x-icon name="shield" :size="14" />
+                                        <span wire:loading.remove wire:target="approveSubmission">Approve / Compliance</span>
+                                        <span wire:loading wire:target="approveSubmission">Saving…</span>
+                                    </button>
+                                </div>
+                            @else
+                                <p class="opcrf-review-card-desc opcrf-review-readonly-note">
+                                    This submission has been routed onward to
+                                    <strong>Superadmin {{ $this->reviewSubmission()->assignedTo?->username ?? 'the next reviewer' }}</strong>
+                                    and now sits in their review queue. This record stays
+                                    visible here for reference — the review history below
+                                    is read-only.
+                                </p>
+                            @endif
+                        </div>
+
+                        {{-- REVIEW HISTORY: the submission's immutable trail —
+                             every review action shown as a timeline: the
+                             action, the reviewer, their remarks, the
+                             timestamp, and the forward recipient. Existing
+                             submissions keep every historical record. --}}
+                        <div class="opcrf-review-card">
+                            <div class="opcrf-review-card-head"><span>Review History</span></div>
+
+                            @if ($this->reviewHistory->isEmpty())
+                                <div class="opcrf-history-timeline">
+                                    <div class="opcrf-history-entry">
+                                        <span class="opcrf-history-dot" aria-hidden="true"></span>
+                                        <p class="opcrf-history-empty-text">No review activity yet.</p>
+                                    </div>
+                                </div>
+                            @else
+                                <div class="opcrf-history-timeline">
+                                    {{-- The submission's own arrival opens the trail. --}}
+                                    <div class="opcrf-history-entry" wire:key="review-history-received">
+                                        <span class="opcrf-history-dot opcrf-history-dot--muted" aria-hidden="true"></span>
+                                        <div class="opcrf-history-body">
+                                            <div class="opcrf-history-action">Pending Review</div>
+                                            <div class="opcrf-history-meta">Submission received</div>
+                                            <div class="opcrf-history-meta">Date: {{ $this->reviewSubmission()->submitted_at->format('M j, Y g:i A') }}</div>
+                                        </div>
+                                    </div>
+
+                                    @foreach ($this->reviewHistory as $entry)
+                                        <div class="opcrf-history-entry" wire:key="review-history-{{ $entry->id }}">
+                                            <span class="opcrf-history-dot" aria-hidden="true"></span>
+                                        <div class="opcrf-history-body">
+                                            <div class="opcrf-history-action">{{ $entry->actionLabel() }}</div>
+                                            @if ($entry->action === \App\Models\OpcrfReview::ACTION_FORWARD && $entry->to !== null)
+                                                <div class="opcrf-history-meta">Forwarded to: <strong>{{ $entry->to->username }}</strong></div>
+                                                <div class="opcrf-history-meta">By: <strong>{{ $entry->reviewer?->username ?? '—' }}</strong></div>
+                                            @elseif ($entry->action === \App\Models\OpcrfReview::ACTION_RESUBMIT)
+                                                <div class="opcrf-history-meta">Resubmitted by: <strong>{{ $entry->submission->user?->username ?? 'the staff member' }}</strong></div>
+                                            @else
+                                                <div class="opcrf-history-meta">Reviewed by: <strong>{{ $entry->reviewer?->username ?? '—' }}</strong></div>
+                                            @endif
+                                            @if ($entry->transitionLabel() !== null)
+                                                <div class="opcrf-history-meta">Status: {{ $entry->transitionLabel() }}</div>
+                                            @endif
+                                            @if ($entry->remarks !== null && trim($entry->remarks) !== '')
+                                                <div class="opcrf-history-remarks">Remarks: {{ $entry->remarks }}</div>
+                                            @endif
+                                            <div class="opcrf-history-meta">Date: {{ $entry->reviewed_at->format('M j, Y g:i A') }}</div>
+                                        </div>
+                                        </div>
+                                    @endforeach
                                 </div>
                             @endif
                         </div>

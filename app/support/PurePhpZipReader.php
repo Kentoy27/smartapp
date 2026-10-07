@@ -75,6 +75,51 @@ final class PurePhpZipReader
     }
 
     /**
+     * One entry's contents by name, or null when the archive has no such
+     * entry.
+     *
+     * Reads only the entry asked for. A workbook's worksheet parts run to
+     * hundreds of kilobytes each, so pulling the whole archive (readAll())
+     * to inspect one small manifest — the workbook.xml an OPCRF template
+     * stamp lives in — would inflate megabytes for nothing.
+     */
+    public function part(string $name): ?string
+    {
+        $eocd = $this->findEndOfCentralDirectory();
+
+        if ($eocd === null) {
+            throw new RuntimeException('The file is not a valid .xlsx workbook.');
+        }
+
+        $entryCount = unpack('v', substr($this->data, $eocd + 10, 2))[1];
+        $offset = unpack('V', substr($this->data, $eocd + 16, 4))[1];
+
+        for ($i = 0; $i < $entryCount; $i++) {
+            if (substr($this->data, $offset, 4) !== "PK\x01\x02") {
+                break; // corrupt trailing records — not found
+            }
+
+            $method = unpack('v', substr($this->data, $offset + 10, 2))[1];
+            $compressedSize = unpack('V', substr($this->data, $offset + 20, 4))[1];
+            $nameLength = unpack('v', substr($this->data, $offset + 28, 2))[1];
+            $extraLength = unpack('v', substr($this->data, $offset + 30, 2))[1];
+            $commentLength = unpack('v', substr($this->data, $offset + 32, 2))[1];
+            $localOffset = unpack('V', substr($this->data, $offset + 42, 4))[1];
+            $entryName = substr($this->data, $offset + 46, $nameLength);
+
+            if ($entryName === $name) {
+                return $compressedSize > 0
+                    ? $this->extractToMemory($localOffset, $method, $compressedSize)
+                    : '';
+            }
+
+            $offset += 46 + $nameLength + $extraLength + $commentLength;
+        }
+
+        return null;
+    }
+
+    /**
      * The "end of central directory" signature sits at the very end of
      * the archive (plus a ≤64KB comment), so scan backwards for it.
      */

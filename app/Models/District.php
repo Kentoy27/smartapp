@@ -13,4 +13,13 @@ class District extends Model
     {
         return $this->hasMany(School::class)->orderBy('name');
     }
+
+    /**
+     * The district's user-facing display name ("District I" keeps the
+     * template's Roman-numeral style; raw names pass through untouched).
+     */
+    public function displayName(): string
+    {
+        return (string) $this->name;
+    }
 }

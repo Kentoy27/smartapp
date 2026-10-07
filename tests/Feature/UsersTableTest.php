@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Models\District;
+use App\Models\School;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -141,7 +143,7 @@ class UsersTableTest extends TestCase
             ->assertDontSee('Settings');
     }
 
-    public function test_sidebar_items_are_listed_alphabetically(): void
+    public function test_sidebar_items_follow_the_working_order(): void
     {
         $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
 
@@ -151,15 +153,34 @@ class UsersTableTest extends TestCase
         // label marks its position in the menu.
         $positions = array_map(
             fn (string $label) => strpos($html, ">{$label}</span>"),
-            ['Dashboard', 'Review Opcrf', 'Users']
+            ['Dashboard', 'Review Opcrf', 'Users', 'Districts &amp; Schools']
         );
 
-        $this->assertNotContains(false, $positions, 'All three items are rendered.');
+        $this->assertNotContains(false, $positions, 'All four items are rendered.');
 
         $sorted = $positions;
         sort($sorted);
 
-        $this->assertSame($sorted, $positions, 'Sidebar items must appear A→Z.');
+        // The menu follows the work: dashboard first, then the review
+        // queue, then accounts, then the org structure.
+        $this->assertSame($sorted, $positions, 'Sidebar items must appear in working order.');
+    }
+
+    /**
+     * A division + school fixture for the school-assignment fields.
+     *
+     * @return array{0: District, 1: School}
+     */
+    private function createDivisionWithSchool(): array
+    {
+        $division = District::create(['name' => 'SDO Test Division '.uniqid()]);
+        $school = School::create([
+            'district_id' => $division->id,
+            'name' => 'Test Elementary School',
+            'school_id' => (string) random_int(100000, 999999),
+        ]);
+
+        return [$division, $school];
     }
 
     public function test_add_user_modal_opens_and_closes(): void
@@ -197,9 +218,12 @@ class UsersTableTest extends TestCase
     public function test_create_user_makes_an_account_and_updates_the_table(): void
     {
         $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
+        [$division, $school] = $this->createDivisionWithSchool();
 
         Livewire::actingAs($admin)->test('users-table')
             ->call('openCreateModal')
+            ->set('school_division', (string) $division->id)
+            ->set('school_id_choice', (string) $school->id)
             ->set('name', 'Jane Doe')
             ->set('username', 'jane')
             ->set('email', 'jane@example.com')
@@ -212,18 +236,50 @@ class UsersTableTest extends TestCase
         $user = User::where('username', 'jane')->first();
 
         $this->assertNotNull($user);
-        $this->assertSame('Jane Doe', $user->name);
         $this->assertSame('jane@example.com', $user->email);
+        $this->assertSame('Jane Doe', $user->name);
         $this->assertNotSame('supersecret1', $user->password); // hashed
         $this->assertFalse($user->is_superadmin); // never created as superadmin
+    }
+
+    /**
+     * The account's name is what an OPCRF upload is matched against, so a
+     * superadmin has to be able to correct it — a wrong or missing name
+     * locks the employee out of submitting entirely, and this form is the
+     * only route to fix that.
+     */
+    public function test_a_superadmin_can_correct_the_name_an_opcrf_upload_is_matched_against(): void
+    {
+        $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
+        [$division, $school] = $this->createDivisionWithSchool();
+
+        $staff = User::factory()->create([
+            'name' => null,
+            'username' => 'staff',
+            'is_superadmin' => false,
+            'school_id' => $school->id,
+        ]);
+
+        Livewire::actingAs($admin)->test('users-table')
+            ->call('openEditModal', $staff)
+            ->assertSet('name', '')
+            ->set('name', 'Juan Dela Cruz')
+            ->call('saveUser')
+            ->assertHasNoErrors();
+
+        $this->assertSame('Juan Dela Cruz', $staff->fresh()->name);
     }
 
     public function test_create_user_shows_a_success_message(): void
     {
         $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
+        [$division, $school] = $this->createDivisionWithSchool();
 
         $component = Livewire::actingAs($admin)->test('users-table')
             ->call('openCreateModal')
+            ->set('school_division', (string) $division->id)
+            ->set('school_id_choice', (string) $school->id)
+            ->set('name', 'Successive User')
             ->set('username', 'successive')
             ->set('email', 'successive@example.com')
             ->set('password', 'supersecret1')
@@ -252,23 +308,25 @@ class UsersTableTest extends TestCase
             'email' => 'editable@example.com',
         ]);
 
+        [$division, $school] = $this->createDivisionWithSchool();
+
         Livewire::actingAs($admin)->test('users-table')
             ->call('openEditModal', $user->id)
             ->assertSet('editingUserId', $user->id)
             ->assertSet('username', 'editable')
             ->assertSet('email', 'editable@example.com')
-            ->assertSet('name', 'Old Name')
             ->assertSet('password', '') // blank = keep current
-            ->set('name', 'New Name')
+            ->set('school_division', (string) $division->id)
+            ->set('school_id_choice', (string) $school->id)
             ->set('email', 'new@example.com')
             ->call('saveUser')
             ->assertSet('showCreateModal', false)
-            ->assertSee('New Name')
             ->assertSet('successMessage', 'Account updated — editable was saved.');
 
         $user->refresh();
 
-        $this->assertSame('New Name', $user->name);
+        // The form has no name field, so an existing name is left alone.
+        $this->assertSame('Old Name', $user->name);
         $this->assertSame('new@example.com', $user->email);
         $this->assertSame('editable', $user->username); // unchanged
         $this->assertNull($user->password ? null : 'not-empty'); // password untouched
@@ -282,11 +340,14 @@ class UsersTableTest extends TestCase
             'email' => 'selfedit@example.com',
         ]);
         $originalHash = $user->password;
+        [$division, $school] = $this->createDivisionWithSchool();
 
         Livewire::actingAs($admin)->test('users-table')
             ->call('openEditModal', $user->id)
             // Re-submitting the same email must not trigger unique validation...
             ->set('email', 'selfedit@example.com')
+            ->set('school_division', (string) $division->id)
+            ->set('school_id_choice', (string) $school->id)
             // ...and a blank password keeps the old one.
             ->call('saveUser')
             ->assertHasNoErrors();
@@ -308,6 +369,35 @@ class UsersTableTest extends TestCase
         $this->assertStringNotContainsString('Joined', $html);
     }
 
+    public function test_a_row_with_several_actions_collapses_into_one_more_actions_menu(): void
+    {
+        $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
+        $other = User::factory()->create(['username' => 'somebody']);
+
+        $html = Livewire::actingAs($admin)->test('users-table')->html();
+
+        // One trigger for the row, naming who it acts on, holding the
+        // actions that used to sit side by side.
+        $this->assertStringContainsString('More actions for somebody', $html);
+        $this->assertStringContainsString('row-menu-trigger', $html);
+        $this->assertStringContainsString('wire:click="openDeleteModal('.$other->id.')"', $html);
+        $this->assertStringNotContainsString('users-actions-row', $html);
+    }
+
+    public function test_a_row_with_only_one_action_keeps_a_plain_button(): void
+    {
+        // A superadmin cannot change their own role or delete themselves, so
+        // their row has exactly one action — a menu would only add a click.
+        $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
+        User::factory()->create(['username' => 'somebody']);
+
+        $html = Livewire::actingAs($admin)->test('users-table')->html();
+
+        $this->assertStringNotContainsString('More actions for '.$admin->username, $html);
+        $this->assertStringContainsString('users-action', $html);
+        $this->assertStringContainsString('wire:click="openEditModal('.$admin->id.')"', $html);
+    }
+
     public function test_failed_validation_never_sets_a_success_message(): void
     {
         $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
@@ -323,10 +413,14 @@ class UsersTableTest extends TestCase
     public function test_superadmin_can_create_a_user_with_the_admin_role(): void
     {
         $admin = User::factory()->create(['is_superadmin' => true]);
+        [$division, $school] = $this->createDivisionWithSchool();
 
         $component = Livewire::actingAs($admin)
             ->test('users-table')
             ->call('openCreateModal')
+            ->set('school_division', (string) $division->id)
+            ->set('school_id_choice', (string) $school->id)
+            ->set('name', 'Fresh Admin')
             ->set('username', 'freshadmin')
             ->set('email', 'freshadmin@example.com')
             ->set('password', 'supersecret1')

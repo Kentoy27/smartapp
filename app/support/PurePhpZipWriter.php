@@ -16,6 +16,26 @@ use RuntimeException;
 final class PurePhpZipWriter
 {
     /**
+     * The MS-DOS timestamp every entry is stamped with: 1980-01-01 00:00.
+     *
+     * MS-DOS dates count from year 1980 and have no zero date — month 0
+     * and day 0 do not exist. Writing a zero word therefore produces an
+     * archive whose entries are stamped "month 0, day 0", which Excel
+     * rejects outright: it reports the workbook as corrupt and offers to
+     * repair it, then strips the parts it could not parse. (The shipped
+     * OPCRF template is stamped exactly this way too — 1980-01-01 is what
+     * WPS writes for an in-memory workbook.)
+     *
+     * A fixed epoch rather than the clock, so the bytes of a workbook
+     * depend only on its contents: two personalizations of the same
+     * account are then identical files, and a test can compare them.
+     */
+    private const DOS_DATE = 0x0021; // (1980-1980) << 9 | 1 << 5 | 1
+
+    /** 00:00:00, in MS-DOS 2-second units. */
+    private const DOS_TIME = 0x0000;
+
+    /**
      * The assembled archive: local file headers + payloads, then the
      * central directory and its end-of-central-directory record.
      */
@@ -64,8 +84,8 @@ final class PurePhpZipWriter
                 .pack('v', 20) // version needed
                 .pack('v', 0) // flags
                 .pack('v', $method)
-                .pack('v', 0) // dos time
-                .pack('v', 0) // dos date
+                .pack('v', self::DOS_TIME)
+                .pack('v', self::DOS_DATE)
                 .pack('V', $crc)
                 .pack('V', $compressedSize)
                 .pack('V', $uncompressedSize)
@@ -78,8 +98,8 @@ final class PurePhpZipWriter
                 .pack('v', 20) // version needed
                 .pack('v', 0) // flags
                 .pack('v', $method)
-                .pack('v', 0) // dos time
-                .pack('v', 0) // dos date
+                .pack('v', self::DOS_TIME)
+                .pack('v', self::DOS_DATE)
                 .pack('V', $crc)
                 .pack('V', $compressedSize)
                 .pack('V', $uncompressedSize)

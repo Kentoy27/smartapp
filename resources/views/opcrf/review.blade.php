@@ -5,7 +5,7 @@
 @section('content')
     <div class="page-header">
         <h1>Review Opcrf</h1>
-        <p>Every staff OPCRF submission — newest first. Open a row to review the submitted form, download the full workbook, and see its MOVs. Approving a submission records who approved it and when; attaching the corrected/filled workbook in the same step makes it the official copy the staff member can download. The list updates live as staff submit.</p>
+        <p>Every staff OPCRF submission — newest first. Open a row to review the submitted form, download the full workbook, and see its MOVs. Add remarks, then Approve / Compliance (the submission auto-routes onward to the next superadmin in the review chain) or Return it for revision — the original uploaded workbook is never replaced, and every action is recorded in the review history. The list updates live as staff submit.</p>
     </div>
 
     {{-- SUBMISSIONS REVIEW TABLE: one Livewire component — new submissions
