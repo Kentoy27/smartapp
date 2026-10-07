@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\OpcrfSubmission;
 use App\Models\User;
 use App\Support\OpcrfPartOne;
+use App\Support\WfpTemplate;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 
@@ -32,6 +33,11 @@ class DashboardController extends Controller
             // Part availability by school-year term: outside the final term
             // the card's download is Part I only (superadmins have no card).
             'opcrfPartOne' => $isSuperAdmin ? null : OpcrfPartOne::summary(),
+            // The WFP Template card is for the School Head (SH) role only —
+            // no card for superadmins, SDS viewers, or anyone else.
+            'wfpTemplate' => (! $isSuperAdmin && $user->canAccessWfp())
+                ? ['name' => WfpTemplate::fileName(), 'description' => WfpTemplate::description()]
+                : null,
         ]);
     }
 

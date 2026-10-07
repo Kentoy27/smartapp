@@ -70,4 +70,32 @@
             </div>
         @endif
     @endif
+
+    {{-- WFP tools: School Head (SH) only — the SDS Viewer and Super Admin
+         never see this card, and the route/Livewire guards enforce the same. --}}
+    @if ($wfpTemplate !== null)
+        <div class="card">
+            <div class="card-head">
+                <div class="card-title">WFP Template</div>
+                <a href="{{ route('wfp.index') }}" class="card-link">Go to WFP →</a>
+            </div>
+            <div class="opcr-template-row">
+                <span class="opcr-file-badge" aria-hidden="true">
+                    <x-icon name="file-spreadsheet" :size="22" />
+                </span>
+                <div class="opcr-file-meta">
+                    <span class="opcr-file-name">{{ $wfpTemplate['name'] }}</span>
+                    <span class="opcr-file-sub">{{ $wfpTemplate['description'] }}</span>
+                </div>
+                <a href="{{ route('wfp.template') }}" class="opcr-download-btn" download>
+                    <x-icon name="download" :size="16" />
+                    <span>Download</span>
+                </a>
+
+                {{-- UPLOAD: clicking it opens the "Upload your WFP in here"
+                     window; the workbook is checked as a WFP and stored. --}}
+                <livewire:wfp-upload :key="'wfp-upload-card'" />
+            </div>
+        </div>
+    @endif
 @endsection

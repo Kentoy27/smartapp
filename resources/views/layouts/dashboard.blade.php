@@ -1138,6 +1138,144 @@
             color: #ef4444;
         }
 
+        /* ---------- WFP (Work and Financial Plan) module ---------- */
+        .wfp-status-meta {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px 20px;
+            margin: 16px 0 0;
+            padding: 16px 0 0;
+            border-top: 1px solid var(--border);
+        }
+
+        .wfp-status-item dt {
+            font-size: 0.6875rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+        }
+
+        .wfp-status-item dd {
+            margin: 0;
+            font-size: 0.875rem;
+            color: var(--text-strong);
+        }
+
+        .wfp-status-pill {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 999px;
+            background: var(--primary-soft);
+            color: var(--primary-strong);
+            font-size: 0.6875rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .wfp-empty {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            line-height: 1.6;
+            margin: 0;
+        }
+
+        .wfp-remove-btn {
+            flex: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 9px 18px;
+            border-radius: 8px;
+            border: 1px solid #dc2626;
+            background: transparent;
+            color: #dc2626;
+            font: inherit;
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+
+        .wfp-remove-btn:hover {
+            background: rgba(220, 38, 38, 0.08);
+        }
+
+        .wfp-remove-btn:active {
+            transform: translateY(1px);
+        }
+
+        .wfp-preview-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+
+        .wfp-search {
+            flex: 1;
+            min-width: 200px;
+            padding: 9px 12px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-strong);
+            font: inherit;
+            font-size: 0.875rem;
+        }
+
+        .wfp-search:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+
+        .wfp-preview-note {
+            font-size: 0.8125rem;
+            color: var(--text-muted);
+        }
+
+        .wfp-preview-scroll {
+            overflow-x: auto;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .wfp-preview-table {
+            border-collapse: collapse;
+            width: 100%;
+            font-size: 0.75rem;
+            white-space: nowrap;
+        }
+
+        .wfp-preview-table th,
+        .wfp-preview-table td {
+            padding: 6px 10px;
+            border-bottom: 1px solid var(--border);
+            border-right: 1px solid var(--border);
+            text-align: left;
+            color: var(--text);
+        }
+
+        .wfp-preview-table thead th {
+            background: var(--bg-elevated);
+            color: var(--text-strong);
+            font-weight: 600;
+        }
+
+        .wfp-preview-rowhead {
+            position: sticky;
+            left: 0;
+            background: var(--bg-elevated);
+            color: var(--text-muted);
+            font-weight: 600;
+            text-align: center;
+        }
+
         /* ---------- OPCRF SUBMISSION FORM (staff /opcrf page) ---------- */
         .opcrf-card-link {
             display: inline-flex;
