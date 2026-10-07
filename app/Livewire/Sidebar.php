@@ -220,6 +220,17 @@ class Sidebar extends Component
                 'panel' => 'mov',
                 'children' => $this->movTree(),
             ];
+
+            // WFP is for the School Head (SH) role only — hidden from the
+            // SDS Viewer, and unreachable by URL regardless (route guard).
+            if (Auth::user()?->canAccessWfp()) {
+                $items[] = [
+                    'label' => 'WFP',
+                    'route' => 'wfp.index',
+                    'path' => 'wfp',
+                    'icon' => 'chart-column',
+                ];
+            }
         }
 
         usort($items, function (array $a, array $b): int {

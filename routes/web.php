@@ -6,6 +6,7 @@ use App\Http\Controllers\DashboardController;
 use App\Support\OpcrfPartOne;
 use App\Support\OpcrfTemplatePersonalizer;
 use App\Support\OpcrfWorkbookTrim;
+use App\Support\WfpTemplate;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
@@ -222,6 +223,46 @@ Route::middleware('auth')->group(function () {
         return Storage::disk('local')->download($mov->stored_path, $mov->original_name);
     })->name('opcrf.movs.download')->where('mov', '[0-9]+');
 
+    /* ------------------------------------------------------------------
+     * WFP (Work and Financial Plan) — School Head (SH) only.
+     *
+     * Every WFP route re-checks Auth::user()->canAccessWfp(): the module,
+     * template, and uploaded files are unreachable for the SDS Viewer and
+     * the Super Admin even by typing the URL directly (they get a 404). The
+     * Livewire components re-check the same gate on every action.
+     * ----------------------------------------------------------------- */
+
+    Route::get('/wfp', function () {
+        abort_unless(Auth::user()?->canAccessWfp(), 404);
+
+        return view('wfp.index');
+    })->name('wfp.index');
+
+    // The official WFP template, served from storage/forms/ (never public/).
+    // Bytes first, then the response — a streamed callback's return value is
+    // discarded and would risk a 0-byte download.
+    Route::get('/download/wfp-template', function () {
+        abort_unless(Auth::user()?->canAccessWfp(), 404);
+        abort_unless(WfpTemplate::exists(), 404);
+
+        $bytes = WfpTemplate::bytes();
+
+        return response($bytes)
+            ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            ->header('Content-Length', (string) strlen($bytes))
+            ->header('Content-Disposition', 'attachment; filename="'.WfpTemplate::fileName().'"');
+    })->name('wfp.template');
+
+    // A user's uploaded WFP. Owner-only — the model gate re-checks ownership,
+    // so another account's file id is unreachable.
+    Route::get('/wfp-uploads/{wfp}/download', function (App\Models\WfpSubmission $wfp) {
+        abort_unless(Auth::user()?->canAccessWfp(), 404);
+        abort_unless($wfp->canBeManagedBy(Auth::user()), 404);
+        abort_unless($wfp->hasFile(), 404);
+
+        return Storage::disk('local')->download($wfp->file_path, $wfp->fileDownloadName());
+    })->name('wfp.download')->where('wfp', '[0-9]+');
+});
     // MOV uploads: the staff member's Means of Verification checklist —
     // Part → Category → MOV → the document they attached to it. A separate
     // page from the OPCR upload on purpose: this is the standing evidence
