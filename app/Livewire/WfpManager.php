@@ -7,6 +7,7 @@ use App\Support\WfpSpreadsheet;
 use App\Support\WfpTemplate;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
+use RuntimeException;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Title;
@@ -49,33 +50,46 @@ class WfpManager extends Component
     }
 
     /**
-     * A read-only preview of the uploaded workbook (title + used-range grid),
-     * or null when nothing is uploaded / the file can no longer be read.
+     * The workbook's persisted full-sheet analysis and row data. Older WFP
+     * records without analysis are analyzed from their archived file.
      *
-     * @return array{title: string, grid: array{rows: array<int, array{number: int, cells: array<int, string>}>, columns: int, header_index: ?int, truncated: bool}}|null
+     * @return array<string, mixed>|null
      */
     #[Computed]
     public function preview(): ?array
     {
         $submission = $this->submission;
 
-        if ($submission === null || ! $submission->hasFile()) {
+        if ($submission === null) {
             return null;
+        }
+
+        if (is_array($submission->sheet_data) && $submission->sheet_data !== []
+            && is_array($submission->analysis) && is_array($submission->validation)) {
+            return [
+                'sheets' => $submission->sheet_data,
+                'analysis' => $submission->analysis,
+                'validation' => $submission->validation,
+            ];
+        }
+
+        if (! $submission->hasFile()) {
+            return ['error' => 'The uploaded workbook is missing from storage, so it cannot be analyzed.'];
         }
 
         try {
             $sheet = new WfpSpreadsheet(Storage::disk('local')->path($submission->file_path));
 
-            return ['title' => $sheet->title(), 'grid' => $sheet->grid()];
-        } catch (\Throwable) {
-            return null;
+            return $sheet->reviewData();
+        } catch (RuntimeException $exception) {
+            return ['error' => $exception->getMessage()];
         }
     }
 
     /**
-     * The preview rows after the optional search filter.
+     * Every worksheet with its rows filtered by the optional search term.
      *
-     * @return array<int, array{number: int, cells: array<int, string>}>
+     * @return array<int, array<string, mixed>>
      */
     #[Computed]
     public function previewRows(): array
@@ -86,22 +100,27 @@ class WfpManager extends Component
             return [];
         }
 
-        $rows = $preview['grid']['rows'];
-        $term = trim($this->search);
-
-        if ($term === '') {
-            return $rows;
+        if (isset($preview['error'])) {
+            return [];
         }
 
-        return array_values(array_filter($rows, function (array $row) use ($term): bool {
-            foreach ($row['cells'] as $cell) {
-                if ($cell !== '' && mb_stripos($cell, $term) !== false) {
-                    return true;
-                }
+        $term = trim($this->search);
+
+        return array_map(function (array $sheet) use ($term): array {
+            if ($term !== '') {
+                $sheet['rows'] = array_values(array_filter($sheet['rows'], function (array $row) use ($term): bool {
+                    foreach ($row['cells'] as $cell) {
+                        if ($cell !== '' && mb_stripos($cell, $term) !== false) {
+                            return true;
+                        }
+                    }
+
+                    return false;
+                }));
             }
 
-            return false;
-        }));
+            return $sheet;
+        }, $preview['sheets'] ?? []);
     }
 
     /**

@@ -113,62 +113,124 @@
         @endif
     </div>
 
-    {{-- PREVIEW CARD: a summarized, searchable view of the workbook. --}}
+    {{-- ANALYSIS + FULL WORKBOOK REVIEW: findings and every worksheet are
+         persisted on the upload, then displayed to the School Head. --}}
     @php($preview = $this->preview)
 
     @if ($preview !== null)
-        @php($grid = $preview['grid'])
-        @php($headerRow = $grid['header_index'] !== null ? $grid['rows'][$grid['header_index']] : null)
-
-        <div class="card">
-            <div class="card-head">
-                <div class="card-title">WFP Preview</div>
+        @if (isset($preview['error']))
+            <div class="card wfp-analysis-error" role="alert">
+                <div class="card-title">WFP analysis unavailable</div>
+                <p>{{ $preview['error'] }}</p>
             </div>
+        @else
+            @php($analysis = $preview['analysis'])
+            <section class="card wfp-analysis">
+                <div class="card-head">
+                    <div>
+                        <div class="card-title">WFP Analysis &amp; Review</div>
+                        <p class="wfp-analysis-intro">The uploaded workbook has been analyzed across all worksheets. Review the extracted workbook contents below.</p>
+                    </div>
+                    <span class="wfp-analysis-result{{ $preview['validation']['passed'] ? ' is-valid' : ' is-warning' }}">
+                        {{ $preview['validation']['passed'] ? 'Structure checked' : 'Review required' }}
+                    </span>
+                </div>
+
+                <div class="wfp-analysis-stats">
+                    <div><strong>{{ $analysis['sheet_count'] }}</strong><span>Worksheets analyzed</span></div>
+                    <div><strong>{{ $analysis['row_count'] }}</strong><span>Populated rows reviewed</span></div>
+                    <div><strong>{{ $analysis['populated_cell_count'] }}</strong><span>Populated cells reviewed</span></div>
+                    <div><strong>{{ $analysis['sections_found'] }} / {{ count($analysis['sections']) }}</strong><span>WFP sections detected</span></div>
+                </div>
+
+                <div class="wfp-analysis-sections">
+                    <h3>WFP section checks</h3>
+                    <ul>
+                        @foreach ($analysis['required_headings'] as $heading)
+                            <li class="{{ $heading['found'] ? 'is-found' : 'is-missing' }}">
+                                <span aria-hidden="true">{{ $heading['found'] ? '✓' : '!' }}</span>
+                                <span>Required heading: {{ $heading['label'] }}</span>
+                                <strong>{{ $heading['found'] ? 'Found' : 'Not found' }}</strong>
+                            </li>
+                        @endforeach
+                        @foreach ($analysis['sections'] as $section)
+                            <li class="{{ $section['found'] ? 'is-found' : 'is-missing' }}">
+                                <span aria-hidden="true">{{ $section['found'] ? '✓' : '!' }}</span>
+                                <span>{{ $section['label'] }}</span>
+                                <strong>{{ $section['found'] ? 'Found' : 'Not found' }}</strong>
+                            </li>
+                        @endforeach
+                    </ul>
+                </div>
+
+                @if ($preview['validation']['warnings'] !== [])
+                    <div class="wfp-analysis-warnings">
+                        <strong>Items to review</strong>
+                        <ul>
+                            @foreach ($preview['validation']['warnings'] as $warning)
+                                <li>{{ $warning }}</li>
+                            @endforeach
+                        </ul>
+                    </div>
+                @endif
+            </section>
 
             <div class="wfp-preview-toolbar">
                 <input
                     type="search"
                     class="wfp-search"
-                    placeholder="Filter by program, activity, objective…"
+                    placeholder="Filter all worksheets…"
                     wire:model.live.debounce.300ms="search"
-                    aria-label="Filter WFP preview"
+                    aria-label="Filter WFP worksheets"
                 >
-                @if ($grid['truncated'])
-                    <span class="wfp-preview-note">Showing the first {{ count($grid['rows']) }} rows.</span>
-                @endif
+                <span class="wfp-preview-note">Showing {{ count($preview['sheets']) }} worksheets and their populated rows.</span>
             </div>
 
-            @if (count($this->previewRows) === 0)
-                <p class="wfp-empty">No rows match “{{ $search }}”.</p>
-            @else
-                <div class="wfp-preview-scroll">
-                    <table class="wfp-preview-table">
-                        @if ($headerRow !== null)
-                            <thead>
-                                <tr>
-                                    <th class="wfp-preview-rowhead" scope="col">#</th>
-                                    @foreach ($headerRow['cells'] as $cell)
-                                        <th scope="col">{{ $cell }}</th>
-                                    @endforeach
-                                </tr>
-                            </thead>
-                        @endif
-                        <tbody>
-                            @foreach ($this->previewRows as $row)
-                                @if ($headerRow !== null && $row['number'] === $headerRow['number'])
-                                    @continue
+            @forelse ($this->previewRows as $sheet)
+                @php($headerRow = $sheet['header_index'] !== null ? ($sheet['rows'][$sheet['header_index']] ?? null) : null)
+                <section class="card wfp-sheet-review" wire:key="wfp-sheet-{{ md5($sheet['name']) }}">
+                    <div class="card-head">
+                        <div>
+                            <div class="card-title">{{ $sheet['name'] }}</div>
+                            <p class="wfp-sheet-meta">{{ count($sheet['rows']) }} populated rows · {{ count($sheet['column_indexes']) }} columns in use</p>
+                        </div>
+                    </div>
+
+                    @if ($sheet['rows'] === [])
+                        <p class="wfp-empty">No rows match “{{ $search }}” in this worksheet.</p>
+                    @else
+                        <div class="wfp-preview-scroll" role="region" aria-label="{{ $sheet['name'] }} WFP contents" tabindex="0">
+                            <table class="wfp-preview-table">
+                                @if ($headerRow !== null)
+                                    <thead>
+                                        <tr>
+                                            <th class="wfp-preview-rowhead" scope="col">#</th>
+                                            @foreach ($sheet['column_indexes'] as $column)
+                                                <th scope="col">{{ $headerRow['cells'][$column] ?? 'Column '.$column }}</th>
+                                            @endforeach
+                                        </tr>
+                                    </thead>
                                 @endif
-                                <tr wire:key="wfp-row-{{ $row['number'] }}">
-                                    <th class="wfp-preview-rowhead" scope="row">{{ $row['number'] }}</th>
-                                    @foreach ($row['cells'] as $cell)
-                                        <td>{{ $cell }}</td>
+                                <tbody>
+                                    @foreach ($sheet['rows'] as $row)
+                                        @if ($headerRow !== null && $row['number'] === $headerRow['number'])
+                                            @continue
+                                        @endif
+                                        <tr wire:key="wfp-row-{{ md5($sheet['name']) }}-{{ $row['number'] }}">
+                                            <th class="wfp-preview-rowhead" scope="row">{{ $row['number'] }}</th>
+                                            @foreach ($sheet['column_indexes'] as $column)
+                                                <td>{{ $row['cells'][$column] ?? '' }}</td>
+                                            @endforeach
+                                        </tr>
                                     @endforeach
-                                </tr>
-                            @endforeach
-                        </tbody>
-                    </table>
-                </div>
-            @endif
-        </div>
+                                </tbody>
+                            </table>
+                        </div>
+                    @endif
+                </section>
+            @empty
+                <p class="wfp-empty">No rows match “{{ $search }}” in the uploaded workbook.</p>
+            @endforelse
+        @endif
     @endif
 </div>

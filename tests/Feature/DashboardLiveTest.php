@@ -65,6 +65,24 @@ class DashboardLiveTest extends TestCase
             ->assertDontSee('District List');
     }
 
+    public function test_the_staff_dashboard_groups_plan_workflows_in_one_responsive_workspace(): void
+    {
+        $user = $this->staffUser();
+        $user->forceFill(['role' => 'user'])->save();
+
+        $this->actingAs($user)
+            ->get(route('home'))
+            ->assertOk()
+            ->assertSee('staff-dashboard-grid', false)
+            ->assertSee('Performance plan')
+            ->assertSee('Financial plan')
+            ->assertSee('Download OPCRF Template')
+            ->assertSee('Upload Completed OPCRF')
+            ->assertSee('Upload WFP')
+            ->assertSee(route('wfp.template'), false)
+            ->assertSee(route('wfp.index'), false);
+    }
+
     public function test_the_staff_opcrf_card_unlocks_when_the_submission_is_returned_without_a_reload(): void
     {
         $user = $this->staffUser();

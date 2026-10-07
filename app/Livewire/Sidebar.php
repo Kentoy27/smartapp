@@ -78,6 +78,30 @@ class Sidebar extends Component
             && MovRequirement::query()->active()->whereKey($requestedMov)->exists()
                 ? (string) $requestedMov
                 : null;
+
+        if ($this->movFocus !== null) {
+            $requirement = MovRequirement::query()
+                ->active()
+                ->with('category.part')
+                ->find((int) $this->movFocus);
+
+            if ($requirement?->category?->part !== null) {
+                $partId = $requirement->category->part->id;
+                $this->movOpenParts[$partId] = true;
+                $this->movOpenCategories[$partId.':'.$requirement->category->id] = true;
+            }
+        }
+
+        if ($this->movSection !== 'all') {
+            $category = MovCategory::query()
+                ->active()
+                ->with('part')
+                ->find((int) $this->movSection);
+
+            if ($category?->part !== null) {
+                $this->movOpenParts[$category->part->id] = true;
+            }
+        }
     }
 
     /**
@@ -130,20 +154,15 @@ class Sidebar extends Component
 
     /**
      * Number of OPCRF submissions still awaiting the superadmin's approval,
-     * shown as a live badge on the Review Opcrf item.
+     * shown as a live badge on the superadmin OPCRF item.
      */
     public ?int $opcrfCount = null;
 
     /**
      * The navigation items, in the order they are listed.
      *
-     * The order follows how the work is actually done, not the alphabet:
-     * a superadmin opens the dashboard, works the review queue, then
-     * manages accounts and the org structure. `order` states that
-     * explicitly (1 = first); an item without one falls back to the
-     * natural label sort, so a new destination still lands somewhere
-     * sensible. Role checks decide *which* items exist, the order decides
-     * where they appear.
+     * Role checks decide which items exist. Each item's section and order
+     * keep the navigation grouped consistently across roles.
      */
     #[Computed]
     public function items(): array
@@ -154,18 +173,39 @@ class Sidebar extends Component
                 'route' => 'home',
                 'path' => 'home',
                 'icon' => 'layout-dashboard',
+                'section' => 'Main',
                 'order' => 1,
             ],
         ];
 
+        $items[] = [
+            'label' => 'AIP',
+            'route' => 'aip.index',
+            'path' => 'aip',
+            'icon' => 'file-spreadsheet',
+            'section' => 'Files',
+            'order' => 12,
+        ];
+
         if (Auth::user()?->is_superadmin) {
             $items[] = [
-                'label' => 'Review Opcrf',
+                'label' => 'OPCRF',
                 'route' => 'opcrf.review',
                 'path' => 'opcrf-review',
                 'icon' => 'eye',
                 'badge' => $this->opcrfCount,
-                'order' => 2,
+                'section' => 'Files',
+                'order' => 10,
+            ];
+
+            // Both superadmin OPCRF tools remain available under Files.
+            $items[] = [
+                'label' => 'OPCRF Schedule',
+                'route' => 'opcrf.schedule',
+                'path' => 'opcrf-schedule',
+                'icon' => 'calendar',
+                'section' => 'Files',
+                'order' => 11,
             ];
 
             $items[] = [
@@ -174,7 +214,8 @@ class Sidebar extends Component
                 'path' => 'users',
                 'icon' => 'users-round',
                 'badge' => $this->usersCount,
-                'order' => 3,
+                'section' => 'Admin',
+                'order' => 20,
             ];
 
             $items[] = [
@@ -182,27 +223,18 @@ class Sidebar extends Component
                 'route' => 'districts.index',
                 'path' => 'districts',
                 'icon' => 'school',
-                'order' => 4,
-            ];
-
-            // The OPCRF calendar: when each Part of the form may be opened.
-            // Superadmin-only, and placed directly after Review Opcrf — it
-            // governs the same workflow that page reviews.
-            $items[] = [
-                'label' => 'OPCRF Schedule',
-                'route' => 'opcrf.schedule',
-                'path' => 'opcrf-schedule',
-                'icon' => 'calendar',
-                'order' => 3,
+                'section' => 'Admin',
+                'order' => 21,
             ];
         } else {
             // Opcrf is a staff-facing page: regular users only.
             $items[] = [
-                'label' => 'Opcrf',
+                'label' => 'OPCRF',
                 'route' => 'opcrf.index',
                 'path' => 'opcrf',
                 'icon' => 'clipboard-list',
-                'order' => 2,
+                'section' => 'Files',
+                'order' => 10,
             ];
 
             // The MOV checklist is its own page, deliberately not folded
@@ -212,11 +244,12 @@ class Sidebar extends Component
             // navigation tree — Part → Category → MOV — plus the progress
             // of the person reading it.
             $items[] = [
-                'label' => 'Upload MOV',
+                'label' => 'MOV',
                 'route' => 'mov.index',
                 'path' => 'movs',
                 'icon' => 'upload',
-                'order' => 3,
+                'section' => 'MOV',
+                'order' => 20,
                 'panel' => 'mov',
                 'children' => $this->movTree(),
             ];
@@ -229,6 +262,8 @@ class Sidebar extends Component
                     'route' => 'wfp.index',
                     'path' => 'wfp',
                     'icon' => 'chart-column',
+                    'section' => 'Files',
+                    'order' => 11,
                 ];
             }
         }
@@ -341,39 +376,6 @@ class Sidebar extends Component
             ->get(['mov_requirement_id', 'status'])
             ->groupBy('mov_requirement_id');
 
-        $focus = $this->movFocus !== null ? (int) $this->movFocus : 0;
-        $scoped = $this->movSection !== null && $this->movSection !== 'all'
-            ? (int) $this->movSection
-            : 0;
-
-        // Where the URL is pointing, resolved against the catalogue in one
-        // walk rather than by extra queries: a stale id simply never matches
-        // anything, so it leaves the tree in its resting state.
-        $focusPartId = 0;
-        $focusCategoryId = 0;
-        $scopedPartId = 0;
-
-        foreach ($parts as $part) {
-            foreach ($part->categories as $category) {
-                if ($category->id === $scoped) {
-                    $scopedPartId = $part->id;
-                }
-
-                if ($focus === 0 || $focusPartId !== 0) {
-                    continue;
-                }
-
-                foreach ($category->requirements as $requirement) {
-                    if ($requirement->id === $focus) {
-                        $focusPartId = $part->id;
-                        $focusCategoryId = $category->id;
-
-                        break 2;
-                    }
-                }
-            }
-        }
-
         $tree = [];
 
         foreach ($parts as $part) {
@@ -428,8 +430,7 @@ class Sidebar extends Component
                     // where it sits, and the count says how far it is.
                     'meta' => $categoryDone.'/'.$categoryTotal,
                     'url' => route('mov.index', ['category' => $category->id]),
-                    'open' => $category->id === $focusCategoryId
-                        || isset($this->movOpenCategories[$part->id.':'.$category->id]),
+                    'open' => isset($this->movOpenCategories[$part->id.':'.$category->id]),
                     'children' => $movs,
                 ];
             }
@@ -445,9 +446,7 @@ class Sidebar extends Component
                 'label' => $part->name,
                 'title' => $part->name,
                 'meta' => $partDone.'/'.$partTotal,
-                'open' => $part->id === $focusPartId
-                    || $part->id === $scopedPartId
-                    || isset($this->movOpenParts[$part->id]),
+                'open' => isset($this->movOpenParts[$part->id]),
                 'children' => $categories,
             ];
         }

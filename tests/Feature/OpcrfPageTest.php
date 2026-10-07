@@ -81,7 +81,7 @@ class OpcrfPageTest extends TestCase
         $html = \Livewire\Livewire::test(\App\Livewire\Sidebar::class, ['usersCount' => 0])
             ->html();
 
-        $this->assertStringContainsString('Opcrf', $html);
+        $this->assertStringContainsString('OPCRF', $html);
         $this->assertStringNotContainsString('Users', $html);
     }
 
@@ -96,7 +96,7 @@ class OpcrfPageTest extends TestCase
 
         $positions = array_map(
             fn (string $label) => strpos($html, ">{$label}</span>"),
-            ['Dashboard', 'Opcrf']
+            ['Dashboard', 'OPCRF']
         );
 
         $this->assertNotContains(false, $positions, 'Both items are rendered.');
@@ -116,10 +116,11 @@ class OpcrfPageTest extends TestCase
         $html = \Livewire\Livewire::test(\App\Livewire\Sidebar::class, ['usersCount' => 3])
             ->html();
 
-        // The staff Opcrf page stays hidden — but the superadmin's own
-        // Review Opcrf item shows.
+        // The staff OPCRF page stays hidden — but the superadmin's review
+        // destination remains available under the same Files label.
         $this->assertStringNotContainsString('href="'.route('opcrf.index').'"', $html);
-        $this->assertStringContainsString('Review Opcrf', $html);
+        $this->assertStringContainsString('OPCRF', $html);
+        $this->assertStringContainsString('OPCRF Schedule', $html);
         $this->assertStringContainsString('Users', $html);
     }
 
@@ -157,7 +158,7 @@ class OpcrfPageTest extends TestCase
         $this->actingAs($admin);
 
         \Livewire\Livewire::test(\App\Livewire\Sidebar::class, ['usersCount' => 3])
-            ->assertSee('Review Opcrf')
+            ->assertSee('OPCRF')
             ->assertSee('>2</span>', false);
     }
 

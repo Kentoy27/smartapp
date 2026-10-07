@@ -129,13 +129,15 @@ class UsersTableTest extends TestCase
         $this->assertDatabaseHas('users', ['id' => $admin->id]);
     }
 
-    public function test_sidebar_shows_only_dashboard_and_users(): void
+    public function test_sidebar_shows_superadmin_destinations(): void
     {
         $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
         User::factory()->count(3)->create();
 
         Livewire::actingAs($admin)->test('sidebar')
             ->assertSee('Dashboard')
+            ->assertSee('OPCRF')
+            ->assertSee('OPCRF Schedule')
             ->assertSee('Users')
             ->assertSee('3') // live badge count
             ->assertDontSee('Help Center')
@@ -153,7 +155,7 @@ class UsersTableTest extends TestCase
         // label marks its position in the menu.
         $positions = array_map(
             fn (string $label) => strpos($html, ">{$label}</span>"),
-            ['Dashboard', 'Review Opcrf', 'Users', 'Districts &amp; Schools']
+            ['Dashboard', 'OPCRF', 'Users', 'Districts &amp; Schools']
         );
 
         $this->assertNotContains(false, $positions, 'All four items are rendered.');
@@ -161,8 +163,7 @@ class UsersTableTest extends TestCase
         $sorted = $positions;
         sort($sorted);
 
-        // The menu follows the work: dashboard first, then the review
-        // queue, then accounts, then the org structure.
+        // Dashboard and file destinations come before superadmin management.
         $this->assertSame($sorted, $positions, 'Sidebar items must appear in working order.');
     }
 

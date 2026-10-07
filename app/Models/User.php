@@ -42,4 +42,16 @@ class User extends Authenticatable
     {
         return $this->belongsTo(School::class);
     }
+
+    /**
+     * Whether this account may access the Work and Financial Plan (WFP)
+     * module. WFP is for the School Head (SH) role only: the role column
+     * uses 'user' for SH (the UI labels it 'SH'), 'viewer' for the SDS
+     * Viewer, and 'superadmin' for superadmins. Only a non-superadmin SH
+     * can reach WFP — everyone else gets a 404 from the route guard.
+     */
+    public function canAccessWfp(): bool
+    {
+        return ! $this->is_superadmin && $this->role === 'user';
+    }
 }

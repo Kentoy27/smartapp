@@ -19,7 +19,7 @@ use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
- * The Upload MOV checklist.
+ * The MOV checklist and evidence uploads.
  *
  * These tests pin the three things that make the module trustworthy: the
  * checklist is DATA (a config change plus one sync adds a MOV, with no view
@@ -127,9 +127,9 @@ class MovUploadTest extends TestCase
     private function movTreeFor(User $user): array
     {
         $item = collect(Livewire::actingAs($user)->test(Sidebar::class)->instance()->items())
-            ->firstWhere('label', 'Upload MOV');
+            ->firstWhere('label', 'MOV');
 
-        $this->assertNotNull($item, 'Upload MOV lost its place in the navigation.');
+        $this->assertNotNull($item, 'The MOV section lost its place in the navigation.');
 
         return $item['children'];
     }
@@ -181,23 +181,23 @@ class MovUploadTest extends TestCase
 
         $staff = $this->staff();
 
-        // The page is empty until a MOV is chosen: no header, no checklist,
-        // no card. A MOV is chosen from the sidebar.
+        // The progress and selection prompt are available until a MOV is
+        // chosen from the sidebar.
         $this->actingAs($staff)
             ->get(route('mov.index'))
             ->assertOk()
             ->assertSeeLivewire('mov-uploader')
-            ->assertDontSee('class="mov-card"', false)
-            ->assertDontSee('Pictures attached to', false)
-            ->assertDontSee('Upload your photos here', false);
+            ->assertSee('MOV Submission Progress')
+            ->assertSee('Select a MOV from the sidebar')
+            ->assertDontSee('class="mov-evidence-table"', false);
 
-        // Chosen, it renders alone: one MOV, its own table, its own upload row.
+        // Chosen, it renders alone with the evidence table and upload panel.
         $this->actingAs($staff)
             ->get(route('mov.index', ['mov' => $this->wfpRequirement()->id]))
             ->assertOk()
-            ->assertSee('Pictures attached to PART 1 → A → MOV 1', false)
-            ->assertSee('Upload your photos here', false)
-            ->assertDontSee('Pictures attached to PART 1 → A → MOV 2', false);
+            ->assertSee('PART 1 → A → MOV 1', false)
+            ->assertSee('Upload MOV Evidence')
+            ->assertSee('No MOV evidence uploaded yet');
 
         // Superadmins review MOVs, they do not fill in this checklist — the
         // same boundary the OPCR page keeps.
@@ -206,22 +206,25 @@ class MovUploadTest extends TestCase
             ->assertStatus(404);
     }
 
-    public function test_the_sidebar_offers_upload_mov_to_staff_only(): void
+    public function test_the_sidebar_offers_the_mov_section_to_staff_only(): void
     {
         $staff = $this->staff();
 
         $staffItems = collect(Livewire::actingAs($staff)->test(Sidebar::class)->instance()->items())
             ->pluck('label');
 
-        $this->assertTrue($staffItems->contains('Upload MOV'));
+        $this->assertTrue($staffItems->contains('MOV'));
         // Its own page, not folded into the OPCR upload.
-        $this->assertTrue($staffItems->contains('Opcrf'));
+        $this->assertTrue($staffItems->contains('OPCRF'));
 
         $adminItems = collect(Livewire::actingAs(User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']))
             ->test(Sidebar::class)->instance()->items())
             ->pluck('label');
 
-        $this->assertFalse($adminItems->contains('Upload MOV'));
+        $this->assertFalse($adminItems->contains('MOV'));
+
+        $sidebar = Livewire::actingAs($staff)->test(Sidebar::class)->html();
+        $this->assertStringNotContainsString('sidebar-upload-mov', $sidebar);
     }
 
     public function test_the_sidebar_carries_the_whole_checklist_as_part_category_mov(): void
@@ -580,6 +583,30 @@ class MovUploadTest extends TestCase
             ->assertSet('movOpenParts.'.$part->id, false);
     }
 
+    public function test_a_focused_mov_does_not_prevent_its_tree_nodes_from_closing(): void
+    {
+        $this->seedChecklist();
+        $staff = $this->staff();
+        $requirement = $this->wfpRequirement();
+        $part = MovPart::where('name', 'PART 1')->firstOrFail();
+        $category = MovCategory::where('mov_part_id', $part->id)->where('name', 'A')->firstOrFail();
+
+        $component = Livewire::actingAs($staff)
+            ->test(Sidebar::class)
+            ->set('movFocus', (string) $requirement->id)
+            ->set('movOpenParts.'.$part->id, true)
+            ->set('movOpenCategories.'.$part->id.':'.$category->id, true);
+
+        $component->call('toggleMovNode', 'part-'.$part->id)
+            ->assertSet('movOpenParts.'.$part->id, false)
+            ->assertDontSee("toggleMovNode('category-".$part->id.'-'.$category->id."')");
+
+        $component->call('toggleMovNode', 'part-'.$part->id)
+            ->call('toggleMovNode', 'category-'.$part->id.'-'.$category->id)
+            ->assertSet('movOpenCategories.'.$part->id.':'.$category->id, false)
+            ->assertDontSee('href="'.route('mov.index', ['mov' => $requirement->id]).'"', false);
+    }
+
     public function test_the_dropdown_renders_the_three_levels(): void
     {
         $this->seedChecklist();
@@ -821,6 +848,39 @@ class MovUploadTest extends TestCase
         $this->assertStringStartsWith('mov-uploads/'.$staff->id.'/', $upload->stored_path);
     }
 
+    public function test_replacing_a_picture_only_replaces_the_selected_record(): void
+    {
+        Storage::fake('local');
+        $this->seedChecklist();
+        $staff = $this->staff();
+        $requirement = $this->wfpRequirement();
+        $component = Livewire::actingAs($staff)->test(MovUploader::class);
+
+        foreach (['keep.jpg', 'replace.jpg'] as $name) {
+            $component->call('openUpload', $requirement->id)
+                ->set('document', UploadedFile::fake()->create($name, 20, 'image/jpeg'))
+                ->call('upload')
+                ->assertHasNoErrors();
+        }
+
+        $pictures = UserMov::forUser($staff)->where('mov_requirement_id', $requirement->id)->oldest('id')->get();
+        $kept = $pictures[0];
+        $selected = $pictures[1];
+        $oldPath = $selected->stored_path;
+
+        $component->call('beginReplace', $selected->id)
+            ->set('document', UploadedFile::fake()->create('replacement.jpg', 24, 'image/jpeg'))
+            ->call('upload', $requirement->id)
+            ->assertHasNoErrors();
+
+        $this->assertSame(2, UserMov::forUser($staff)->where('mov_requirement_id', $requirement->id)->count());
+        $this->assertSame('keep.jpg', $kept->fresh()->original_name);
+        $this->assertSame('replacement.jpg', $selected->fresh()->original_name);
+        $this->assertSame(UserMov::STATUS_UPLOADED, $selected->fresh()->status);
+        Storage::disk('local')->assertMissing($oldPath);
+        Storage::disk('local')->assertExists($selected->fresh()->stored_path);
+    }
+
     public function test_a_mov_keeps_every_picture_it_is_given(): void
     {
         Storage::fake('local');
@@ -1017,7 +1077,8 @@ class MovUploadTest extends TestCase
             ->test(MovUploader::class);
 
         $otherComponent->assertDontSee('mine.jpg')
-            ->assertSee('Upload your photos here', false);
+            ->assertSee('Upload MOV Evidence', false)
+            ->assertSee('No MOV evidence uploaded yet');
 
         // The owner can, and a superadmin (the reviewer) can.
         $this->actingAs($owner)->get(route('mov.download', $upload->id))->assertOk();
@@ -1037,22 +1098,19 @@ class MovUploadTest extends TestCase
             ->withQueryParams(['mov' => $requirement->id])
             ->test(MovUploader::class)
             ->assertSee('Approved Work and Financial Plan (WFP)', false)
-            ->assertSee('Upload your photos here', false)
-            // The upload row says which requirement the picture will answer.
+            ->assertSee('Upload MOV Evidence', false)
+            ->assertSee('No MOV evidence uploaded yet')
             ->assertSee('PART 1 → A → MOV 1', false)
             ->set('document', UploadedFile::fake()->create('WFP-AIP.jpg', 20, 'image/jpeg'))
             ->call('upload', $requirement->id)
-            // The picture is a row in the MOV's own table, with when it landed and
-            // where it is in review, and the table still ends in an upload row
-            // to add another one rather than a replace.
             ->assertSee('WFP-AIP.jpg')
-            ->assertSee('>Uploaded</th>', false)
-            ->assertSee('badge-muted', false)
-            ->assertSee('1 picture · not reviewed yet')
-            ->assertSee('Upload your photos here', false);
+            ->assertSee('>Date Uploaded</th>', false)
+            ->assertSee('Pending')
+            ->assertSee('Upload MOV Evidence', false)
+            ->assertSee('1 of 23 required MOVs completed');
     }
 
-    public function test_every_mov_carries_its_own_table_with_an_upload_row(): void
+    public function test_each_selected_mov_shows_its_evidence_and_upload_panel(): void
     {
         Storage::fake('local');
         $this->seedChecklist();
@@ -1074,47 +1132,40 @@ class MovUploadTest extends TestCase
             'The picture went to the MOV whose upload area was used, and to no other.',
         );
 
-        // The MOV with a picture, chosen, renders alone: its own table with a row
-        // for the picture and the upload row that adds to it.
+        // The chosen MOV renders alone with its evidence table and separate
+        // upload panel so another picture can be added without replacing it.
         $component = Livewire::actingAs($staff)
             ->withQueryParams(['mov' => $requirement->id])
             ->test(MovUploader::class);
 
         $html = $component->html();
 
-        $this->assertSame(1, substr_count($html, 'class="mov-card"'), 'One MOV is on screen.');
+        $this->assertSame(1, substr_count($html, 'class="mov-evidence"'), 'One MOV is on screen.');
         $this->assertSame(
             1,
-            substr_count($html, '<table class="mov-picture-table"'),
-            'It carries its own table.',
-        );
-        $this->assertSame(
-            1,
-            substr_count($html, '<tr class="mov-upload-row">'),
-            'The table ends in an upload row.',
+            substr_count($html, '<table class="mov-evidence-table">'),
+            'It carries its own evidence table.',
         );
         $this->assertSame(
             1,
             substr_count($html, 'wire:click="upload('),
-            'The upload row names the MOV it uploads to.',
+            'The separate upload panel names the MOV it uploads to.',
         );
 
-        // The MOV with a picture has a row for it and its own trail as the
-        // caption; a MOV with nothing says so rather than rendering empty.
-        $this->assertSame(1, substr_count($html, 'class="mov-picture '));
-        $this->assertSame(0, substr_count($html, 'class="mov-picture-empty"'));
-        $this->assertStringContainsString('Pictures attached to PART 1 → A → MOV 1', $html);
+        $this->assertSame(1, substr_count($html, 'class="mov-evidence-thumb"'));
+        $this->assertSame(0, substr_count($html, 'No MOV evidence uploaded yet'));
+        $this->assertStringContainsString('Evidence files for PART 1 → A → MOV 1', $html);
         $this->assertStringContainsString('wfp.jpg', $html);
 
-        // The same holds for every other MOV: chosen, it gets its own table,
-        // captioned with its own trail and nothing else on the page.
+        // Other MOVs show their own empty state and upload panel, not a
+        // misleading empty table.
         foreach (MovRequirement::query()->active()->where('id', '!=', $requirement->id)->take(3)->get() as $other) {
             $page = Livewire::actingAs($staff)->withQueryParams(['mov' => $other->id])->test(MovUploader::class)->html();
 
-            $this->assertSame(1, substr_count($page, 'class="mov-card"'), $other->trail());
-            $this->assertSame(1, substr_count($page, '<table class="mov-picture-table"'));
-            $this->assertSame(1, substr_count($page, '<tr class="mov-upload-row">'));
-            $this->assertStringContainsString('Pictures attached to '.$other->trail(), $page);
+            $this->assertSame(1, substr_count($page, 'class="mov-evidence"'), $other->trail());
+            $this->assertSame(0, substr_count($page, '<table class="mov-evidence-table">'));
+            $this->assertStringContainsString('No MOV evidence uploaded yet', $page);
+            $this->assertStringContainsString($other->trail(), $page);
             $this->assertStringContainsString('>Upload Picture<', $page);
         }
     }
@@ -1228,9 +1279,9 @@ class MovUploadTest extends TestCase
             ->test(MovUploader::class);
 
         $component
-            ->assertSee('Returned for Revision')
+            ->assertSee('Returned')
             ->assertSee('Please upload the signed version.')
-            ->assertSee('Reviewed by: '.$reviewer->username);
+            ->assertSee('Reviewed by '.$reviewer->username);
 
         // The document still counts as attached — but it is flagged, not
         // quietly counted as finished.

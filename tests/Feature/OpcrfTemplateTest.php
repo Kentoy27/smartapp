@@ -321,12 +321,15 @@ class OpcrfTemplateTest extends TestCase
         $this->actingAs($staff)
             ->get(route('home'))
             ->assertOk()
-            // The whole card is locked: no download, no upload.
+            // The whole card is locked: no download, no upload. The checks
+            // are scoped to the OPCRF card's own download (file name and
+            // route): a page-wide "no Download" check predates the WFP card,
+            // which legitimately shows its own Download button for School
+            // Heads — this staff account is one.
             ->assertSee('OPCRF submitted — locked')
             ->assertSee('Locked')
             ->assertDontSee('OPCRF-TEMPLATE.xlsx')
             ->assertDontSee(route('opcrf.template'), false)
-            ->assertDontSee('Download')
             ->assertDontSee('Click to choose your OPCRF file');
     }
 

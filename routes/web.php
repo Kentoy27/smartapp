@@ -3,10 +3,12 @@
 use App\Http\Controllers\Auth\GoogleAuthController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\DashboardController;
+use App\Models\User;
 use App\Support\OpcrfPartOne;
 use App\Support\OpcrfTemplatePersonalizer;
 use App\Support\OpcrfWorkbookTrim;
 use App\Support\WfpTemplate;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
@@ -33,6 +35,10 @@ Route::get('/auth/google/callback', [GoogleAuthController::class, 'callback'])->
 Route::get('/home', [DashboardController::class, 'index'])->middleware('auth')->name('home');
 
 Route::middleware('auth')->group(function () {
+    Route::get('/aip', function () {
+        return view('aip.index');
+    })->name('aip.index');
+
     Route::get('/users', function () {
         abort_unless(Auth::user()?->is_superadmin, 404);
 
@@ -218,9 +224,12 @@ Route::middleware('auth')->group(function () {
 
         abort_if(! $mov->submission->canBeReviewedBy($user), 403);
 
-        abort_unless(Storage::disk('local')->exists($mov->stored_path), 404);
+        /** @var FilesystemAdapter $disk */
+        $disk = Storage::disk('local');
 
-        return Storage::disk('local')->download($mov->stored_path, $mov->original_name);
+        abort_unless($disk->exists($mov->stored_path), 404);
+
+        return $disk->download($mov->stored_path, $mov->original_name);
     })->name('opcrf.movs.download')->where('mov', '[0-9]+');
 
     /* ------------------------------------------------------------------
@@ -233,7 +242,8 @@ Route::middleware('auth')->group(function () {
      * ----------------------------------------------------------------- */
 
     Route::get('/wfp', function () {
-        abort_unless(Auth::user()?->canAccessWfp(), 404);
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canAccessWfp(), 404);
 
         return view('wfp.index');
     })->name('wfp.index');
@@ -242,7 +252,8 @@ Route::middleware('auth')->group(function () {
     // Bytes first, then the response — a streamed callback's return value is
     // discarded and would risk a 0-byte download.
     Route::get('/download/wfp-template', function () {
-        abort_unless(Auth::user()?->canAccessWfp(), 404);
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canAccessWfp(), 404);
         abort_unless(WfpTemplate::exists(), 404);
 
         $bytes = WfpTemplate::bytes();
@@ -256,13 +267,17 @@ Route::middleware('auth')->group(function () {
     // A user's uploaded WFP. Owner-only — the model gate re-checks ownership,
     // so another account's file id is unreachable.
     Route::get('/wfp-uploads/{wfp}/download', function (App\Models\WfpSubmission $wfp) {
-        abort_unless(Auth::user()?->canAccessWfp(), 404);
-        abort_unless($wfp->canBeManagedBy(Auth::user()), 404);
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canAccessWfp(), 404);
+        abort_unless($wfp->canBeManagedBy($user), 404);
         abort_unless($wfp->hasFile(), 404);
 
-        return Storage::disk('local')->download($wfp->file_path, $wfp->fileDownloadName());
+        /** @var FilesystemAdapter $disk */
+        $disk = Storage::disk('local');
+
+        return $disk->download($wfp->file_path, $wfp->fileDownloadName());
     })->name('wfp.download')->where('wfp', '[0-9]+');
-});
+
     // MOV uploads: the staff member's Means of Verification checklist —
     // Part → Category → MOV → the document they attached to it. A separate
     // page from the OPCR upload on purpose: this is the standing evidence
@@ -277,6 +292,7 @@ Route::middleware('auth')->group(function () {
     // inline; anything else (a .docx) is handed over as a download, because
     // no browser can display it.
     Route::get('/movs/{mov}/view', function (App\Models\UserMov $mov) {
+        /** @var FilesystemAdapter $disk */
         $disk = Storage::disk(config('mov.disk', 'local'));
 
         abort_unless($mov->canBeAccessedBy(Auth::user()), 403);
@@ -311,6 +327,7 @@ Route::middleware('auth')->group(function () {
     // The same file as a download. Owner or superadmin only — the storage
     // path is never exposed and never lives under a public URL.
     Route::get('/movs/{mov}/download', function (App\Models\UserMov $mov) {
+        /** @var FilesystemAdapter $disk */
         $disk = Storage::disk(config('mov.disk', 'local'));
 
         abort_unless($mov->canBeAccessedBy(Auth::user()), 403);

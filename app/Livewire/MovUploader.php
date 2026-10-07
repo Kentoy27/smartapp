@@ -8,6 +8,7 @@ use App\Models\MovRequirement;
 use App\Models\UserMov;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
@@ -129,6 +130,11 @@ class MovUploader extends Component
     public ?int $removingId = null;
 
     /**
+     * The picture selected for explicit replacement, if any.
+     */
+    public ?int $replacingId = null;
+
+    /**
      * Toast text after an upload or a removal; cleared once shown, so a poll
      * never re-fires it.
      */
@@ -228,7 +234,24 @@ class MovUploader extends Component
     public function cancelUpload(): void
     {
         $this->uploadingFor = null;
+        $this->replacingId = null;
         $this->document = null;
+        $this->resetValidation();
+    }
+
+    /**
+     * Choose one existing picture to replace. Other pictures for this MOV
+     * remain untouched.
+     */
+    public function beginReplace(int $documentId): void
+    {
+        $this->assertStaffMember();
+
+        $picture = UserMov::forUser(Auth::user())->findOrFail($documentId);
+        $this->uploadingFor = $picture->mov_requirement_id;
+        $this->replacingId = $picture->id;
+        $this->document = null;
+        $this->removingId = null;
         $this->resetValidation();
     }
 
@@ -265,6 +288,12 @@ class MovUploader extends Component
         /** @var TemporaryUploadedFile $file */
         $file = $this->document;
         $originalName = (string) $file->getClientOriginalName();
+        $disk = Storage::disk(config('mov.disk', 'local'));
+        $replacingPicture = $this->replacingId !== null
+            ? UserMov::forUser(Auth::user())
+                ->where('mov_requirement_id', $requirement->id)
+                ->findOrFail($this->replacingId)
+            : null;
 
         $path = $file->storeAs(
             config('mov.directory', 'mov-uploads').'/'.Auth::id(),
@@ -272,18 +301,33 @@ class MovUploader extends Component
             config('mov.disk', 'local'),
         );
 
-        $picture = UserMov::create([
-            'user_id' => Auth::id(),
-            'mov_requirement_id' => $requirement->id,
+        $attributes = [
             'original_name' => $this->displayName($originalName),
             'stored_path' => $path,
             'mime_type' => $file->getClientMimeType(),
             'size_bytes' => (int) $file->getSize(),
             'status' => UserMov::STATUS_UPLOADED,
             'uploaded_at' => now(),
-        ]);
+            'remarks' => null,
+            'reviewed_by' => null,
+            'reviewed_at' => null,
+        ];
+
+        if ($replacingPicture !== null) {
+            $oldPath = $replacingPicture->stored_path;
+            $picture = $replacingPicture;
+            $picture->update($attributes);
+            $disk->delete($oldPath);
+        } else {
+            $picture = UserMov::create([
+                'user_id' => Auth::id(),
+                'mov_requirement_id' => $requirement->id,
+                ...$attributes,
+            ]);
+        }
 
         $this->uploadingFor = null;
+        $this->replacingId = null;
         $this->uploadFailedFor = null;
         $this->document = null;
         $this->removingId = null;
@@ -291,7 +335,8 @@ class MovUploader extends Component
 
         unset($this->tree, $this->sections, $this->scope, $this->progress);
 
-        $this->successMessage = $requirement->label().' — '.$picture->original_name.' added ('
+        $action = $replacingPicture !== null ? 'replaced' : 'added';
+        $this->successMessage = $requirement->label().' — '.$picture->original_name.' '.$action.' ('
             .UserMov::forUser(Auth::user())->where('mov_requirement_id', $requirement->id)->count()
             .' pictures).';
     }
@@ -719,7 +764,13 @@ class MovUploader extends Component
                 'name' => $picture->original_name,
                 'size' => $picture->human_size,
                 'status' => $picture->status,
-                'status_label' => $picture->statusLabel(),
+                'status_label' => match ($picture->status) {
+                    UserMov::STATUS_UPLOADED => 'Pending',
+                    UserMov::STATUS_UNDER_REVIEW => 'Under Review',
+                    UserMov::STATUS_ACCEPTED => 'Approved',
+                    UserMov::STATUS_RETURNED => 'Returned',
+                    default => $picture->statusLabel(),
+                },
                 'status_class' => $picture->statusBadgeClass(),
                 'remarks' => $picture->remarks,
                 'reviewer' => $picture->reviewer?->username,
@@ -728,6 +779,15 @@ class MovUploader extends Component
             ])
             ->values()
             ->all();
+
+        $statuses = array_column($lines, 'status');
+        $state = match (true) {
+            $statuses === [] => ['Not Submitted', 'badge-muted'],
+            in_array(UserMov::STATUS_RETURNED, $statuses, true) => ['Returned', 'badge--warn'],
+            count(array_filter($statuses, fn (string $status): bool => $status === UserMov::STATUS_ACCEPTED)) === count($statuses) => ['Approved', 'badge--ok'],
+            in_array(UserMov::STATUS_UNDER_REVIEW, $statuses, true) => ['Under Review', 'badge--info'],
+            default => ['Submitted', 'badge-muted'],
+        };
 
         return [
             'id' => $requirement->id,
@@ -739,6 +799,8 @@ class MovUploader extends Component
             'pictures' => $lines,
             'count' => count($lines),
             'summary' => $this->picturesSummary($lines),
+            'submission_status' => $state[0],
+            'submission_status_class' => $state[1],
         ];
     }
 

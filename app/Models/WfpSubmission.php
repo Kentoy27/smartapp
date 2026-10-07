@@ -30,11 +30,26 @@ class WfpSubmission extends Model
         'school_name',
         'status',
         'uploaded_at',
+        'file_type',
+        'edited_file_path',
+        'sheet_data',
+        'analysis',
+        'validation',
+        'review_status',
+        'review_remarks',
+        'reviewer_id',
+        'submitted_at',
+        'reviewed_at',
     ];
 
     protected $casts = [
         'uploaded_at' => 'datetime',
         'file_size' => 'integer',
+        'sheet_data' => 'array',
+        'analysis' => 'array',
+        'validation' => 'array',
+        'submitted_at' => 'datetime',
+        'reviewed_at' => 'datetime',
     ];
 
     public function user(): BelongsTo

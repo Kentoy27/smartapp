@@ -116,6 +116,7 @@ class WfpUpload extends Component
         // Open + structure-check the workbook before storing anything.
         $spreadsheet = new WfpSpreadsheet($this->file->getRealPath());
         $spreadsheet->validateStructure();
+        $reviewData = $spreadsheet->reviewData();
 
         $originalName = $this->file->getClientOriginalName();
 
@@ -125,22 +126,29 @@ class WfpUpload extends Component
             'local'
         );
 
-        // A staff member keeps a single active plan: drop the previous row
-        // (its stored file is removed by the model's deleting hook) so a new
-        // upload replaces it.
-        WfpSubmission::where('user_id', $user->id)->get()->each->delete();
-
-        WfpSubmission::create([
+        $submission = WfpSubmission::create([
             'user_id' => $user->id,
             'original_file_name' => $originalName,
             'file_path' => $path,
             'file_size' => $this->file->getSize(),
             'mime_type' => $this->file->getMimeType(),
+            'file_type' => 'xlsx',
             'school_year' => $spreadsheet->detectSchoolYear(),
             'school_name' => $spreadsheet->detectSchoolName(),
             'status' => WfpSubmission::STATUS_UPLOADED,
             'uploaded_at' => now(),
+            'sheet_data' => $reviewData['sheet_data'],
+            'analysis' => $reviewData['analysis'],
+            'validation' => $reviewData['validation'],
         ]);
+
+        // Keep the just-created analyzed workbook intact if a cleanup failure
+        // occurs while removing this user's previous upload.
+        WfpSubmission::where('user_id', $user->id)
+            ->where('id', '!=', $submission->id)
+            ->get()
+            ->each
+            ->delete();
     }
 
     public function clearSuccess(): void

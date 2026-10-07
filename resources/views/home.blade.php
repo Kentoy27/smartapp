@@ -3,64 +3,79 @@
 @section('title', 'Dashboard — SmartApp')
 
 @section('content')
-    <div class="page-header">
-        <h1>Welcome back, {{ $user->username }}</h1>
-        <p>Here's what's happening with your account today.</p>
-    </div>
+    <section class="dashboard-welcome{{ $user->is_superadmin ? ' dashboard-welcome--admin' : '' }}">
+        <div class="dashboard-welcome__copy">
+            <span class="dashboard-welcome__eyebrow">
+                {{ $user->is_superadmin ? 'ADMIN WORKSPACE' : 'STAFF WORKSPACE' }}
+            </span>
+            <h1>Welcome back, {{ $user->username }}</h1>
+            <p>
+                {{ $user->is_superadmin
+                    ? 'Review submissions and keep your school data moving.'
+                    : 'Your performance plan and financial plan, together in one place.' }}
+            </p>
+        </div>
+        @unless ($user->is_superadmin)
+            <a href="{{ route('mov.index') }}" class="dashboard-welcome__link" wire:navigate>
+                <x-icon name="upload" :size="16" />
+                <span>Open MOV checklist</span>
+                <span aria-hidden="true">→</span>
+            </a>
+        @endunless
+    </section>
 
-    {{-- Everything below the greeting is data-driven and refreshes itself.
-         Staff get the OPCRF Template card (DashboardSummary), which polls for
-         changes so a submission, approval or return-for-revision shows up here
-         without a reload. A superadmin gets OPCRF Analytics instead — the
-         review workload at a glance, over the same submissions their Review
-         Opcrf page lists. The District List has its own page (Districts &
-         Schools), so it is on neither dashboard. --}}
     @if ($user->is_superadmin)
         <livewire:opcrf-analytics />
     @else
-        <livewire:dashboard-summary />
-
-        {{-- The OPCRF upload button and its two modals (upload window, then
-             review-before-submitting). Kept here, as a SIBLING of the
-             dashboard summary rather than inside it: the summary polls every
-             15s, and a nested component is re-mounted on every poll — which
-             discarded the picked file and closed the review modal seconds
-             after it opened. As a sibling it keeps its state for as long as
-             the user is in the flow.
-
-             Staff-only, as it was inside the summary: the component refuses
-             to mount for a superadmin, so rendering it for one would turn
-             their whole dashboard into a 404. --}}
-        @if (! auth()->user()->is_superadmin)
-            <livewire:opcrf-upload />
-        @endif
-    @endif
-
-    {{-- WFP tools: School Head (SH) only — the SDS Viewer and Super Admin
-         never see this card, and the route/Livewire guards enforce the same. --}}
-    @if ($wfpTemplate !== null)
-        <div class="card">
-            <div class="card-head">
-                <div class="card-title">WFP Template</div>
-                <a href="{{ route('wfp.index') }}" class="card-link">Go to WFP →</a>
-            </div>
-            <div class="opcr-template-row">
-                <span class="opcr-file-badge" aria-hidden="true">
-                    <x-icon name="file-spreadsheet" :size="22" />
-                </span>
-                <div class="opcr-file-meta">
-                    <span class="opcr-file-name">{{ $wfpTemplate['name'] }}</span>
-                    <span class="opcr-file-sub">{{ $wfpTemplate['description'] }}</span>
+        <div class="staff-dashboard-grid{{ $wfpTemplate !== null ? ' has-wfp' : '' }}">
+            <section class="staff-dashboard-panel" aria-labelledby="dashboard-opcrf-heading">
+                <div class="staff-dashboard-panel__intro">
+                    <span class="staff-dashboard-panel__step">01</span>
+                    <div>
+                        <h2 id="dashboard-opcrf-heading">Performance plan</h2>
+                        <p>Prepare your OPCRF and follow its review status.</p>
+                    </div>
                 </div>
-                <a href="{{ route('wfp.template') }}" class="opcr-download-btn" download>
-                    <x-icon name="download" :size="16" />
-                    <span>Download</span>
-                </a>
+                <livewire:dashboard-summary />
+                <div class="staff-dashboard-panel__actions">
+                    <livewire:opcrf-upload />
+                </div>
+            </section>
 
-                {{-- UPLOAD: clicking it opens the "Upload your WFP in here"
-                     window; the workbook is checked as a WFP and stored. --}}
-                <livewire:wfp-upload :key="'wfp-upload-card'" />
-            </div>
+            @if ($wfpTemplate !== null)
+                <section class="staff-dashboard-panel staff-dashboard-panel--wfp" aria-labelledby="dashboard-wfp-heading">
+                    <div class="staff-dashboard-panel__intro">
+                        <span class="staff-dashboard-panel__step">02</span>
+                        <div>
+                            <h2 id="dashboard-wfp-heading">Financial plan</h2>
+                            <p>Upload and review your school’s WFP workbook.</p>
+                        </div>
+                    </div>
+
+                    <article class="card dashboard-plan-card">
+                        <div class="dashboard-plan-card__heading">
+                            <span class="opcr-file-badge" aria-hidden="true">
+                                <x-icon name="file-spreadsheet" :size="22" />
+                            </span>
+                            <div>
+                                <h3>WFP Template</h3>
+                                <span class="opcr-file-name">{{ $wfpTemplate['name'] }}</span>
+                            </div>
+                        </div>
+                        <p class="dashboard-plan-card__description">{{ $wfpTemplate['description'] }}</p>
+                        <div class="dashboard-plan-card__actions">
+                            <a href="{{ route('wfp.template') }}" class="opcr-download-btn" download>
+                                <x-icon name="download" :size="16" />
+                                <span>Download</span>
+                            </a>
+                            <livewire:wfp-upload :key="'wfp-upload-card'" />
+                        </div>
+                        <a href="{{ route('wfp.index') }}" class="dashboard-plan-card__link" wire:navigate>
+                            Open WFP workspace <span aria-hidden="true">→</span>
+                        </a>
+                    </article>
+                </section>
+            @endif
         </div>
     @endif
 @endsection

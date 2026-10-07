@@ -11,10 +11,10 @@ use RuntimeException;
  * the WFP workbook is wide and free-form — the app does not know, or want to
  * know, where each figure lives. So this reader stays layout-agnostic:
  *
- *   - it loads the first worksheet's cells (shared/inline strings resolved),
- *   - validates the workbook by *searching* for the WFP headings, and
+ *   - it loads every worksheet's cells (shared/inline strings resolved),
+ *   - validates and analyzes the workbook's WFP headings across all sheets,
  *   - detects a title/school/year best-effort for the status card, and
- *   - exposes the used range as a grid for the preview table.
+ *   - exposes every populated row for the review table.
  *
  * The workbook is opened with PHP's native ZipArchive when the zip extension
  * is loaded, and falls back to PurePhpZipReader on builds without it (e.g.
@@ -36,6 +36,13 @@ class WfpSpreadsheet
      * @var array<string, string>
      */
     private array $cells = [];
+
+    /**
+     * Worksheet names mapped to their cell values.
+     *
+     * @var array<string, array<string, string>>
+     */
+    private array $worksheets = [];
 
     public function __construct(string $filePath)
     {
@@ -87,13 +94,13 @@ class WfpSpreadsheet
      */
     public function detectSchoolYear(): ?string
     {
-        foreach ($this->cells as $value) {
+        foreach ($this->allCellValues() as $value) {
             if (preg_match('/\bCY\s*(\d{4})\b/i', $value, $m) === 1) {
                 return 'CY '.$m[1];
             }
         }
 
-        foreach ($this->cells as $value) {
+        foreach ($this->allCellValues() as $value) {
             if (preg_match('/\b(20\d{2})\b/', $value, $m) === 1) {
                 return $m[1];
             }
@@ -107,7 +114,7 @@ class WfpSpreadsheet
      */
     public function detectSchoolName(): ?string
     {
-        foreach ($this->cells as $value) {
+        foreach ($this->allCellValues() as $value) {
             if (preg_match(
                 "#([A-Za-z][A-Za-z.'\- ]{1,60}?\s+(?:Elementary|Central|Integrated|National|High|Secondary)\s+School)#i",
                 $value,
@@ -136,30 +143,133 @@ class WfpSpreadsheet
      */
     public function validateStructure(): void
     {
-        $haystack = $this->normalizedText();
+        $analysis = $this->analysis();
+        $validation = $this->validation($analysis);
+
+        if ($validation['errors'] !== []) {
+            throw new RuntimeException(implode(' ', $validation['errors']));
+        }
+    }
+
+    /**
+     * Workbook-wide findings, based on every worksheet's actual populated
+     * cells. This reports structure and coverage without inventing scores.
+     *
+     * @return array<string, mixed>
+     */
+    public function analysis(): array
+    {
+        $allValues = [];
+        $sheetSummaries = [];
+
+        foreach ($this->worksheets as $name => $cells) {
+            $values = array_values($cells);
+            $allValues = array_merge($allValues, $values);
+            $sheetGrid = $this->worksheetGrid($cells);
+            $sheetSummaries[] = [
+                'name' => $name,
+                'rows' => count($sheetGrid['rows']),
+                'columns' => count($sheetGrid['column_indexes']),
+                'populated_cells' => count(array_filter($values, fn (string $value): bool => trim($value) !== '')),
+            ];
+        }
+
+        $haystack = $this->normalize(implode(' ', $allValues));
+        $requiredHeadings = [];
 
         foreach ((array) config('wfp.required_keywords', ['work and financial plan']) as $phrase) {
-            if (! str_contains($haystack, $this->normalize((string) $phrase))) {
-                throw new RuntimeException(
-                    'This workbook doesn’t look like the WFP template — the “Work and Financial Plan” heading was not found.'
-                );
+            $phrase = (string) $phrase;
+            $requiredHeadings[] = [
+                'label' => $phrase,
+                'found' => str_contains($haystack, $this->normalize($phrase)),
+            ];
+        }
+
+        $sections = [];
+
+        foreach ((array) config('wfp.section_keywords', []) as $section) {
+            $section = (string) $section;
+            $sections[] = [
+                'label' => $section,
+                'found' => str_contains($haystack, $this->normalize($section)),
+            ];
+        }
+
+        return [
+            'sheet_count' => count($sheetSummaries),
+            'row_count' => array_sum(array_column($sheetSummaries, 'rows')),
+            'populated_cell_count' => array_sum(array_column($sheetSummaries, 'populated_cells')),
+            'required_headings' => $requiredHeadings,
+            'sections' => $sections,
+            'sections_found' => count(array_filter($sections, fn (array $section): bool => $section['found'])),
+            'sections_required' => (int) config('wfp.min_sections', 3),
+            'sheets' => $sheetSummaries,
+        ];
+    }
+
+    /**
+     * Validation findings shown beside the workbook-wide analysis.
+     *
+     * @param  array<string, mixed>|null  $analysis
+     * @return array{passed: bool, errors: array<int, string>, warnings: array<int, string>}
+     */
+    public function validation(?array $analysis = null): array
+    {
+        $analysis ??= $this->analysis();
+        $errors = [];
+        $warnings = [];
+
+        foreach ($analysis['required_headings'] as $heading) {
+            if (! $heading['found']) {
+                $errors[] = 'Required heading not found: '.$heading['label'].'.';
             }
         }
 
-        $sections = (array) config('wfp.section_keywords', []);
-        $found = 0;
+        if ($analysis['sections_found'] < $analysis['sections_required']) {
+            $errors[] = 'The workbook does not contain enough recognizable WFP sections. Found '
+                .$analysis['sections_found'].'; at least '.$analysis['sections_required'].' are required.';
+        }
 
-        foreach ($sections as $section) {
-            if (str_contains($haystack, $this->normalize((string) $section))) {
-                $found++;
+        foreach ($analysis['sections'] as $section) {
+            if (! $section['found']) {
+                $warnings[] = 'Section heading not found: '.$section['label'].'.';
             }
         }
 
-        if ($found < (int) config('wfp.min_sections', 3)) {
-            throw new RuntimeException(
-                'This workbook is missing the WFP sections (Objectives, Programs/Projects/Activities, Major Outputs, …). Upload a completed copy of the official WFP template.'
-            );
+        return ['passed' => $errors === [], 'errors' => $errors, 'warnings' => $warnings];
+    }
+
+    /**
+     * All worksheet names and populated rows, preserving source row and
+     * column positions while avoiding dense blank cells in stored JSON.
+     *
+     * @return array<int, array{name: string, column_indexes: array<int, int>, rows: array<int, array{number: int, cells: array<int, string>}>, header_index: ?int}>
+     */
+    public function workbookSheets(): array
+    {
+        $sheets = [];
+
+        foreach ($this->worksheets as $name => $cells) {
+            $sheets[] = ['name' => $name] + $this->worksheetGrid($cells);
         }
+
+        return $sheets;
+    }
+
+    /**
+     * The complete data package persisted with a WFP upload.
+     *
+     * @return array{sheet_data: array<int, array<string, mixed>>, analysis: array<string, mixed>, validation: array<string, mixed>}
+     */
+    public function reviewData(): array
+    {
+        $analysis = $this->analysis();
+
+        return [
+            'sheet_data' => $this->workbookSheets(),
+            'analysis' => $analysis,
+            'validation' => $this->validation($analysis),
+        ];
     }
 
     /* ------------------------------------------------------------------
@@ -254,7 +364,8 @@ class WfpSpreadsheet
             : (new PurePhpZipReader($filePath))->readAll();
 
         $this->sharedStrings = $this->readSharedStrings($entries['xl/sharedStrings.xml'] ?? false);
-        $this->cells = $this->readWorksheet($this->firstWorksheet($entries));
+        $this->worksheets = $this->readWorksheets($entries);
+        $this->cells = reset($this->worksheets) ?: [];
     }
 
     /**
@@ -300,6 +411,93 @@ class WfpSpreadsheet
         }
 
         return false;
+    }
+
+    /**
+     * Resolve sheet names and worksheet files through the workbook
+     * relationships; fall back to sheet file order for older workbooks.
+     *
+     * @param  array<string, string>  $entries
+     * @return array<string, array<string, string>>
+     */
+    private function readWorksheets(array $entries): array
+    {
+        $workbookXml = $entries['xl/workbook.xml'] ?? false;
+        $relationshipsXml = $entries['xl/_rels/workbook.xml.rels'] ?? false;
+        $sheetFiles = [];
+
+        if ($workbookXml !== false && $relationshipsXml !== false) {
+            $workbook = @simplexml_load_string($workbookXml);
+            $relationships = @simplexml_load_string($relationshipsXml);
+
+            if ($workbook !== false && $relationships !== false) {
+                $relationshipTargets = [];
+
+                foreach ($relationships->children('http://schemas.openxmlformats.org/package/2006/relationships')->Relationship as $relationship) {
+                    $attributes = $relationship->attributes();
+                    $relationshipTargets[(string) $attributes['Id']] = (string) $attributes['Target'];
+                }
+
+                foreach ($workbook->children('http://schemas.openxmlformats.org/spreadsheetml/2006/main')->sheets
+                    ->children('http://schemas.openxmlformats.org/spreadsheetml/2006/main')->sheet as $sheet) {
+                    $attributes = $sheet->attributes();
+                    $relationshipAttributes = $sheet->attributes('http://schemas.openxmlformats.org/officeDocument/2006/relationships');
+                    $name = trim((string) $attributes['name']);
+                    $target = $relationshipTargets[(string) $relationshipAttributes['id']] ?? null;
+
+                    if ($name === '' || $target === null) {
+                        continue;
+                    }
+
+                    $path = $this->normalizeZipPath(str_starts_with($target, '/') ? ltrim($target, '/') : 'xl/'.$target);
+
+                    if (isset($entries[$path])) {
+                        $sheetFiles[$name] = $entries[$path];
+                    }
+                }
+            }
+        }
+
+        if ($sheetFiles === []) {
+            foreach ($entries as $path => $xml) {
+                if (preg_match('#^xl/worksheets/sheet\d+\.xml$#', $path) === 1) {
+                    $sheetFiles['Sheet '.(count($sheetFiles) + 1)] = $xml;
+                }
+            }
+        }
+
+        if ($sheetFiles === []) {
+            throw new RuntimeException('The workbook has no readable worksheet.');
+        }
+
+        $sheets = [];
+
+        foreach ($sheetFiles as $name => $xml) {
+            $sheets[$name] = $this->readWorksheet($xml);
+        }
+
+        return $sheets;
+    }
+
+    private function normalizeZipPath(string $path): string
+    {
+        $segments = [];
+
+        foreach (explode('/', str_replace('\\', '/', $path)) as $segment) {
+            if ($segment === '' || $segment === '.') {
+                continue;
+            }
+
+            if ($segment === '..') {
+                array_pop($segments);
+
+                continue;
+            }
+
+            $segments[] = $segment;
+        }
+
+        return implode('/', $segments);
     }
 
     /**
@@ -385,6 +583,57 @@ class WfpSpreadsheet
         return $cells;
     }
 
+    /**
+     * Build a sparse but position-preserving grid from worksheet cells.
+     *
+     * @param  array<string, string>  $cells
+     * @return array{column_indexes: array<int, int>, rows: array<int, array{number: int, cells: array<int, string>}>, header_index: ?int}
+     */
+    private function worksheetGrid(array $cells): array
+    {
+        $perRow = [];
+        $columns = [];
+
+        foreach ($cells as $ref => $value) {
+            $parts = $this->refParts($ref);
+
+            if ($parts === null || $value === '') {
+                continue;
+            }
+
+            $perRow[$parts['row']][$parts['col']] = $value;
+            $columns[$parts['col']] = true;
+        }
+
+        ksort($perRow);
+        $columnIndexes = array_keys($columns);
+        sort($columnIndexes);
+        $rows = [];
+
+        foreach ($perRow as $number => $rowCells) {
+            ksort($rowCells);
+            $rows[] = ['number' => (int) $number, 'cells' => $rowCells];
+        }
+
+        $headerIndex = null;
+        $best = 0;
+
+        foreach (array_slice($rows, 0, 10, true) as $index => $row) {
+            $count = count($row['cells']);
+
+            if ($count > $best) {
+                $best = $count;
+                $headerIndex = $index;
+            }
+        }
+
+        return [
+            'column_indexes' => $columnIndexes,
+            'rows' => $rows,
+            'header_index' => $headerIndex,
+        ];
+    }
+
     /* ------------------------------------------------------------------
      * Small helpers
      * ----------------------------------------------------------------- */
@@ -395,7 +644,23 @@ class WfpSpreadsheet
      */
     private function normalizedText(): string
     {
-        return $this->normalize(implode(' ', array_values($this->cells)));
+        return $this->normalize(implode(' ', $this->allCellValues()));
+    }
+
+    /**
+     * All text cells in workbook order, across every worksheet.
+     *
+     * @return array<int, string>
+     */
+    private function allCellValues(): array
+    {
+        $values = [];
+
+        foreach ($this->worksheets as $cells) {
+            array_push($values, ...array_values($cells));
+        }
+
+        return $values;
     }
 
     private function normalize(string $value): string

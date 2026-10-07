@@ -25,7 +25,7 @@
         title="Upload your completed WFP xlsx"
     >
         <x-icon name="upload" :size="16" />
-        <span>Upload</span>
+        <span>Upload WFP</span>
     </button>
 
     {{-- UPLOAD WINDOW --}}
@@ -45,8 +45,8 @@
 
                 <p class="opcrf-review-note">
                     Choose your completed <strong>WFP.xlsx</strong>. It is checked
-                    against the official template before anything is saved — a file
-                    that isn’t a Work and Financial Plan is rejected.
+                    against the WFP structure across every worksheet before saving.
+                    The full workbook analysis and sheet contents will appear below.
                 </p>
 
                 <div class="modal-form opcrf-upload-body">
@@ -67,7 +67,7 @@
                                     <x-icon name="upload" :size="20" />
                                 </span>
                                 <span class="opcrf-dropzone-title">Click to choose your WFP file</span>
-                                <span class="opcrf-dropzone-sub">.xlsx · checked against the WFP template before saving</span>
+                                <span class="opcrf-dropzone-sub">.xlsx · every worksheet is analyzed before saving</span>
                             </span>
 
                             <span class="opcrf-dropzone-inner" wire:loading wire:target="file">

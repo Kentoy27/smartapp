@@ -18,9 +18,14 @@
      replaces the very row under the pointer mid-click and discards the
      click; the counts on this component are already refreshed by events. --}}
 <nav class="sidebar-nav" aria-label="Main navigation">
-    <div class="nav-section"><span>Main</span></div>
+    @php($currentSection = null)
 
     @foreach ($this->items as $item)
+        @if (($item['section'] ?? null) !== $currentSection)
+            <div class="nav-section"><span>{{ $item['section'] }}</span></div>
+            @php($currentSection = $item['section'] ?? null)
+        @endif
+
         @if (isset($item['children']))
             <div class="nav-group" wire:key="sidebar-group-{{ $item['path'] }}">
                 <button
@@ -84,7 +89,7 @@
         @else
             <a
                 href="{{ route($item['route']) }}"
-                class="nav-item"
+                class="nav-item{{ request()->routeIs($item['route']) ? ' active' : '' }}"
                 wire:navigate
                 wire:current.exact="active"
                 wire:key="sidebar-{{ $item['path'] }}"
