@@ -20,7 +20,7 @@ class UsersTable extends Component
 
     public function mount(): void
     {
-        abort_unless(Auth::user()?->is_superadmin, 404);
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
     }
 
     /**
@@ -97,7 +97,7 @@ class UsersTable extends Component
      * Does this form set the password itself?
      *
      * An SH's account is keyed to their school: the school's DepEd ID is both
-     * the login and the starting password, so the superadmin never types one
+     * the login and the starting password, so the administrator never types one
      * and the field is not rendered at all. It is decided by the ROLE alone —
      * the field must not reappear just because no school has been picked yet.
      * (An SH whose school has no ID on record cannot be saved; createUser says
@@ -109,7 +109,7 @@ class UsersTable extends Component
     }
 
     /**
-     * Role selection in the add/edit modal. Only superadmins may set or
+     * Role selection in the add/edit modal. Only administrators may set or
      * change it (enforced server-side); it renders only for them.
      */
     public bool $isSuperadmin = false;
@@ -163,7 +163,7 @@ class UsersTable extends Component
             'password' => $editing || $autoPassword
                 ? ['nullable', 'string', 'min:8']
                 : ['required', 'string', 'min:8'],
-            'role' => ['required', Rule::in(['user', 'viewer', 'superadmin'])],
+            'role' => ['required', Rule::in(['user', 'viewer', 'administrator', 'superadmin'])],
         ];
     }
 
@@ -249,7 +249,7 @@ class UsersTable extends Component
         abort_unless($this->canAssignRoles(), 403);
 
         $validated = $this->validate([
-            'selectedRole' => ['required', Rule::in(['user', 'viewer', 'superadmin'])],
+            'selectedRole' => ['required', Rule::in(['user', 'viewer', 'administrator', 'superadmin'])],
         ]);
 
         $user = User::findOrFail($this->roleUserId);
@@ -261,9 +261,12 @@ class UsersTable extends Component
         ])->save();
 
         $username = $user->username;
-        $role = $validated['selectedRole'] === 'superadmin'
-            ? 'Super Admin'
-            : ($validated['selectedRole'] === 'viewer' ? 'SDS Viewer' : 'SH');
+        $role = match ($validated['selectedRole']) {
+            'superadmin' => 'Super Admin',
+            'administrator' => 'Administrator',
+            'viewer' => 'SDS Viewer',
+            default => 'SH',
+        };
 
         $this->closeRoleModal();
         $this->successMessage = "Role updated — {$username} is now {$role}.";
@@ -327,7 +330,7 @@ class UsersTable extends Component
 
     public function setRole(string $role): void
     {
-        if (! in_array($role, ['user', 'viewer', 'superadmin'], true)) {
+        if (! in_array($role, ['user', 'viewer', 'administrator', 'superadmin'], true)) {
             return;
         }
 
@@ -360,13 +363,13 @@ class UsersTable extends Component
     }
 
     /**
-     * The signed-in user may grant/revoke the superadmin role only if they
-     * hold it themselves. Guarded server-side — the checkbox is a UI
+     * The signed-in user may grant/revoke administrative roles only if they
+     * hold administrative access. Guarded server-side — the picker is a UI
      * convenience, never the security boundary.
      */
     private function canAssignRoles(): bool
     {
-        return (bool) $this->authenticatedUser()?->is_superadmin;
+        return (bool) $this->authenticatedUser()?->canManageUsersAndSchools();
     }
 
     /**
@@ -417,15 +420,20 @@ class UsersTable extends Component
         // Jump to page 1 (newest first) so the fresh account is visible.
         $this->resetPage();
 
-        $role = $user->is_superadmin ? 'super admin' : ($user->role === 'viewer' ? 'viewer' : 'user');
-        $this->successMessage = "Account created — {$user->username} was added as a {$role}.";
+        $roleDescription = match ($user->role) {
+            'superadmin' => 'a super admin',
+            'administrator' => 'an administrator',
+            'viewer' => 'a viewer',
+            default => 'a user',
+        };
+        $this->successMessage = "Account created — {$user->username} was added as {$roleDescription}.";
 
         $this->announce();
     }
 
     /**
      * Update the account (password only when provided). Role changes go
-     * through the same superadmin-only guard; a superadmin can never demote
+     * through the same administrator-only guard; an administrator can never demote
      * themselves, so a system always keeps at least one admin.
      */
     public function updateUser(): void

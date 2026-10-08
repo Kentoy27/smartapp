@@ -187,7 +187,7 @@ class Sidebar extends Component
             'order' => 12,
         ];
 
-        if (Auth::user()?->is_superadmin) {
+        if (Auth::user()?->hasAdminAccess()) {
             $items[] = [
                 'label' => 'OPCRF',
                 'route' => 'opcrf.review',
@@ -208,24 +208,26 @@ class Sidebar extends Component
                 'order' => 11,
             ];
 
-            $items[] = [
-                'label' => 'Users',
-                'route' => 'users.index',
-                'path' => 'users',
-                'icon' => 'users-round',
-                'badge' => $this->usersCount,
-                'section' => 'Admin',
-                'order' => 20,
-            ];
+            if (Auth::user()?->canManageUsersAndSchools()) {
+                $items[] = [
+                    'label' => 'Users',
+                    'route' => 'users.index',
+                    'path' => 'users',
+                    'icon' => 'users-round',
+                    'badge' => $this->usersCount,
+                    'section' => 'Admin',
+                    'order' => 20,
+                ];
 
-            $items[] = [
-                'label' => 'Districts & Schools',
-                'route' => 'districts.index',
-                'path' => 'districts',
-                'icon' => 'school',
-                'section' => 'Admin',
-                'order' => 21,
-            ];
+                $items[] = [
+                    'label' => 'Districts & Schools',
+                    'route' => 'districts.index',
+                    'path' => 'districts',
+                    'icon' => 'school',
+                    'section' => 'Admin',
+                    'order' => 21,
+                ];
+            }
         } else {
             // Opcrf is a staff-facing page: regular users only.
             $items[] = [
@@ -357,7 +359,7 @@ class Sidebar extends Component
 
         // The checklist is the staff member's page; the superadmin does not
         // have one, so there is nothing to walk for them.
-        if ($user === null || $user->is_superadmin) {
+        if ($user === null || $user->hasAdminAccess()) {
             return [];
         }
 
@@ -499,7 +501,7 @@ class Sidebar extends Component
     #[On('users-refreshed')]
     public function refreshUsersBadge(): void
     {
-        if (Auth::user()?->is_superadmin) {
+        if (Auth::user()?->hasAdminAccess()) {
             $this->usersCount = User::count();
         }
     }
@@ -515,7 +517,7 @@ class Sidebar extends Component
     #[On('opcrf-submission-forwarded')]
     public function refreshOpcrfBadge(): void
     {
-        if (Auth::user()?->is_superadmin) {
+        if (Auth::user()?->hasAdminAccess()) {
             $this->opcrfCount = $this->pendingSubmissions();
         }
     }
@@ -536,7 +538,7 @@ class Sidebar extends Component
 
     public function render()
     {
-        if (Auth::user()?->is_superadmin) {
+        if (Auth::user()?->hasAdminAccess()) {
             $this->usersCount = User::count();
             $this->opcrfCount = $this->pendingSubmissions();
         } else {

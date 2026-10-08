@@ -56,6 +56,18 @@ class ApplicationSmokeTest extends TestCase
         ]);
     }
 
+    private function administrator(): User
+    {
+        return User::create([
+            'name' => 'System Administrator',
+            'username' => 'systemadmin',
+            'email' => 'systemadmin@example.com',
+            'password' => Hash::make('secret123'),
+            'role' => 'administrator',
+            'is_superadmin' => false,
+        ]);
+    }
+
     private function staff(): User
     {
         return User::create([
@@ -192,8 +204,9 @@ class ApplicationSmokeTest extends TestCase
                 ->assertOk();
         }
 
-        // Superadmin-owned components, including opening the review modal
+        // Administrator-owned components, including opening the review modal
         // so its biggest view actually renders.
+        $admin = $this->administrator();
         $superComponents = [
             UsersTable::class,
             DistrictManager::class,

@@ -155,7 +155,7 @@ class NotificationsMenu extends Component
                 'tone' => 'muted',
                 'title' => 'Notification',
                 'detail' => 'Open the page this refers to for details.',
-                'link' => $user?->is_superadmin ? route('opcrf.review') : route('opcrf.index'),
+                'link' => $user?->hasAdminAccess() ? route('opcrf.review') : route('opcrf.index'),
             ],
         };
 

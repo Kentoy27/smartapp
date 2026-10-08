@@ -28,7 +28,7 @@ class OpcrfAnalytics extends Component
     {
         // Superadmin-only card: the counts describe review queues, which
         // regular users must never see (not even as bare numbers).
-        abort_unless(Auth::user()?->is_superadmin, 404);
+        abort_unless(Auth::user()?->hasAdminAccess(), 404);
     }
 
     public function render()

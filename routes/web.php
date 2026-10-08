@@ -40,17 +40,19 @@ Route::middleware('auth')->group(function () {
     })->name('aip.index');
 
     Route::get('/users', function () {
-        abort_unless(Auth::user()?->is_superadmin, 404);
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canManageUsersAndSchools(), 404);
 
         return view('users.index');
     })->name('users.index');
 
-    // Districts & Schools: the superadmin's page for the org structure —
+    // Districts & Schools: the Administrator's page for the org structure —
     // every district with its schools, and the manager that adds, renames and
     // removes them. The sidebar item points here; the dashboard keeps its own
     // summary card, and both render the same DistrictList component.
     Route::get('/districts', function () {
-        abort_unless(Auth::user()?->is_superadmin, 404);
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canManageUsersAndSchools(), 404);
 
         return view('districts.index');
     })->name('districts.index');
@@ -60,7 +62,8 @@ Route::middleware('auth')->group(function () {
     // This is the parts grid: every Part is listed with the state the
     // superadmin's schedule puts it in, open or locked.
     Route::get('/opcrf', function () {
-        abort_if(Auth::user()?->is_superadmin, 404);
+        $user = Auth::user();
+        abort_if($user instanceof User && $user->hasAdminAccess(), 404);
 
         return view('opcrf.parts');
     })->name('opcrf.index');
@@ -93,7 +96,8 @@ Route::middleware('auth')->group(function () {
     // OPCRF SCHEDULE: the superadmin's calendar. Part access is decided from
     // these rows on every request, so this page is the control for it.
     Route::get('/opcrf-schedule', function () {
-        abort_unless(Auth::user()?->is_superadmin, 404);
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->hasAdminAccess(), 404);
 
         return view('opcrf.schedule');
     })->name('opcrf.schedule');
@@ -102,7 +106,8 @@ Route::middleware('auth')->group(function () {
     // read-only review of the submitted OPCR (with a download of the
     // submitted file) and each submission's MOVs as a view-only record.
     Route::get('/opcrf-review', function () {
-        abort_unless(Auth::user()?->is_superadmin, 404);
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->hasAdminAccess(), 404);
 
         return view('opcrf.review');
     })->name('opcrf.review');
@@ -125,7 +130,11 @@ Route::middleware('auth')->group(function () {
     Route::get('/download/opcrf-template', function () {
         $user = Auth::user();
 
-        abort_if($user?->is_superadmin, 404);
+        if (! $user instanceof User) {
+            abort(404);
+        }
+
+        abort_if($user->hasAdminAccess(), 404);
         abort_unless(is_file(OpcrfPartOne::templatePath()), 404);
 
         // The personalized template IS Part 1, so it answers to Part 1's
@@ -183,6 +192,10 @@ Route::middleware('auth')->group(function () {
     Route::get('/opcrf-submissions/{submission}/download', function (App\Models\OpcrfSubmission $submission) {
         $user = Auth::user();
 
+        if (! $user instanceof User) {
+            abort(404);
+        }
+
         abort_unless($submission->canBeDownloadedBy($user), 404);
         abort_unless($submission->hasFile(), 404);
 
@@ -195,7 +208,7 @@ Route::middleware('auth')->group(function () {
         // cannot read (or a workbook with no PART I tab) is served as-is.
         $bytes = null;
 
-        if (! $user->is_superadmin && ! OpcrfPartOne::windowOpen()) {
+        if (! $user->hasAdminAccess() && ! OpcrfPartOne::windowOpen()) {
             try {
                 $bytes = OpcrfWorkbookTrim::keepPart(
                     $storedPath,
@@ -283,7 +296,8 @@ Route::middleware('auth')->group(function () {
     // page from the OPCR upload on purpose: this is the standing evidence
     // set, not the cycle's form.
     Route::get('/movs', function () {
-        abort_if(Auth::user()?->is_superadmin, 404);
+        $user = Auth::user();
+        abort_if($user instanceof User && $user->hasAdminAccess(), 404);
 
         return view('mov.index');
     })->name('mov.index');

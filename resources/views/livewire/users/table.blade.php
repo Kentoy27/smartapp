@@ -79,8 +79,8 @@
                                 @endif
                             </td>
                             <td>
-                                <span @class(['badge', 'badge-muted' => ! $account->is_superadmin])>
-                                    {{ $account->is_superadmin ? 'Super Admin' : ($account->role === 'viewer' ? 'SDS Viewer' : 'SH') }}
+                                <span @class(['badge', 'badge-muted' => ! $account->hasAdminAccess()])>
+                                    {{ $account->roleLabel() }}
                                 </span>
                             </td>
                             <td>
@@ -222,6 +222,14 @@
                             </label>
 
                             <label class="role-option">
+                                <input type="radio" name="selectedRole" value="administrator" wire:model="selectedRole">
+                                <span class="role-option-body">
+                                    <strong>Administrator</strong>
+                                    <small>Full access to administrative pages and user management</small>
+                                </span>
+                            </label>
+
+                            <label class="role-option">
                                 <input type="radio" name="selectedRole" value="superadmin" wire:model="selectedRole">
                                 <span class="role-option-body">
                                     <strong>Super Admin</strong>
@@ -285,7 +293,7 @@
             </div>
 
             <form wire:submit="saveUser" class="modal-form">
-                @if (auth()->user()?->is_superadmin)
+                @if (auth()->user()?->hasAdminAccess())
                     {{-- ROLE FIRST: it decides the shape of the rest of the
                          form. Picking SH reveals the Division → School →
                          School ID cascade below; the other roles have no

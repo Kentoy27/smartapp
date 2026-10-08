@@ -77,6 +77,33 @@ class LoginPageTest extends TestCase
             ->assertSee('Login successful', false);
     }
 
+    public function test_administrator_login_opens_the_admin_dashboard_and_pages(): void
+    {
+        User::factory()->create([
+            'username' => 'administrator',
+            'email' => 'administrator@example.com',
+            'password' => 'correct-password',
+            'role' => 'administrator',
+            'is_superadmin' => false,
+        ]);
+
+        $this->post(route('login'), [
+            'login' => 'administrator',
+            'password' => 'correct-password',
+        ])->assertRedirect('/home');
+
+        $this->get('/home')
+            ->assertOk()
+            ->assertSee('ADMIN WORKSPACE')
+            ->assertSeeLivewire('opcrf-analytics')
+            ->assertDontSee('STAFF WORKSPACE');
+
+        $this->get(route('users.index'))->assertOk();
+        $this->get(route('districts.index'))->assertOk();
+        $this->get(route('opcrf.schedule'))->assertOk();
+        $this->get(route('opcrf.review'))->assertOk();
+    }
+
     public function test_logout_invalidates_the_session_and_returns_to_login(): void
     {
                 /** @var User $user */

@@ -44,6 +44,33 @@ class User extends Authenticatable
     }
 
     /**
+     * Whether this account has access to administrative workflows.
+     */
+    public function hasAdminAccess(): bool
+    {
+        return $this->is_superadmin || $this->role === 'administrator';
+    }
+
+    /** Whether this account may manage accounts and school organization. */
+    public function canManageUsersAndSchools(): bool
+    {
+        return $this->role === 'administrator' && ! $this->is_superadmin;
+    }
+
+    public function roleLabel(): string
+    {
+        if ($this->is_superadmin || $this->role === 'superadmin') {
+            return 'Super Admin';
+        }
+
+        return match ($this->role) {
+            'administrator' => 'Administrator',
+            'viewer' => 'SDS Viewer',
+            default => 'SH',
+        };
+    }
+
+    /**
      * Whether this account may access the Work and Financial Plan (WFP)
      * module. WFP is for the School Head (SH) role only: the role column
      * uses 'user' for SH (the UI labels it 'SH'), 'viewer' for the SDS

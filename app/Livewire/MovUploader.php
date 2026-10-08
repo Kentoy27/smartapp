@@ -885,7 +885,7 @@ class MovUploader extends Component
      */
     private function assertStaffMember(): void
     {
-        abort_if(Auth::user()?->is_superadmin, 404);
+        abort_if(Auth::user()?->hasAdminAccess(), 404);
     }
 
     /**

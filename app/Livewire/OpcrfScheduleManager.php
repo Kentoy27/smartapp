@@ -86,7 +86,7 @@ class OpcrfScheduleManager extends Component
 
     protected function ensureSuperadmin(): void
     {
-        abort_unless(Auth::user()?->is_superadmin, 404);
+        abort_unless(Auth::user()?->hasAdminAccess(), 404);
     }
 
     /**

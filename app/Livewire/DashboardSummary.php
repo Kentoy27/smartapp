@@ -35,7 +35,7 @@ class DashboardSummary extends Component
     public function render()
     {
         $user = Auth::user();
-        $isSuperAdmin = (bool) $user?->is_superadmin;
+        $isSuperAdmin = (bool) $user?->hasAdminAccess();
 
         return view('livewire.dashboard.summary', [
             'isSuperAdmin' => $isSuperAdmin,

@@ -377,8 +377,12 @@ class OpcrfSubmission extends Model
      */
     public function isAssignedTo(?User $user): bool
     {
-        if ($user === null || ! $user->is_superadmin) {
+        if ($user === null || ! $user->hasAdminAccess()) {
             return false;
+        }
+
+        if (! $user->is_superadmin) {
+            return true;
         }
 
         $current = $this->assigned_to ?? $this->reviewer_id;
@@ -396,6 +400,10 @@ class OpcrfSubmission extends Model
      */
     public function scopeVisibleTo(Builder $query, User $reviewer): Builder
     {
+        if ($reviewer->role === 'administrator' && ! $reviewer->is_superadmin) {
+            return $query;
+        }
+
         return $query->where(function (Builder $routed) use ($reviewer): void {
             $routed->where('reviewer_id', $reviewer->id)
                 ->orWhere('assigned_to', $reviewer->id)
@@ -422,11 +430,15 @@ class OpcrfSubmission extends Model
      */
     public function scopeAwaitingReviewFrom(Builder $query, User $reviewer): Builder
     {
-        return $query
-            ->visibleTo($reviewer)
-            ->where(function (Builder $held) use ($reviewer): void {
+        $query = $query->visibleTo($reviewer);
+
+        if (! ($reviewer->role === 'administrator' && ! $reviewer->is_superadmin)) {
+            $query->where(function (Builder $held) use ($reviewer): void {
                 $held->whereNull('assigned_to')->orWhere('assigned_to', $reviewer->id);
-            })
+            });
+        }
+
+        return $query
             ->where(function (Builder $undecided): void {
                 $undecided->whereNull('approved_at')
                     ->orWhere('status', self::STATUS_FORWARDED);
@@ -481,7 +493,11 @@ class OpcrfSubmission extends Model
             return false;
         }
 
-        if ($user->is_superadmin) {
+        if ($user->hasAdminAccess()) {
+            if (! $user->is_superadmin) {
+                return true;
+            }
+
             return $this->reviewer_id === null
                 || $this->reviewer_id === $user->id
                 || $this->assigned_to === $user->id;
@@ -516,7 +532,7 @@ class OpcrfSubmission extends Model
     {
         $current = $this->assigned_to ?? $this->reviewer_id;
 
-        if (! $recipient->is_superadmin || $recipient->id === $current) {
+        if (! $recipient->hasAdminAccess() || $recipient->id === $current) {
             return false;
         }
 

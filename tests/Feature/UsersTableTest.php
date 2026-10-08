@@ -18,13 +18,10 @@ class UsersTableTest extends TestCase
         $this->get(route('users.index'))->assertRedirect(route('login'));
     }
 
-    public function test_users_page_lists_accounts_and_is_reachable_for_superadmins(): void
+    public function test_users_page_lists_accounts_and_is_reachable_for_administrators(): void
     {
         /** @var User $admin */
-        $admin = User::factory()->create([
-            'is_superadmin' => true,
-            'role' => 'superadmin',
-        ]);
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
         $other = User::factory()->create(['username' => 'otheruser']);
 
         $this->actingAs($admin)
@@ -39,7 +36,7 @@ class UsersTableTest extends TestCase
 
     public function test_search_narrows_the_live_table(): void
     {
-        $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
         User::factory()->create(['username' => 'alpha']);
         User::factory()->create(['username' => 'beta']);
 
@@ -50,9 +47,9 @@ class UsersTableTest extends TestCase
             ->assertDontSee('beta');
     }
 
-    public function test_superadmin_can_change_an_account_role_from_the_role_modal(): void
+    public function test_administrator_can_change_an_account_role_from_the_role_modal(): void
     {
-        $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
         $target = User::factory()->create(['is_superadmin' => false, 'role' => 'user']);
 
         Livewire::actingAs($admin)
@@ -81,7 +78,7 @@ class UsersTableTest extends TestCase
 
     public function test_users_can_be_deleted_but_not_yourself(): void
     {
-        $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
         $other = User::factory()->create();
 
         Livewire::actingAs($admin)
@@ -96,7 +93,7 @@ class UsersTableTest extends TestCase
 
     public function test_delete_modal_requires_confirmation(): void
     {
-        $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
         $other = User::factory()->create();
 
         Livewire::actingAs($admin)
@@ -119,7 +116,7 @@ class UsersTableTest extends TestCase
 
     public function test_deleting_yourself_never_sets_a_success_message(): void
     {
-        $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
 
         Livewire::actingAs($admin)
             ->test('users-table')
@@ -129,9 +126,9 @@ class UsersTableTest extends TestCase
         $this->assertDatabaseHas('users', ['id' => $admin->id]);
     }
 
-    public function test_sidebar_shows_superadmin_destinations(): void
+    public function test_sidebar_shows_administrator_destinations(): void
     {
-        $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
         User::factory()->count(3)->create();
 
         Livewire::actingAs($admin)->test('sidebar')
@@ -147,7 +144,7 @@ class UsersTableTest extends TestCase
 
     public function test_sidebar_items_follow_the_working_order(): void
     {
-        $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
 
         $html = Livewire::actingAs($admin)->test('sidebar')->html();
 
@@ -186,7 +183,7 @@ class UsersTableTest extends TestCase
 
     public function test_add_user_modal_opens_and_closes(): void
     {
-        $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
 
         Livewire::actingAs($admin)->test('users-table')
             ->assertSet('showCreateModal', false)
@@ -199,7 +196,7 @@ class UsersTableTest extends TestCase
 
     public function test_create_user_validates_required_and_unique_fields(): void
     {
-        $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
         User::factory()->create(['username' => 'taken', 'email' => 'taken@example.com']);
 
         Livewire::actingAs($admin)->test('users-table')
@@ -218,7 +215,7 @@ class UsersTableTest extends TestCase
 
     public function test_create_user_makes_an_account_and_updates_the_table(): void
     {
-        $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
         [$division, $school] = $this->createDivisionWithSchool();
 
         Livewire::actingAs($admin)->test('users-table')
@@ -251,7 +248,7 @@ class UsersTableTest extends TestCase
      */
     public function test_a_superadmin_can_correct_the_name_an_opcrf_upload_is_matched_against(): void
     {
-        $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
         [$division, $school] = $this->createDivisionWithSchool();
 
         $staff = User::factory()->create([
@@ -273,7 +270,7 @@ class UsersTableTest extends TestCase
 
     public function test_create_user_shows_a_success_message(): void
     {
-        $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
         [$division, $school] = $this->createDivisionWithSchool();
 
         $component = Livewire::actingAs($admin)->test('users-table')
@@ -302,7 +299,7 @@ class UsersTableTest extends TestCase
 
     public function test_edit_modal_prefills_the_account_and_updates_it(): void
     {
-        $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
         $user = User::factory()->create([
             'name' => 'Old Name',
             'username' => 'editable',
@@ -335,7 +332,7 @@ class UsersTableTest extends TestCase
 
     public function test_edit_ignores_blank_password_and_allows_keeping_own_email(): void
     {
-        $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
         $user = User::factory()->create([
             'username' => 'selfedit',
             'email' => 'selfedit@example.com',
@@ -360,7 +357,7 @@ class UsersTableTest extends TestCase
 
     public function test_table_renders_an_edit_action_and_no_joined_column(): void
     {
-        $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
         User::factory()->create();
 
         $component = Livewire::actingAs($admin)->test('users-table');
@@ -372,7 +369,7 @@ class UsersTableTest extends TestCase
 
     public function test_a_row_with_several_actions_collapses_into_one_more_actions_menu(): void
     {
-        $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
         $other = User::factory()->create(['username' => 'somebody']);
 
         $html = Livewire::actingAs($admin)->test('users-table')->html();
@@ -389,7 +386,7 @@ class UsersTableTest extends TestCase
     {
         // A superadmin cannot change their own role or delete themselves, so
         // their row has exactly one action — a menu would only add a click.
-        $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
         User::factory()->create(['username' => 'somebody']);
 
         $html = Livewire::actingAs($admin)->test('users-table')->html();
@@ -401,7 +398,7 @@ class UsersTableTest extends TestCase
 
     public function test_failed_validation_never_sets_a_success_message(): void
     {
-        $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
 
         Livewire::actingAs($admin)->test('users-table')
             ->call('openCreateModal')
@@ -411,9 +408,9 @@ class UsersTableTest extends TestCase
             ->assertSet('successMessage', null);
     }
 
-    public function test_superadmin_can_create_a_user_with_the_admin_role(): void
+    public function test_administrator_can_create_a_user_with_the_superadmin_role(): void
     {
-        $admin = User::factory()->create(['is_superadmin' => true]);
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
         [$division, $school] = $this->createDivisionWithSchool();
 
         $component = Livewire::actingAs($admin)
@@ -436,6 +433,63 @@ class UsersTableTest extends TestCase
         $this->assertStringContainsString('super admin', $component->html());
     }
 
+    public function test_administrator_can_create_an_administrator_account(): void
+    {
+        $superadmin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
+
+        Livewire::actingAs($superadmin)
+            ->test('users-table')
+            ->call('openCreateModal')
+            ->set('role', 'administrator')
+            ->set('name', 'System Administrator')
+            ->set('username', 'systemadmin')
+            ->set('email', 'systemadmin@example.com')
+            ->set('password', 'supersecret1')
+            ->call('saveUser')
+            ->assertSet('successMessage', 'Account created — systemadmin was added as an administrator.');
+
+        $administrator = User::where('username', 'systemadmin')->firstOrFail();
+
+        $this->assertSame('administrator', $administrator->role);
+        $this->assertFalse($administrator->is_superadmin);
+        $this->assertNull($administrator->school_id);
+        $this->assertTrue($administrator->hasAdminAccess());
+        $this->assertTrue($administrator->canManageUsersAndSchools());
+    }
+
+    public function test_administrator_has_the_superadmin_sidebar_and_admin_routes(): void
+    {
+        $administrator = User::factory()->create([
+            'role' => 'administrator',
+            'is_superadmin' => false,
+        ]);
+
+        Livewire::actingAs($administrator)->test('sidebar')
+            ->assertSee('OPCRF')
+            ->assertSee('OPCRF Schedule')
+            ->assertSee('Users')
+            ->assertSee('Districts & Schools');
+
+        $target = User::factory()->create(['role' => 'user', 'is_superadmin' => false]);
+        Livewire::actingAs($administrator)
+            ->test('users-table')
+            ->call('openRoleModal', $target->id)
+            ->set('selectedRole', 'administrator')
+            ->call('updateRole');
+        $this->assertSame('administrator', $target->refresh()->role);
+        $this->assertFalse($target->is_superadmin);
+
+        $this->actingAs($administrator)
+            ->get(route('users.index'))
+            ->assertOk()
+            ->assertSeeLivewire('users-table');
+
+        $this->get(route('districts.index'))->assertOk();
+        $this->get(route('opcrf.schedule'))->assertOk();
+        $this->get(route('opcrf.review'))->assertOk();
+        $this->get(route('opcrf.index'))->assertNotFound();
+    }
+
     public function test_non_superadmin_cannot_grant_the_admin_role(): void
     {
         /** @var User $viewer */
@@ -448,7 +502,7 @@ class UsersTableTest extends TestCase
 
     public function test_role_modal_prefills_the_role_and_can_change_it(): void
     {
-        $admin = User::factory()->create(['is_superadmin' => true]);
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
         $user = User::factory()->create(['is_superadmin' => false]);
 
         Livewire::actingAs($admin)
@@ -471,21 +525,17 @@ class UsersTableTest extends TestCase
         $this->assertSame('viewer', $user->role);
     }
 
-    public function test_superadmin_cannot_demote_themselves_via_the_edit_modal(): void
+    public function test_superadmin_cannot_open_user_management(): void
     {
-        $admin = User::factory()->create(['is_superadmin' => true]);
+        $superadmin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
 
-        Livewire::actingAs($admin)
-            ->test('users-table')
-            ->call('openEditModal', $admin->id)
-            ->set('role', 'user')
-            ->set('isSuperadmin', false)
-            ->call('saveUser');
-
-        $this->assertTrue($admin->refresh()->is_superadmin, 'A superadmin must never be able to demote themselves.');
+        $this->actingAs($superadmin)->get(route('users.index'))->assertNotFound();
+        Livewire::actingAs($superadmin)->test('sidebar')
+            ->assertDontSee('Users')
+            ->assertDontSee('Districts & Schools');
     }
 
-    public function test_role_picker_is_hidden_from_non_superadmins(): void
+    public function test_staff_user_cannot_open_user_management_or_role_picker(): void
     {
         /** @var User $viewer */
         $viewer = User::factory()->create(['is_superadmin' => false]);

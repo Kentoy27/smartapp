@@ -77,7 +77,7 @@ class OpcrfReview extends Component
     {
         // Superadmin-only component: the table lists every staff member's
         // submissions, so regular users must never mount it.
-        abort_unless(Auth::user()?->is_superadmin, 404);
+        abort_unless(Auth::user()?->hasAdminAccess(), 404);
     }
 
     /**
@@ -86,7 +86,7 @@ class OpcrfReview extends Component
     #[Computed]
     public function reviewSubmission(): ?OpcrfSubmission
     {
-        if (! Auth::user()?->is_superadmin || $this->reviewId === null) {
+        if (! Auth::user()?->hasAdminAccess() || $this->reviewId === null) {
             return null;
         }
 
@@ -260,7 +260,7 @@ class OpcrfReview extends Component
      */
     public function openReview(int $submissionId): void
     {
-        abort_if(! Auth::user()?->is_superadmin, 404);
+        abort_if(! Auth::user()?->hasAdminAccess(), 404);
 
         // Routing is the authorization boundary: a submission sent to another
         // superadmin must not open, not even by a crafted call.
@@ -330,7 +330,7 @@ class OpcrfReview extends Component
      */
     public function approveSubmission(): void
     {
-        abort_unless(Auth::user()?->is_superadmin, 404);
+        abort_unless(Auth::user()?->hasAdminAccess(), 404);
 
         $submission = $this->reviewSubmission();
 
@@ -390,7 +390,7 @@ class OpcrfReview extends Component
      */
     public function returnSubmission(): void
     {
-        abort_unless(Auth::user()?->is_superadmin, 404);
+        abort_unless(Auth::user()?->hasAdminAccess(), 404);
 
         $submission = $this->reviewSubmission();
 
@@ -451,7 +451,9 @@ class OpcrfReview extends Component
         }
 
         return User::query()
-            ->where('is_superadmin', true)
+            ->where(function ($query): void {
+                $query->where('is_superadmin', true)->orWhere('role', 'administrator');
+            })
             ->where('username', $configured)
             ->where('id', '!=', $submission->assigned_to ?? $submission->reviewer_id)
             ->first();
@@ -468,7 +470,7 @@ class OpcrfReview extends Component
      */
     public function openDelete(int $submissionId): void
     {
-        abort_unless(Auth::user()?->is_superadmin, 404);
+        abort_unless(Auth::user()?->hasAdminAccess(), 404);
 
         // Same routing boundary as the review modal: a submission sent to
         // another superadmin is not even deletable.
@@ -495,7 +497,7 @@ class OpcrfReview extends Component
      */
     public function confirmDelete(): void
     {
-        abort_unless(Auth::user()?->is_superadmin, 404);
+        abort_unless(Auth::user()?->hasAdminAccess(), 404);
 
         $submission = $this->deleteId === null
             ? null

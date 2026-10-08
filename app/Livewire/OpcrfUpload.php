@@ -174,7 +174,7 @@ class OpcrfUpload extends Component
         // confirmSubmit() reads Auth::id() — so a guest is refused here
         // rather than half way through a submit.
         abort_unless(Auth::check(), 404);
-        abort_if(Auth::user()->is_superadmin, 404);
+        abort_if(Auth::user()->hasAdminAccess(), 404);
     }
 
     /**
@@ -183,7 +183,7 @@ class OpcrfUpload extends Component
     public function openUpload(): void
     {
         abort_unless(Auth::check(), 404);
-        abort_if(Auth::user()->is_superadmin, 404);
+        abort_if(Auth::user()->hasAdminAccess(), 404);
 
         $this->resetValidation();
         $this->showUpload = true;
@@ -204,14 +204,18 @@ class OpcrfUpload extends Component
 
         if ($configured !== '') {
             $reviewer = User::query()
-                ->where('is_superadmin', true)
+                ->where(function ($query): void {
+                    $query->where('is_superadmin', true)->orWhere('role', 'administrator');
+                })
                 ->where('username', $configured)
                 ->first();
         }
 
         return $reviewer
             ?? User::query()
-                ->where('is_superadmin', true)
+                ->where(function ($query): void {
+                    $query->where('is_superadmin', true)->orWhere('role', 'administrator');
+                })
                 ->orderBy('username')
                 ->first();
     }
@@ -237,7 +241,7 @@ class OpcrfUpload extends Component
     public function updatedFile(): void
     {
         abort_unless(Auth::check(), 404);
-        abort_if(Auth::user()->is_superadmin, 404);
+        abort_if(Auth::user()->hasAdminAccess(), 404);
 
         $this->validate([
             'file' => ['required', 'file', 'max:'.(int) config('opcrf.template.max_kb', 10240), 'extensions:xlsx'],
@@ -352,7 +356,7 @@ class OpcrfUpload extends Component
     public function confirmSubmit(): void
     {
         abort_unless(Auth::check(), 404);
-        abort_if(Auth::user()->is_superadmin, 404);
+        abort_if(Auth::user()->hasAdminAccess(), 404);
 
         // Re-validate server-side: the review modal's data must still be
         // well-formed (the client could have crafted the call). Blanks are

@@ -11,7 +11,7 @@ use Livewire\Attributes\Computed;
 use Livewire\Component;
 
 /**
- * Superadmin-only district & school management.
+ * Administrator-only district & school management.
  *
  * Lives in a modal on the dashboard ("Manage Districts & Schools"):
  * clickable districts with their schools underneath (name + School ID),
@@ -73,7 +73,7 @@ class DistrictManager extends Component
 
     public function mount(): void
     {
-        abort_unless(Auth::user()?->is_superadmin, 404);
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
     }
 
     #[Computed]
@@ -137,7 +137,7 @@ class DistrictManager extends Component
 
     public function addDistrict(): void
     {
-        abort_unless(Auth::user()?->is_superadmin, 404);
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
 
         $this->validateOnly('districtName', [
             'districtName' => ['required', 'string', 'max:120', 'unique:districts,name'],
@@ -156,7 +156,7 @@ class DistrictManager extends Component
 
     public function openSchoolForm(int $districtId): void
     {
-        abort_unless(Auth::user()?->is_superadmin, 404);
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
 
         $this->schoolFormDistrictId = $districtId;
         $this->schoolName = '';
@@ -175,7 +175,7 @@ class DistrictManager extends Component
 
     public function addSchool(): void
     {
-        abort_unless(Auth::user()?->is_superadmin, 404);
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
 
         $this->validate([
             // Unique only within the district being added to.
@@ -209,7 +209,7 @@ class DistrictManager extends Component
 
     public function startEditSchool(int $schoolId): void
     {
-        abort_unless(Auth::user()?->is_superadmin, 404);
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
 
         $school = School::findOrFail($schoolId);
 
@@ -230,7 +230,7 @@ class DistrictManager extends Component
 
     public function saveEditSchool(): void
     {
-        abort_unless(Auth::user()?->is_superadmin, 404);
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
 
         $school = School::findOrFail($this->editingSchoolId);
 
@@ -265,7 +265,7 @@ class DistrictManager extends Component
 
     public function openDeleteSchool(int $schoolId): void
     {
-        abort_unless(Auth::user()?->is_superadmin, 404);
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
 
         $school = School::withCount('users')->findOrFail($schoolId);
 
@@ -284,7 +284,7 @@ class DistrictManager extends Component
 
     public function confirmDeleteSchool(): void
     {
-        abort_unless(Auth::user()?->is_superadmin, 404);
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
 
         $school = School::withCount('users')->find($this->deleteSchoolId);
 
@@ -314,7 +314,7 @@ class DistrictManager extends Component
 
     public function startRename(string $type, int $id): void
     {
-        abort_unless(Auth::user()?->is_superadmin, 404);
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
 
         $this->editingName = $type === 'district'
             ? District::findOrFail($id)->name
@@ -334,7 +334,7 @@ class DistrictManager extends Component
 
     public function saveRename(): void
     {
-        abort_unless(Auth::user()?->is_superadmin, 404);
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
 
         $this->validate([
             'editingName' => ['required', 'string', 'max:160'],
@@ -376,7 +376,7 @@ class DistrictManager extends Component
 
     public function deleteDistrict(int $id): void
     {
-        abort_unless(Auth::user()?->is_superadmin, 404);
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
 
         // Schools cascade via the foreign key.
         District::whereKey($id)->delete();

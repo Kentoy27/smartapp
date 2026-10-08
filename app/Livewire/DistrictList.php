@@ -9,7 +9,7 @@ use Livewire\Component;
 /**
  * The District List — every district with its school count.
  *
- * Superadmin-only, and rendered in two places: as the dashboard's summary
+ * Administrator-only, and rendered in two places: as the dashboard's summary
  * card and as the whole of the Districts & Schools page behind the sidebar
  * item. Both go through this one component so the two views can never drift,
  * and it polls so school counts stay current wherever it appears.
@@ -22,7 +22,7 @@ class DistrictList extends Component
 {
     public function mount(): void
     {
-        abort_unless(Auth::user()?->is_superadmin, 404);
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
     }
 
     public function render()

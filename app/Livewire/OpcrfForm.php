@@ -100,7 +100,7 @@ class OpcrfForm extends Component
 
         // Staff-only page; superadmins use their own tooling (same guard
         // as the /opcrf route itself).
-        abort_if(Auth::user()->is_superadmin, 404);
+        abort_if(Auth::user()->hasAdminAccess(), 404);
 
         // Pre-filled from the signed-in account — and from the SAME source
         // the personalized template download writes from
@@ -126,7 +126,7 @@ class OpcrfForm extends Component
      */
     public function submitForReview(): void
     {
-        abort_if(Auth::user()?->is_superadmin, 404);
+        abort_if(Auth::user()?->hasAdminAccess(), 404);
 
         $this->validate();
 
@@ -139,7 +139,7 @@ class OpcrfForm extends Component
      */
     public function confirmSubmit(): void
     {
-        abort_if(Auth::user()?->is_superadmin, 404);
+        abort_if(Auth::user()?->hasAdminAccess(), 404);
 
         // Re-validate: the client could have changed fields between the
         // review gate opening and confirming (or crafted the call).

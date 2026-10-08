@@ -3,19 +3,19 @@
 @section('title', 'Dashboard — SmartApp')
 
 @section('content')
-    <section class="dashboard-welcome{{ $user->is_superadmin ? ' dashboard-welcome--admin' : '' }}">
+    <section class="dashboard-welcome{{ $user->hasAdminAccess() ? ' dashboard-welcome--admin' : '' }}">
         <div class="dashboard-welcome__copy">
             <span class="dashboard-welcome__eyebrow">
-                {{ $user->is_superadmin ? 'ADMIN WORKSPACE' : 'STAFF WORKSPACE' }}
+                {{ $user->hasAdminAccess() ? 'ADMIN WORKSPACE' : 'STAFF WORKSPACE' }}
             </span>
             <h1>Welcome back, {{ $user->username }}</h1>
             <p>
-                {{ $user->is_superadmin
+                {{ $user->hasAdminAccess()
                     ? 'Review submissions and keep your school data moving.'
                     : 'Your performance plan and financial plan, together in one place.' }}
             </p>
         </div>
-        @unless ($user->is_superadmin)
+        @unless ($user->hasAdminAccess())
             <a href="{{ route('mov.index') }}" class="dashboard-welcome__link" wire:navigate>
                 <x-icon name="upload" :size="16" />
                 <span>Open MOV checklist</span>
@@ -24,7 +24,7 @@
         @endunless
     </section>
 
-    @if ($user->is_superadmin)
+    @if ($user->hasAdminAccess())
         <livewire:opcrf-analytics />
     @else
         <div class="staff-dashboard-grid{{ $wfpTemplate !== null ? ' has-wfp' : '' }}">

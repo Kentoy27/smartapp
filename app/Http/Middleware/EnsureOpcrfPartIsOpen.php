@@ -22,7 +22,7 @@ use Symfony\Component\HttpFoundation\Response;
  * the user has already submitted: closing a deadline stops new work without
  * locking a user out of the form they already handed in.
  *
- * A superadmin has no Parts of their own to fill in, so they are refused
+ * An administrator has no Parts of their own to fill in, so they are refused
  * here too rather than being quietly given a staff page.
  */
 class EnsureOpcrfPartIsOpen
@@ -32,7 +32,7 @@ class EnsureOpcrfPartIsOpen
         $user = $request->user();
 
         abort_if($user === null, 403);
-        abort_if($user->is_superadmin, 404);
+        abort_if($user->hasAdminAccess(), 404);
 
         // Read off the route rather than taking it as a middleware argument:
         // only the guard itself decides which Part is on trial, and a

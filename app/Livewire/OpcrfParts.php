@@ -33,7 +33,7 @@ class OpcrfParts extends Component
     {
         $user = Auth::user();
 
-        abort_if($user === null || $user->is_superadmin, 404);
+        abort_if($user === null || $user->hasAdminAccess(), 404);
 
         $year = OpcrfAccess::currentYear();
         $now = now();
