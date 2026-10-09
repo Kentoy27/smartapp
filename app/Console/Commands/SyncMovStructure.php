@@ -93,6 +93,9 @@ class SyncMovStructure extends Command
                                 'description' => ($mov['description'] ?? null) !== null
                                     ? (string) $mov['description']
                                     : null,
+                                'kra_label' => trim((string) ($mov['kra_label'] ?? '')) !== ''
+                                    ? trim((string) $mov['kra_label'])
+                                    : null,
                                 'is_required' => (bool) ($mov['is_required'] ?? true),
                                 'display_order' => $mov['display_order'] ?? $movIndex + 1,
                                 'is_active' => true,

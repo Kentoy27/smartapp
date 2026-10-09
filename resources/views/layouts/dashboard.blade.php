@@ -576,7 +576,7 @@
         }
 
         /* THE LEVELS: each step in and carries a guide rule, so Part →
-           category → MOV reads without hovering anything. */
+           category → KRA → MOV reads without hovering anything. */
         .sidebar .nav-tree--1 {
             padding-left: 8px;
         }
@@ -656,10 +656,11 @@
             color: var(--text-faint);
         }
 
-        /* A MOV: the deepest level, and a step further in again so three
-           levels do not read as two. The dot is the signed-in person's own
+        /* A MOV: the deepest level, and a step further in again so the tree
+           remains legible. The dot is the signed-in person's own
            upload state, in the application's own four states. */
-        .sidebar .nav-tree--2 > .nav-mov {
+        .sidebar .nav-tree--2 > .nav-mov,
+        .sidebar .nav-tree--3 > .nav-mov {
             margin-left: 14px;
         }
 
@@ -5253,23 +5254,108 @@
             font-size: 0.6875rem;
         }
 
-        .mov-dropzone__preview {
-            width: auto;
-            max-width: 180px;
-            height: 74px;
-            border: 1px solid var(--border);
-            border-radius: 4px;
-            object-fit: cover;
+        .mov-selected-files {
+            display: grid;
+            gap: 6px;
+            margin: 10px 0 0;
+            padding: 0;
+            list-style: none;
         }
 
-        .mov-dropzone__filename {
-            max-width: 90%;
+        .mov-selected-files li {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 0;
+            padding: 8px 10px;
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            background: var(--bg-panel);
+            font-size: 0.75rem;
+        }
+
+        .mov-selected-files__type {
+            flex-shrink: 0;
+            padding: 3px 5px;
+            border-radius: 3px;
+            background: var(--primary-soft);
+            color: var(--primary-strong);
+            font-size: 0.625rem;
+            font-weight: 700;
+        }
+
+        .mov-selected-files__name {
+            min-width: 0;
             overflow: hidden;
             color: var(--text-strong);
-            font-size: 0.8125rem;
             font-weight: 600;
             text-overflow: ellipsis;
             white-space: nowrap;
+        }
+
+        .mov-selected-files__size {
+            flex-shrink: 0;
+            margin-left: auto;
+            color: var(--text-faint);
+            font-size: 0.6875rem;
+        }
+
+        .mov-upload-progress {
+            margin-top: 12px;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            background: var(--bg-panel);
+        }
+
+        .mov-upload-progress__label {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 7px;
+            color: var(--text-muted);
+            font-size: 0.75rem;
+        }
+
+        .mov-upload-progress__label strong {
+            color: var(--primary-strong);
+        }
+
+        .mov-upload-progress__track {
+            height: 6px;
+            overflow: hidden;
+            border-radius: 999px;
+            background: var(--bg-muted);
+        }
+
+        .mov-upload-progress__track span {
+            display: block;
+            width: 35%;
+            height: 100%;
+            border-radius: inherit;
+            background: var(--primary);
+            animation: mov-upload-progress 1.1s ease-in-out infinite alternate;
+        }
+
+        .mov-upload-spinner {
+            display: inline-block;
+            width: 13px;
+            height: 13px;
+            margin-right: 6px;
+            border: 2px solid currentColor;
+            border-right-color: transparent;
+            border-radius: 50%;
+            vertical-align: -2px;
+            animation: mov-upload-spin 0.7s linear infinite;
+        }
+
+        @keyframes mov-upload-spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes mov-upload-progress {
+            from { transform: translateX(0); }
+            to { transform: translateX(185%); }
         }
 
         .mov-upload-panel__actions {

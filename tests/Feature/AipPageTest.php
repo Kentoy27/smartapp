@@ -21,14 +21,18 @@ class AipPageTest extends TestCase
     {
         $user = User::factory()->create();
 
-        $this->actingAs($user)
+        $response = $this->actingAs($user)
             ->get(route('aip.index'))
             ->assertOk()
             ->assertSee('Annual Implementation Plan (AIP)')
             ->assertSee('AIP Records')
             ->assertSee('<table class="data-table aip-table">', false)
-            ->assertSee('No AIP records yet.')
-            ->assertSee('href="'.route('aip.index').'" class="nav-item active"', false);
+            ->assertSee('No AIP records yet.');
+
+        $this->assertMatchesRegularExpression(
+            '/href="'.preg_quote(route('aip.index'), '/').'"\s+class="nav-item active"/',
+            $response->getContent()
+        );
     }
 
     public function test_aip_is_listed_in_the_files_sidebar_for_staff_and_superadmins(): void

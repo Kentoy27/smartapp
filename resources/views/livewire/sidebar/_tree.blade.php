@@ -1,19 +1,18 @@
 {{-- ONE LEVEL of a sidebar navigation tree, rendered by itself so the tree
-     can be any depth: the MOV checklist's Part → Category → MOV.
+     can be any depth: the MOV checklist's Part → Category → KRA → MOV.
 
      Two kinds of node, and the difference is the whole point of the tree:
 
        · a node with children is a DISCLOSURE — a button that opens and closes
          what is under it, and nothing else: one target per row, so the row
-         under the pointer is always the row that answers. Part and category
-         are both this, at two depths.
+         under the pointer is always the row that answers. Part, category and
+         KRA are all disclosures.
        · a node without children is a LINK — the MOV itself, which opens that
          exact requirement on the checklist page. Nothing is uploaded from
          here: the sidebar navigates, the page uploads.
 
-     Each level steps in, so Part → category → MOV is legible at a glance, and
-     the count on a Part or a category is over exactly the MOVs listed beneath
-     it. --}}
+     Each level steps in, so Part → category → KRA → MOV is legible at a
+     glance, and the count on every branch covers the MOVs listed beneath it. --}}
 @foreach ($nodes as $node)
     @if (($node['children'] ?? []) !== [])
         {{-- A BRANCH: opens what is under it. The row is one target —

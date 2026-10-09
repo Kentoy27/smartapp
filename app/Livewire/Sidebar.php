@@ -25,7 +25,7 @@ use Livewire\Component;
  * Items are derived and sorted (see items()), so a new destination is added
  * by one entry here and slots itself into reading order. An item may carry
  * `children`: a dropdown of the sections of that page, which may nest. The
- * MOV checklist is the three-level case — Part → Category → MOV, built from
+ * MOV checklist is the Part → Category → KRA → MOV case, built from
  * the same catalogue rows the checklist page renders, so the navigation can
  * never offer a MOV the page does not have. An item may also carry a
  * `panel`: the control shown above its dropdown (the MOV checklist's search
@@ -89,6 +89,10 @@ class Sidebar extends Component
                 $partId = $requirement->category->part->id;
                 $this->movOpenParts[$partId] = true;
                 $this->movOpenCategories[$partId.':'.$requirement->category->id] = true;
+
+                if ($requirement->kra_label !== null && trim($requirement->kra_label) !== '') {
+                    $this->movOpenKras[$this->kraNodeKey($requirement->category->id, $requirement->kra_label)] = true;
+                }
             }
         }
 
@@ -142,6 +146,13 @@ class Sidebar extends Component
     public array $movOpenCategories = [];
 
     /**
+     * Which KRA groups are open, keyed by their category and label.
+     *
+     * @var array<string, true>
+     */
+    public array $movOpenKras = [];
+
+    /**
      * The MOV the page is on (`?mov=`), as a string, or null when it is not
      * on one — which also covers a requirement that has since been retired.
      */
@@ -179,12 +190,21 @@ class Sidebar extends Component
         ];
 
         $items[] = [
+            'label' => 'APP',
+            'route' => 'procurement.app.index',
+            'path' => 'procurement-app',
+            'icon' => 'file-spreadsheet',
+            'section' => 'Files',
+            'order' => 12,
+        ];
+
+        $items[] = [
             'label' => 'AIP',
             'route' => 'aip.index',
             'path' => 'aip',
             'icon' => 'file-spreadsheet',
             'section' => 'Files',
-            'order' => 12,
+            'order' => 13,
         ];
 
         if (Auth::user()?->hasAdminAccess()) {
@@ -243,7 +263,7 @@ class Sidebar extends Component
             // into the OPCR upload: the checklist is the standing set of
             // evidence documents, and it is worked on independently of any
             // one submission's cycle. It carries the whole checklist as a
-            // navigation tree — Part → Category → MOV — plus the progress
+            // navigation tree — Part → Category → KRA → MOV — plus progress
             // of the person reading it.
             $items[] = [
                 'label' => 'MOV',
@@ -306,10 +326,9 @@ class Sidebar extends Component
      * Open or close one node of the MOV tree.
      *
      * One method for the whole tree, addressed by the node's own id
-     * ("part-1", "category-1-2"), so adding a level is a matter of reading
-     * one more shape here rather than of a new public action per level.
-     * Anything that is not a Part or a category — a MOV leaf, or an id from
-     * a stale page — is simply not a node to open.
+     * ("part-1", "category-1-2", or a KRA key), so adding a level is a
+     * matter of reading one more shape here rather than a new action.
+     * Anything that is not a branch — a MOV leaf or a stale id — is ignored.
      */
     public function toggleMovNode(string $node): void
     {
@@ -323,19 +342,26 @@ class Sidebar extends Component
             $segments = explode('-', substr($node, 9));
 
             $this->toggleKey($this->movOpenCategories, ($segments[0] ?? '').':'.($segments[1] ?? ''));
+
+            return;
+        }
+
+        if (str_starts_with($node, 'kra-')) {
+            $this->toggleKey($this->movOpenKras, $node);
         }
     }
 
     /**
-     * The MOV checklist as the sidebar walks it: Part → Category → MOV, with
-     * each MOV carrying the signed-in user's own upload state.
+     * The MOV checklist as the sidebar walks it: Part → Category → KRA → MOV,
+     * with each MOV carrying the signed-in user's own upload state.
      *
      * Built from the same catalogue rows the checklist page renders, with the
      * same active-only scoping, so the navigation can never offer a Part,
-     * category or MOV that the page does not have. Nothing about the shape is
-     * hardcoded: the Parts, their categories and their MOVs — and every MOV
-     * number and title — come from the tables, so if Part 1 → A holds four
-     * MOVs and Part 1 → B holds seven, that is exactly what is listed.
+     * category, KRA or MOV that the page does not have. Nothing about the
+     * shape is hardcoded: the Parts, categories, KRA labels and MOVs — and
+     * every MOV number and title — come from the tables, so if Part 1 → A
+     * holds four MOVs and Part 1 → B holds seven, that is exactly what is
+     * listed.
      *
      * A MOV is identified by its requirement id, never by its number: MOV 1
      * under Part 1 → A is a different requirement from MOV 1 under Part 1 → B,
@@ -387,6 +413,7 @@ class Sidebar extends Component
 
             foreach ($part->categories as $category) {
                 $movs = [];
+                $kraGroups = [];
                 $categoryDone = 0;
 
                 // The counts are over the whole category and the whole Part,
@@ -401,7 +428,7 @@ class Sidebar extends Component
 
                     $categoryDone += $own->isEmpty() ? 0 : 1;
 
-                    $movs[] = [
+                    $mov = [
                         'key' => 'mov-'.$requirement->id,
                         'section' => (string) $requirement->id,
                         'label' => $requirement->label(),
@@ -416,7 +443,36 @@ class Sidebar extends Component
                         'pictures' => $own->count(),
                         'children' => [],
                     ];
+
+                    $kraLabel = trim((string) $requirement->kra_label);
+
+                    if ($kraLabel === '') {
+                        $movs[] = $mov;
+
+                        continue;
+                    }
+
+                    $kraKey = $this->kraNodeKey($category->id, $kraLabel);
+
+                    if (! isset($kraGroups[$kraKey])) {
+                        $kraGroups[$kraKey] = [
+                            'key' => $kraKey,
+                            'section' => null,
+                            'label' => $kraLabel,
+                            'title' => $category->trail().' → '.$kraLabel,
+                            'meta' => '0/0',
+                            'open' => isset($this->movOpenKras[$kraKey]),
+                            'children' => [],
+                            'done' => 0,
+                        ];
+                    }
+
+                    $kraGroups[$kraKey]['children'][] = $mov;
+                    $kraGroups[$kraKey]['done'] += $own->isEmpty() ? 0 : 1;
+                    $kraGroups[$kraKey]['meta'] = $kraGroups[$kraKey]['done'].'/'.count($kraGroups[$kraKey]['children']);
                 }
+
+                $movs = array_merge(array_values($kraGroups), $movs);
 
                 // Rolled in before the category is kept, so a Part's count
                 // always covers everything it holds.
@@ -454,6 +510,11 @@ class Sidebar extends Component
         }
 
         return $tree;
+    }
+
+    private function kraNodeKey(int $categoryId, string $kraLabel): string
+    {
+        return 'kra-'.$categoryId.'-'.sha1($kraLabel);
     }
 
     /**

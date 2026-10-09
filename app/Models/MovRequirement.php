@@ -22,6 +22,7 @@ class MovRequirement extends Model
     protected $fillable = [
         'mov_category_id',
         'mov_number',
+        'kra_label',
         'title',
         'description',
         'is_required',
@@ -71,12 +72,17 @@ class MovRequirement extends Model
     }
 
     /**
-     * "Part 1 → A → MOV 1" — shown on the requirement card and on the
-     * download's tooltip, so a file always says what it belongs to.
+     * "Part 1 → A → KRA 1: ... → MOV 1" — shown on the requirement card and
+     * on the download's tooltip, so a file always says what it belongs to.
      */
     public function trail(): string
     {
-        $segments = array_filter([$this->category?->part?->name, $this->category?->name, $this->label()]);
+        $segments = array_filter([
+            $this->category?->part?->name,
+            $this->category?->name,
+            $this->kra_label,
+            $this->label(),
+        ]);
 
         return implode(' → ', $segments);
     }

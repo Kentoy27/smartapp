@@ -35,6 +35,10 @@ Route::get('/auth/google/callback', [GoogleAuthController::class, 'callback'])->
 Route::get('/home', [DashboardController::class, 'index'])->middleware('auth')->name('home');
 
 Route::middleware('auth')->group(function () {
+    Route::get('/app', function () {
+        return view('procurement.app.index');
+    })->name('procurement.app.index');
+
     Route::get('/aip', function () {
         return view('aip.index');
     })->name('aip.index');

@@ -35,7 +35,7 @@
         </div>
         @if ($progress['returned'] > 0)
             <p class="mov-progress-panel__note">
-                {{ $progress['returned'] }} {{ \Illuminate\Support\Str::plural('picture', $progress['returned']) }} returned for revision.
+                {{ $progress['returned'] }} {{ \Illuminate\Support\Str::plural('file', $progress['returned']) }} returned for revision.
             </p>
         @endif
     </section>
@@ -78,7 +78,7 @@
                         <table class="mov-evidence-table">
                             <thead>
                                 <tr>
-                                    <th scope="col">Picture</th>
+                                    <th scope="col">File</th>
                                     <th scope="col">File Name</th>
                                     <th scope="col">Date Uploaded</th>
                                     <th scope="col">Status</th>
@@ -92,7 +92,7 @@
                                         wire:key="mov-picture-{{ $picture['id'] }}"
                                     >
                                         <td data-label="Picture">
-                                            @if ($picture['has_file'])
+                                            @if ($picture['has_file'] && $picture['is_image'])
                                                 <a href="{{ route('mov.view', $picture['id']) }}" target="_blank" rel="noopener" class="mov-evidence-thumb-link" aria-label="View {{ $picture['name'] }}">
                                                     <img
                                                         class="mov-evidence-thumb"
@@ -103,8 +103,8 @@
                                                 </a>
                                             @else
                                                 <span class="mov-evidence-placeholder">
-                                                    <x-icon name="image" :size="18" />
-                                                    <span>No Picture</span>
+                                                    <x-icon name="file-text" :size="18" />
+                                                    <span>{{ $picture['has_file'] ? ($picture['extension'] ?: 'FILE') : 'Missing file' }}</span>
                                                 </span>
                                             @endif
                                         </td>
@@ -114,7 +114,7 @@
                                                 <span class="mov-evidence-remarks"><strong>Remarks:</strong> {{ $picture['remarks'] }}</span>
                                             @endif
                                             @if (! $picture['has_file'])
-                                                <span class="mov-evidence-missing">The stored picture is missing. Replace it to restore the evidence.</span>
+                                                <span class="mov-evidence-missing">The stored file is missing. Replace it to restore the evidence.</span>
                                             @endif
                                         </td>
                                         <td data-label="Date Uploaded">
@@ -130,16 +130,18 @@
                                         <td data-label="Actions">
                                             @if ($removingId === $picture['id'])
                                                 <div class="mov-evidence-actions mov-evidence-actions--confirm">
-                                                    <span>Delete this picture?</span>
+                                                    <span>Delete this file?</span>
                                                     <button type="button" class="btn-danger btn-danger--small" wire:click="confirmRemove({{ $picture['id'] }})">Delete</button>
                                                     <button type="button" class="btn-ghost btn-ghost--small" wire:click="cancelRemove">Cancel</button>
                                                 </div>
                                             @else
                                                 <div class="mov-evidence-actions">
                                                     @if ($picture['has_file'])
-                                                        <a class="btn-ghost btn-ghost--small" href="{{ route('mov.view', $picture['id']) }}" target="_blank" rel="noopener">
-                                                            <x-icon name="eye" :size="14" /><span>View</span>
-                                                        </a>
+                                                        @if ($picture['is_image'] || $picture['extension'] === 'PDF')
+                                                            <a class="btn-ghost btn-ghost--small" href="{{ route('mov.view', $picture['id']) }}" target="_blank" rel="noopener">
+                                                                <x-icon name="eye" :size="14" /><span>View</span>
+                                                            </a>
+                                                        @endif
                                                         <a class="btn-ghost btn-ghost--small" href="{{ route('mov.download', $picture['id']) }}">
                                                             <x-icon name="download" :size="14" /><span>Download</span>
                                                         </a>
@@ -168,13 +170,16 @@
                         <span class="mov-evidence-empty__icon" aria-hidden="true"><x-icon name="image" :size="22" /></span>
                         <div>
                             <h2>No MOV evidence uploaded yet</h2>
-                            <p>Upload the required picture or document for this MOV to continue.</p>
+                            <p>Upload one or more pictures or documents. You can add more files at any time.</p>
                         </div>
                     </div>
                 @endif
             </section>
 
-            <section class="mov-upload-panel" aria-labelledby="mov-upload-title">
+            <section
+                class="mov-upload-panel"
+                aria-labelledby="mov-upload-title"
+            >
                 <div class="mov-upload-panel__head">
                     <div>
                         <span class="mov-upload-panel__eyebrow">{{ $replacingId !== null ? 'Replace selected evidence' : 'Add evidence' }}</span>
@@ -184,34 +189,62 @@
                 </div>
 
                 <label
-                    class="mov-dropzone{{ $document ? ' has-file' : '' }}"
+                    class="mov-dropzone{{ $documents !== [] ? ' has-file' : '' }}"
                     for="mov-evidence-file"
                     wire:key="mov-dropzone-{{ $focused }}-{{ $replacingId ?? 'new' }}"
                 >
                     <input
                         id="mov-evidence-file"
                         type="file"
-                        wire:model="document"
-                        accept=".jpg,.jpeg,.png,.webp"
-                        aria-label="Choose a MOV evidence image"
+                        wire:model="documents"
+                        accept="{{ implode(',', array_map(fn ($extension) => '.'.$extension, config('mov.allowed_extensions', []))) }}"
+                        @unless ($replacingId !== null) multiple @endunless
+                        aria-label="Choose MOV evidence files"
                     >
-                    @if ($document)
-                        <img class="mov-dropzone__preview" src="{{ $document->temporaryUrl() }}" alt="Preview of selected file">
-                        <span class="mov-dropzone__filename">{{ $document->getClientOriginalName() }}</span>
-                        <span class="mov-dropzone__action">Choose a different file</span>
+                    @if ($documents !== [])
+                        <span class="mov-dropzone__icon" aria-hidden="true"><x-icon name="file-text" :size="24" /></span>
+                        <strong>{{ count($documents) }} {{ \Illuminate\Support\Str::plural('file', count($documents)) }} selected</strong>
+                        <span><span class="mov-dropzone__action">Choose more files</span></span>
                     @else
                         <span class="mov-dropzone__icon" aria-hidden="true"><x-icon name="upload" :size="24" /></span>
-                        <strong>Drag &amp; drop your image here</strong>
-                        <span>or <span class="mov-dropzone__action">Choose File</span></span>
+                        <strong>Drag &amp; drop your files here</strong>
+                        <span>or <span class="mov-dropzone__action">Choose Files</span></span>
                     @endif
                     <span class="mov-dropzone__formats">
                         Supported formats: {{ $this->acceptedExtensions() }}
-                        <span>Maximum file size: {{ number_format($this->uploadLimitMegabytes(), 0) }} MB</span>
+                        <span>Maximum size per file: {{ number_format($this->uploadLimitMegabytes(), 0) }} MB</span>
                     </span>
                 </label>
 
-                @if ($uploadFailedFor === $mov['id'] && $errors->has('document'))
-                    <div class="error-text" role="alert">{{ $errors->first('document') }}</div>
+                @if ($documents !== [])
+                    <ul class="mov-selected-files" aria-label="Selected files">
+                        @foreach ($documents as $selectedFile)
+                            @php($extension = strtoupper(pathinfo($selectedFile->getClientOriginalName(), PATHINFO_EXTENSION)))
+                            <li wire:key="mov-selected-file-{{ $loop->index }}">
+                                <span class="mov-selected-files__type">{{ $extension ?: 'FILE' }}</span>
+                                <span class="mov-selected-files__name">{{ $selectedFile->getClientOriginalName() }}</span>
+                                <span class="mov-selected-files__size">{{ number_format($selectedFile->getSize() / 1048576, 2) }} MB</span>
+                            </li>
+                        @endforeach
+                    </ul>
+                @endif
+
+                <div class="mov-upload-progress" wire:loading wire:target="documents" role="status" aria-live="polite">
+                    <div class="mov-upload-progress__label">
+                        <span>Uploading selected files…</span>
+                    </div>
+                    <div class="mov-upload-progress__track" aria-hidden="true">
+                        <span></span>
+                    </div>
+                </div>
+                <div class="mov-upload-progress" wire:loading wire:target="saveDocuments({{ $mov['id'] }})" role="status" aria-live="polite">
+                    <div class="mov-upload-progress__label">
+                        <span>Checking and saving files…</span>
+                    </div>
+                </div>
+
+                @if ($uploadFailedFor === $mov['id'] && ($errors->has('documents') || $errors->has('documents.*') || $errors->has('document')))
+                    <div class="error-text" role="alert">{{ $errors->first('documents') ?: $errors->first('documents.*') ?: $errors->first('document') }}</div>
                 @endif
 
                 <div class="mov-upload-panel__actions">
@@ -221,13 +254,16 @@
                     <button
                         type="button"
                         class="btn-primary btn-primary--small"
-                        wire:click="upload({{ $mov['id'] }})"
+                        wire:click="saveDocuments({{ $mov['id'] }})"
                         wire:loading.attr="disabled"
-                        wire:target="upload({{ $mov['id'] }})"
-                        @disabled(! $document)
+                        wire:target="saveDocuments({{ $mov['id'] }})"
+                        @disabled($documents === [] && ! $document)
                     >
-                        <span wire:loading.remove wire:target="upload({{ $mov['id'] }})">{{ $replacingId !== null ? 'Replace Picture' : 'Upload Picture' }}</span>
-                        <span wire:loading wire:target="upload({{ $mov['id'] }})">Uploading…</span>
+                        <span wire:loading.remove wire:target="saveDocuments({{ $mov['id'] }})">{{ $replacingId !== null ? 'Replace File' : 'Upload '.($documents !== [] ? count($documents).' Files' : 'Files') }}</span>
+                        <span wire:loading wire:target="saveDocuments({{ $mov['id'] }})">
+                            <span class="mov-upload-spinner" aria-hidden="true"></span>
+                            Checking and saving files…
+                        </span>
                     </button>
                 </div>
             </section>

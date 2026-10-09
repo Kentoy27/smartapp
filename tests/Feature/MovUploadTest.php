@@ -160,6 +160,28 @@ class MovUploadTest extends TestCase
     }
 
     /**
+     * The MOV leaves below any set of Part, category or KRA branches.
+     *
+     * @param  array<int, array<string, mixed>>  $nodes
+     * @return array<int, array<string, mixed>>
+     */
+    private function movLeaves(array $nodes): array
+    {
+        $leaves = [];
+
+        foreach ($nodes as $node) {
+            if (isset($node['status'])) {
+                $leaves[] = $node;
+                continue;
+            }
+
+            $leaves = array_merge($leaves, $this->movLeaves($node['children'] ?? []));
+        }
+
+        return $leaves;
+    }
+
+    /**
      * The requirement behind Part 1 → A → MOV 1 in config/mov.php.
      */
     private function wfpRequirement(): MovRequirement
@@ -168,6 +190,11 @@ class MovUploadTest extends TestCase
             ->whereHas('category.part', fn ($query) => $query->where('name', 'PART 1'))
             ->where('mov_number', 1)
             ->firstOrFail();
+    }
+
+    private function kraNodeKey(MovCategory $category, string $kraLabel): string
+    {
+        return 'kra-'.$category->id.'-'.sha1($kraLabel);
     }
 
     public function test_guests_are_sent_to_the_login_page(): void
@@ -195,7 +222,7 @@ class MovUploadTest extends TestCase
         $this->actingAs($staff)
             ->get(route('mov.index', ['mov' => $this->wfpRequirement()->id]))
             ->assertOk()
-            ->assertSee('PART 1 → A → MOV 1', false)
+            ->assertSee('PART 1 → A → KRA 1: School Leadership and Administration → MOV 1', false)
             ->assertSee('Upload MOV Evidence')
             ->assertSee('No MOV evidence uploaded yet');
 
@@ -227,7 +254,7 @@ class MovUploadTest extends TestCase
         $this->assertStringNotContainsString('sidebar-upload-mov', $sidebar);
     }
 
-    public function test_the_sidebar_carries_the_whole_checklist_as_part_category_mov(): void
+    public function test_the_sidebar_carries_the_whole_checklist_grouped_by_template_kra(): void
     {
         $this->seedChecklist();
         $staff = $this->staff();
@@ -243,16 +270,31 @@ class MovUploadTest extends TestCase
             $tree->pluck('label')->all(),
         );
 
-        // Three levels, each with its own MOVs: the categories under Part 1,
-        // and every category's own MOV list — the numbers and titles coming
-        // from the rows, not from a list written into the view.
+        // A/B/C remain distinct and each uses the KRA labels from its own
+        // official template section before listing the MOV leaves.
         $part = $tree->firstWhere('label', 'PART 1');
         $categories = collect($part['children']);
 
         $this->assertSame(['A', 'B', 'C'], $categories->pluck('label')->all());
 
         $categoryA = $categories->firstWhere('label', 'A');
-        $movsA = collect($categoryA['children']);
+        $kraGroupsA = collect($categoryA['children']);
+        $this->assertSame([
+            'KRA 1: School Leadership and Administration',
+            'KRA 2: Teaching and Learning Delivery',
+            'KRA 3: Learner Formation and Development',
+            'KRA 4: School Operations and Management',
+        ], $kraGroupsA->pluck('label')->all());
+
+        $kraMovNumbers = fn (array $group): array => collect($this->movLeaves($group['children']))
+            ->map(fn (array $mov): int => (int) substr($mov['label'], 4))
+            ->all();
+        $this->assertSame([1, 2, 3], $kraMovNumbers($kraGroupsA[0]));
+        $this->assertSame([4, 5, 6, 7], $kraMovNumbers($kraGroupsA[1]));
+        $this->assertSame([8, 9, 10, 11], $kraMovNumbers($kraGroupsA[2]));
+        $this->assertSame([12, 13, 14, 15, 16], $kraMovNumbers($kraGroupsA[3]));
+
+        $movsA = collect($this->movLeaves($categoryA['children']));
 
         $this->assertSame(range(1, 16), $movsA->map(fn (array $mov): int => (int) substr($mov['label'], 4))->all());
         $this->assertSame(
@@ -260,10 +302,26 @@ class MovUploadTest extends TestCase
             $movsA->first()['hint'],
         );
 
-        // Each category carries its OWN list: B has four, C has three, and
-        // they are not A's sixteen with the tail cut off.
-        $this->assertCount(4, $categories->firstWhere('label', 'B')['children']);
-        $this->assertCount(3, $categories->firstWhere('label', 'C')['children']);
+        // Each category carries its own list: B has four and C has three.
+        $categoryB = $categories->firstWhere('label', 'B');
+        $categoryC = $categories->firstWhere('label', 'C');
+        $this->assertCount(4, $this->movLeaves($categoryB['children']));
+        $this->assertCount(3, $this->movLeaves($categoryC['children']));
+        $this->assertSame([
+            'KRA 1: School Leadership and Administration',
+            'KRA 2: Teaching and Learning Delivery',
+            'KRA 3: Learner Formation and Development',
+            'KRA 4: School Operations and Management',
+        ], collect($categoryB['children'])->pluck('label')->all());
+        $this->assertSame([1, 2, 3, 4], collect($categoryB['children'])->map(
+            fn (array $group): int => $kraMovNumbers($group)[0],
+        )->all());
+        $this->assertSame('KRA 1: Financial Stewardship', $categoryC['children'][0]['label']);
+        $this->assertSame('KRA 2: Process Improvement', $categoryC['children'][1]['label']);
+        $this->assertSame('KRA 3: Client Satisfaction', $categoryC['children'][2]['label']);
+        $this->assertSame([1, 2, 3], collect($categoryC['children'])->map(
+            fn (array $group): int => $kraMovNumbers($group)[0],
+        )->all());
 
         // The counts on the two headers are over exactly what is listed
         // beneath them.
@@ -457,9 +515,7 @@ class MovUploadTest extends TestCase
         // checklist, every MOV under its own Part and category.
         $tree = $this->movTreeFor($staff);
 
-        $movs = collect($tree)
-            ->flatMap(fn (array $part) => collect($part['children'] ?? []))
-            ->flatMap(fn (array $category) => collect($category['children'] ?? []));
+        $movs = collect($this->movLeaves($tree));
 
         $this->assertSame(['PART 1'], collect($tree)->pluck('label')->all());
         $this->assertCount(
@@ -485,6 +541,7 @@ class MovUploadTest extends TestCase
             ->call('toggleGroup', 'movs')
             ->call('toggleMovNode', 'part-'.$part->id)
             ->call('toggleMovNode', 'category-'.$part->id.'-'.$categoryA->id)
+            ->call('toggleMovNode', $this->kraNodeKey($categoryA, 'KRA 1: School Leadership and Administration'))
             ->html();
 
         // One control, not a link with a dropdown button beside it: the row
@@ -538,11 +595,11 @@ class MovUploadTest extends TestCase
 
         $this->assertSame(['A', 'B', 'C'], $categories->pluck('label')->all());
 
-        $movs = collect($categories->first()['children']);
+        $movs = collect($this->movLeaves($categories->first()['children']));
 
         $this->assertCount(16, $movs);
         $this->assertSame('MOV 1', $movs->first()['label']);
-        $this->assertStringContainsString('Financial', $movs->first()['title']);
+        $this->assertStringContainsString('KRA 1: School Leadership and Administration', $movs->first()['title']);
 
         // The counts cover everything the branch holds.
         $this->assertSame('0/16', $categories->first()['meta']);
@@ -591,11 +648,15 @@ class MovUploadTest extends TestCase
         $part = MovPart::where('name', 'PART 1')->firstOrFail();
         $category = MovCategory::where('mov_part_id', $part->id)->where('name', 'A')->firstOrFail();
 
+        $kraLabel = 'KRA 1: School Leadership and Administration';
+        $kraKey = $this->kraNodeKey($category, $kraLabel);
+
         $component = Livewire::actingAs($staff)
             ->test(Sidebar::class)
             ->set('movFocus', (string) $requirement->id)
             ->set('movOpenParts.'.$part->id, true)
-            ->set('movOpenCategories.'.$part->id.':'.$category->id, true);
+            ->set('movOpenCategories.'.$part->id.':'.$category->id, true)
+            ->set('movOpenKras.'.$kraKey, true);
 
         $component->call('toggleMovNode', 'part-'.$part->id)
             ->assertSet('movOpenParts.'.$part->id, false)
@@ -607,7 +668,7 @@ class MovUploadTest extends TestCase
             ->assertDontSee('href="'.route('mov.index', ['mov' => $requirement->id]).'"', false);
     }
 
-    public function test_the_dropdown_renders_the_three_levels(): void
+    public function test_the_dropdown_renders_part_category_kra_and_mov_levels(): void
     {
         $this->seedChecklist();
         $staff = $this->staff();
@@ -637,13 +698,21 @@ class MovUploadTest extends TestCase
         $this->assertStringContainsString("toggleMovNode('category-".$part->id.'-'.$categoryA->id."')", $html);
         $this->assertStringContainsString('nav-tree--2', $html);
 
-        // Categories are disclosures too: opening one reveals only its own
-        // MOVs, each a link to its own requirement and a dot for a checklist
-        // nobody has uploaded against.
+        // Categories reveal their KRA groups, and each group reveals its MOVs.
         $html = Livewire::actingAs($staff)->test(Sidebar::class)
             ->call('toggleGroup', 'movs')
             ->call('toggleMovNode', 'part-'.$part->id)
             ->call('toggleMovNode', 'category-'.$part->id.'-'.$categoryA->id)
+            ->html();
+
+        $this->assertStringContainsString('KRA 1: School Leadership and Administration', $html);
+        $this->assertStringContainsString('nav-tree--3', $html);
+
+        $html = Livewire::actingAs($staff)->test(Sidebar::class)
+            ->call('toggleGroup', 'movs')
+            ->call('toggleMovNode', 'part-'.$part->id)
+            ->call('toggleMovNode', 'category-'.$part->id.'-'.$categoryA->id)
+            ->call('toggleMovNode', $this->kraNodeKey($categoryA, 'KRA 1: School Leadership and Administration'))
             ->html();
 
         $this->assertStringContainsString(
@@ -772,6 +841,7 @@ class MovUploadTest extends TestCase
         $categoryB = MovCategory::where('mov_part_id', $part->id)
             ->where('name', 'B')
             ->firstOrFail();
+        $kraLabel = 'KRA 1: School Leadership and Administration';
 
         // Open the dropdown and the Part, so the category's MOV leaves are
         // rendered — each one a link to that MOV on its own page.
@@ -780,6 +850,7 @@ class MovUploadTest extends TestCase
             ->call('toggleGroup', 'movs')
             ->call('toggleMovNode', 'part-'.$part->id)
             ->call('toggleMovNode', 'category-'.$part->id.'-'.$categoryB->id)
+            ->call('toggleMovNode', $this->kraNodeKey($categoryB, $kraLabel))
             ->html();
 
         // Every row of the dropdown is one target: the row under the pointer is
@@ -922,7 +993,7 @@ class MovUploadTest extends TestCase
         $this->assertSame(5, $line['count']);
         $this->assertSame(UserMov::STATUS_ACCEPTED, $line['pictures'][0]['status']);
         $this->assertSame(UserMov::STATUS_RETURNED, $line['pictures'][1]['status']);
-        $this->assertSame('5 pictures · 1 accepted, 1 needs revision', $line['summary']);
+        $this->assertSame('5 files · 1 accepted, 1 needs revision', $line['summary']);
 
         // …and five pictures still complete exactly ONE MOV.
         $progress = $component->instance()->progress();
@@ -943,40 +1014,75 @@ class MovUploadTest extends TestCase
             ->assertStatus(404);
     }
 
-    public function test_a_file_that_is_not_a_picture_is_refused(): void
+    public function test_unsupported_executable_files_are_refused_but_pdfs_are_accepted(): void
     {
         Storage::fake('local');
         $this->seedChecklist();
         $staff = $this->staff();
         $requirement = $this->wfpRequirement();
 
-        // A MOV is evidenced with pictures — an executable is out.
+        // Executables are never accepted as MOV evidence.
         Livewire::actingAs($staff)
             ->test(MovUploader::class)
             ->call('openUpload', $requirement->id)
             ->set('document', UploadedFile::fake()->create('payload.exe', 40, 'application/x-msdownload'))
             ->call('upload')
-            ->assertHasErrors(['document']);
+            ->assertHasErrors(['documents.0']);
 
-        // …and so is a PDF, however official it looks: the checklist is read
-        // as images, so the rule is the same for every non-picture type.
         Livewire::actingAs($staff)
             ->test(MovUploader::class)
             ->call('openUpload', $requirement->id)
             ->set('document', UploadedFile::fake()->create('wfp-and-aip.pdf', 200, 'application/pdf'))
             ->call('upload')
-            ->assertHasErrors(['document']);
+            ->assertHasNoErrors();
 
-        $this->assertSame(0, UserMov::forUser($staff)->count(), 'A refused file still created an upload row.');
-        $this->assertEmpty(Storage::disk('local')->files('mov-uploads'));
+        $this->assertSame(['wfp-and-aip.pdf'], UserMov::forUser($staff)->pluck('original_name')->all());
+        $this->assertCount(1, Storage::disk('local')->allFiles('mov-uploads'));
     }
 
-    public function test_the_accepted_types_are_pictures_only(): void
+    public function test_the_accepted_types_include_common_documents(): void
     {
-        // The rule lives in config, so it can be widened later without code —
-        // but as shipped it is images, nothing else.
-        $this->assertSame(['jpg', 'jpeg', 'png', 'webp'], config('mov.allowed_extensions'));
+        $this->assertSame([
+            'jpg', 'jpeg', 'png', 'webp',
+            'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'csv', 'txt',
+        ], config('mov.allowed_extensions'));
         $this->assertSame(25600, config('mov.max_kb'));
+    }
+
+    public function test_multiple_files_can_be_added_in_batches_without_replacing_previous_evidence(): void
+    {
+        Storage::fake('local');
+        $this->seedChecklist();
+        $staff = $this->staff();
+        $requirement = $this->wfpRequirement();
+        $component = Livewire::actingAs($staff)->test(MovUploader::class);
+
+        $component->set('documents', [
+            UploadedFile::fake()->create('signed-plan.pdf', 200, 'application/pdf'),
+            UploadedFile::fake()->create('cover-photo.jpg', 40, 'image/jpeg'),
+        ])
+            ->call('upload', $requirement->id)
+            ->assertHasNoErrors()
+            ->assertSee('2 files added');
+
+        $component->set('documents', [
+            UploadedFile::fake()->create('budget.csv', 5, 'text/csv'),
+        ])
+            ->call('upload', $requirement->id)
+            ->assertHasNoErrors()
+            ->assertSee('1 file added');
+
+        $uploads = UserMov::forUser($staff)
+            ->where('mov_requirement_id', $requirement->id)
+            ->oldest('id')
+            ->get();
+
+        $this->assertSame(['signed-plan.pdf', 'cover-photo.jpg', 'budget.csv'], $uploads->pluck('original_name')->all());
+        $this->assertCount(3, $uploads);
+
+        foreach ($uploads as $upload) {
+            Storage::disk('local')->assertExists($upload->stored_path);
+        }
     }
 
     public function test_a_file_over_the_configured_size_limit_is_refused(): void
@@ -992,7 +1098,7 @@ class MovUploadTest extends TestCase
             ->call('openUpload', $requirement->id)
             ->set('document', UploadedFile::fake()->create('big.jpg', 400, 'image/jpeg'))
             ->call('upload')
-            ->assertHasErrors(['document']);
+            ->assertHasErrors(['documents.0']);
 
         $this->assertSame(0, UserMov::forUser($staff)->count());
     }
@@ -1100,7 +1206,7 @@ class MovUploadTest extends TestCase
             ->assertSee('Approved Work and Financial Plan (WFP)', false)
             ->assertSee('Upload MOV Evidence', false)
             ->assertSee('No MOV evidence uploaded yet')
-            ->assertSee('PART 1 → A → MOV 1', false)
+            ->assertSee('PART 1 → A → KRA 1: School Leadership and Administration → MOV 1', false)
             ->set('document', UploadedFile::fake()->create('WFP-AIP.jpg', 20, 'image/jpeg'))
             ->call('upload', $requirement->id)
             ->assertSee('WFP-AIP.jpg')
@@ -1148,13 +1254,13 @@ class MovUploadTest extends TestCase
         );
         $this->assertSame(
             1,
-            substr_count($html, 'wire:click="upload('),
+            substr_count($html, 'wire:click="saveDocuments('),
             'The separate upload panel names the MOV it uploads to.',
         );
 
         $this->assertSame(1, substr_count($html, 'class="mov-evidence-thumb"'));
         $this->assertSame(0, substr_count($html, 'No MOV evidence uploaded yet'));
-        $this->assertStringContainsString('Evidence files for PART 1 → A → MOV 1', $html);
+        $this->assertStringContainsString('Evidence files for PART 1 → A → KRA 1: School Leadership and Administration → MOV 1', $html);
         $this->assertStringContainsString('wfp.jpg', $html);
 
         // Other MOVs show their own empty state and upload panel, not a
@@ -1166,7 +1272,9 @@ class MovUploadTest extends TestCase
             $this->assertSame(0, substr_count($page, '<table class="mov-evidence-table">'));
             $this->assertStringContainsString('No MOV evidence uploaded yet', $page);
             $this->assertStringContainsString($other->trail(), $page);
-            $this->assertStringContainsString('>Upload Picture<', $page);
+            $this->assertStringContainsString('>Upload Files<', $page);
+            $this->assertStringContainsString('multiple', $page);
+            $this->assertStringContainsString('Checking and saving files', $page);
         }
     }
     public function test_search_finds_a_mov_by_its_words_and_hides_the_rest(): void
@@ -1195,6 +1303,12 @@ class MovUploadTest extends TestCase
             ['Report on Promotion Rate (School Form 6)', 'School Innovation Paper'],
             $titles($component),
         );
+
+        $component->set('search', 'Financial Stewardship');
+
+        $this->assertSame([
+            'Liquidation Reports stamped received by the Accounting Unit',
+        ], $titles($component));
 
         // Nothing matching finds nothing.
         $component->set('search', 'nothing matches this');
@@ -1499,7 +1613,7 @@ class MovUploadTest extends TestCase
 
         $this->assertSame('PART 1', $requirement->category->part->name);
         $this->assertSame('A', $requirement->category->name);
-        $this->assertSame('PART 1 → A → MOV 1', $requirement->trail());
+        $this->assertSame('PART 1 → A → KRA 1: School Leadership and Administration → MOV 1', $requirement->trail());
         $this->assertSame('Approved Work and Financial Plan (WFP) and Annual Implementation Plan (AIP)', $requirement->title);
 
         // Groups do not all have the same shape: A carries the full set,

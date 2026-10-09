@@ -28,12 +28,10 @@ use Livewire\WithFileUploads;
  * tree links to: the page then opens that MOV's own Part and category and
  * marks the card, so a line three levels down is one click from anywhere.
  *
- * A MOV is evidenced with PICTURES, and takes as many as the staff member
- * needs — a five-page agreement is five photographs, not five uploads that
- * overwrite one another. Each picture is its own record with its own review
- * state (Uploaded / Under Review / Accepted / Returned for Revision), so a
- * reviewer can accept one page and send another back; the card summarises
- * the set.
+ * A MOV accepts pictures and common source documents, individually or in
+ * batches, with no cap on the number of files attached. Each file is its own
+ * record with its own review state (Uploaded / Under Review / Accepted /
+ * Returned for Revision), so a reviewer can accept one and return another.
  *
  * Nothing about the checklist is hardcoded here: the parts, categories and
  * requirements are rows built from config/mov.php by `php artisan mov:sync`,
@@ -120,7 +118,12 @@ class MovUploader extends Component
     public ?int $uploadFailedFor = null;
 
     /**
-     * The file chosen for that requirement (temporary until saved).
+     * Files chosen for that requirement (temporary until saved).
+     */
+    public array $documents = [];
+
+    /**
+     * Backward-compatible single-file property for existing Livewire callers.
      */
     public $document;
 
@@ -223,6 +226,7 @@ class MovUploader extends Component
         $this->assertRequirement($requirementId);
 
         $this->uploadingFor = $requirementId;
+        $this->documents = [];
         $this->document = null;
         $this->removingId = null;
         $this->resetValidation();
@@ -235,6 +239,7 @@ class MovUploader extends Component
     {
         $this->uploadingFor = null;
         $this->replacingId = null;
+        $this->documents = [];
         $this->document = null;
         $this->resetValidation();
     }
@@ -250,95 +255,127 @@ class MovUploader extends Component
         $picture = UserMov::forUser(Auth::user())->findOrFail($documentId);
         $this->uploadingFor = $picture->mov_requirement_id;
         $this->replacingId = $picture->id;
+        $this->documents = [];
         $this->document = null;
         $this->removingId = null;
         $this->resetValidation();
     }
 
     /**
-     * Add the chosen picture to the requirement. There is no cap: a MOV holds
-     * as many pictures as the evidence needs, and each one is added rather
-     * than replacing anything.
+     * Preserve the original Livewire action name for existing callers.
+     */
+    public function upload(?int $requirementId = null): void
+    {
+        $this->saveDocuments($requirementId);
+    }
+
+    /**
+     * Add every chosen file to the requirement. There is no cap on the number
+     * of files a MOV can hold; later batches append rather than replace.
      *
      * Every MOV has its own upload area on the page, so the requirement is
      * named by the MOV whose area was used — a file is attached to the MOV it
      * was picked on and to no other. Naming nothing falls back to the one
-     * `openUpload()` marked, which is how this has always been callable.
+     * `openUpload()` marked.
      */
-    public function upload(?int $requirementId = null): void
+    public function saveDocuments(?int $requirementId = null): void
     {
         $this->assertStaffMember();
 
         $requirement = $this->assertRequirement((int) ($requirementId ?? $this->uploadingFor));
 
+        $files = $this->selectedDocuments();
+
+        if ($files !== [] && $this->replacingId !== null && count($files) !== 1) {
+            $this->addError('documents', 'Choose exactly one file when replacing evidence.');
+            $this->uploadFailedFor = $requirement->id;
+
+            return;
+        }
+
         // Set before validating so a rejected file's message has a MOV to
         // appear on, and cleared the moment the upload succeeds.
         $this->uploadFailedFor = $requirement->id;
+        $this->documents = $files;
+        $this->document = null;
 
         $this->validate(
-            ['document' => $this->documentRules()],
             [
-                'document.required' => 'Choose a picture to upload first.',
-                'document.mimes' => 'A MOV must be evidenced with a picture — upload a '.strtoupper(implode(', ', $this->allowedExtensions())).' file.',
-                'document.extensions' => 'A MOV must be evidenced with a picture — upload a '.strtoupper(implode(', ', $this->allowedExtensions())).' file.',
-                'document.max' => 'That picture is too large ('.number_format($this->maxKilobytes() / 1024, 1).' MB maximum).',
+                'documents' => ['required', 'array', 'min:1'],
+                'documents.*' => $this->documentRules(),
+            ],
+            [
+                'documents.required' => 'Choose at least one file to upload.',
+                'documents.min' => 'Choose at least one file to upload.',
+                'documents.*.mimes' => 'Upload a supported image or document: '.strtoupper(implode(', ', $this->allowedExtensions())).'.',
+                'documents.*.extensions' => 'Upload a supported image or document: '.strtoupper(implode(', ', $this->allowedExtensions())).'.',
+                'documents.*.max' => 'Each file must be no larger than '.number_format($this->maxKilobytes() / 1024, 1).' MB.',
             ],
         );
 
-        /** @var TemporaryUploadedFile $file */
-        $file = $this->document;
-        $originalName = (string) $file->getClientOriginalName();
         $disk = Storage::disk(config('mov.disk', 'local'));
         $replacingPicture = $this->replacingId !== null
             ? UserMov::forUser(Auth::user())
                 ->where('mov_requirement_id', $requirement->id)
                 ->findOrFail($this->replacingId)
             : null;
+        $isReplacing = $replacingPicture !== null;
 
-        $path = $file->storeAs(
-            config('mov.directory', 'mov-uploads').'/'.Auth::id(),
-            $this->storedFileName($originalName),
-            config('mov.disk', 'local'),
-        );
+        $savedFiles = [];
 
-        $attributes = [
-            'original_name' => $this->displayName($originalName),
-            'stored_path' => $path,
-            'mime_type' => $file->getClientMimeType(),
-            'size_bytes' => (int) $file->getSize(),
-            'status' => UserMov::STATUS_UPLOADED,
-            'uploaded_at' => now(),
-            'remarks' => null,
-            'reviewed_by' => null,
-            'reviewed_at' => null,
-        ];
+        foreach ($files as $file) {
+            /** @var TemporaryUploadedFile $file */
+            $originalName = (string) $file->getClientOriginalName();
+            $path = $file->storeAs(
+                config('mov.directory', 'mov-uploads').'/'.Auth::id(),
+                $this->storedFileName($originalName),
+                config('mov.disk', 'local'),
+            );
 
-        if ($replacingPicture !== null) {
-            $oldPath = $replacingPicture->stored_path;
-            $picture = $replacingPicture;
-            $picture->update($attributes);
-            $disk->delete($oldPath);
-        } else {
-            $picture = UserMov::create([
-                'user_id' => Auth::id(),
-                'mov_requirement_id' => $requirement->id,
-                ...$attributes,
-            ]);
+            $attributes = [
+                'original_name' => $this->displayName($originalName),
+                'stored_path' => $path,
+                'mime_type' => $file->getMimeType(),
+                'size_bytes' => (int) $file->getSize(),
+                'status' => UserMov::STATUS_UPLOADED,
+                'uploaded_at' => now(),
+                'remarks' => null,
+                'reviewed_by' => null,
+                'reviewed_at' => null,
+            ];
+
+            if ($replacingPicture !== null) {
+                $oldPath = $replacingPicture->stored_path;
+                $picture = $replacingPicture;
+                $picture->update($attributes);
+                $disk->delete($oldPath);
+                $replacingPicture = null;
+            } else {
+                $picture = UserMov::create([
+                    'user_id' => Auth::id(),
+                    'mov_requirement_id' => $requirement->id,
+                    ...$attributes,
+                ]);
+            }
+
+            $savedFiles[] = $picture->original_name;
         }
 
         $this->uploadingFor = null;
         $this->replacingId = null;
         $this->uploadFailedFor = null;
+        $this->documents = [];
         $this->document = null;
         $this->removingId = null;
         $this->resetValidation();
 
         unset($this->tree, $this->sections, $this->scope, $this->progress);
 
-        $action = $replacingPicture !== null ? 'replaced' : 'added';
-        $this->successMessage = $requirement->label().' — '.$picture->original_name.' '.$action.' ('
+        $action = $isReplacing ? 'replaced' : 'added';
+        $this->successMessage = $requirement->label().' — '.count($savedFiles).' '
+            .Str::plural('file', count($savedFiles)).' '.$action.' ('
             .UserMov::forUser(Auth::user())->where('mov_requirement_id', $requirement->id)->count()
-            .' pictures).';
+            .' total).';
     }
 
     /**
@@ -551,8 +588,8 @@ class MovUploader extends Component
         $required = MovRequirement::query()->active()->required()->count();
         $optional = MovRequirement::query()->active()->where('is_required', false)->count();
 
-        // DISTINCT requirements: five pictures on one MOV is one completed
-        // MOV, not five.
+        // DISTINCT requirements: several files on one MOV still complete
+        // one requirement, not several.
         $done = UserMov::forUser(Auth::user())
             ->whereIn('mov_requirement_id', MovRequirement::query()->active()->required()->select('id'))
             ->distinct()
@@ -776,6 +813,12 @@ class MovUploader extends Component
                 'reviewer' => $picture->reviewer?->username,
                 'uploaded_at' => $picture->uploaded_at?->format('M j, Y g:i A'),
                 'has_file' => $picture->fileExists(),
+                'is_image' => in_array(
+                    strtolower(pathinfo($picture->original_name, PATHINFO_EXTENSION)),
+                    ['jpg', 'jpeg', 'png', 'webp'],
+                    true,
+                ),
+                'extension' => strtoupper(pathinfo($picture->original_name, PATHINFO_EXTENSION)),
             ])
             ->values()
             ->all();
@@ -805,7 +848,7 @@ class MovUploader extends Component
     }
 
     /**
-     * How the set reads at a glance: how many pictures, and what became of
+     * How the set reads at a glance: how many files, and what became of
      * them. A MOV with ten pictures and two returned should say so without
      * anyone counting rows.
      *
@@ -814,11 +857,11 @@ class MovUploader extends Component
     private function picturesSummary(array $pictures): string
     {
         if ($pictures === []) {
-            return 'No pictures yet';
+            return 'No files yet';
         }
 
         $count = count($pictures);
-        $head = $count.' '.Str::plural('picture', $count);
+        $head = $count.' '.Str::plural('file', $count);
 
         $returned = count(array_filter($pictures, fn (array $p): bool => $p['status'] === UserMov::STATUS_RETURNED));
         $accepted = count(array_filter($pictures, fn (array $p): bool => $p['status'] === UserMov::STATUS_ACCEPTED));
@@ -846,8 +889,9 @@ class MovUploader extends Component
 
     /**
      * Does this requirement match the search box? Matches on the part, the
-     * category, the MOV number, the title and the description — "Work and
-     * Financial Plan", "1", "A" and "Part 1" all find the right line.
+     * category, KRA, the MOV number, the title and the description — "Work
+     * and Financial Plan", "Learner Formation", "1", "A" and "Part 1" all
+     * find the right line.
      */
     private function requirementMatches(
         MovRequirement $requirement,
@@ -858,6 +902,7 @@ class MovUploader extends Component
         $haystack = Str::lower(implode(' ', [
             $part->name,
             $category->name,
+            (string) $requirement->kra_label,
             $requirement->label(),
             'mov '.$requirement->mov_number,
             $requirement->title,
@@ -933,6 +978,24 @@ class MovUploader extends Component
     }
 
     /**
+     * Use the multi-file input, while keeping the existing single-file
+     * Livewire property working for older callers and tests.
+     *
+     * @return array<int, TemporaryUploadedFile>
+     */
+    private function selectedDocuments(): array
+    {
+        if ($this->documents !== []) {
+            return array_values(array_filter(
+                $this->documents,
+                fn (mixed $file): bool => $file instanceof TemporaryUploadedFile,
+            ));
+        }
+
+        return $this->document instanceof TemporaryUploadedFile ? [$this->document] : [];
+    }
+
+    /**
      * @return array<int, string>
      */
     private function documentRules(): array
@@ -940,7 +1003,6 @@ class MovUploader extends Component
         $extensions = $this->allowedExtensions();
 
         return [
-            'required',
             'file',
             'mimes:'.implode(',', $extensions),
             'extensions:'.implode(',', $extensions),
@@ -957,7 +1019,7 @@ class MovUploader extends Component
     {
         $extension = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
         $stem = Str::slug(pathinfo($originalName, PATHINFO_FILENAME));
-        $stem = $stem !== '' ? Str::limit($stem, 40, '') : 'picture';
+        $stem = $stem !== '' ? Str::limit($stem, 40, '') : 'file';
 
         return uniqid().'-'.$stem.'.'.$extension;
     }
@@ -972,6 +1034,6 @@ class MovUploader extends Component
         $name = preg_replace('/\s+/u', ' ', $name) ?? $name;
         $name = mb_substr(trim($name), 0, 120);
 
-        return $name !== '' ? $name : 'picture';
+        return $name !== '' ? $name : 'file';
     }
 }
