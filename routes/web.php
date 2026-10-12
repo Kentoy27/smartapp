@@ -4,10 +4,13 @@ use App\Http\Controllers\Auth\GoogleAuthController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\DashboardController;
 use App\Models\User;
+use App\Support\MemXlsxExporter;
 use App\Support\OpcrfPartOne;
 use App\Support\OpcrfTemplatePersonalizer;
 use App\Support\OpcrfWorkbookTrim;
+use App\Support\WfpGenerator;
 use App\Support\WfpTemplate;
+use App\Support\WfpTemplateFiller;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
@@ -60,6 +63,34 @@ Route::middleware('auth')->group(function () {
 
         return view('districts.index');
     })->name('districts.index');
+
+    // ACCOUNT CLASSIFICATIONS: the master data behind the RCA / UACS reference
+    // table (Account Title, RCA Code, UACS Sub-Object / Object Code, Covering
+    // PPAS). Administrative only — the component re-checks the same gate on
+    // every create/update/delete, so hiding the menu item is not the boundary.
+    Route::get('/admin/account-classifications', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->hasAdminAccess(), 404);
+
+        return view('account-classifications.index');
+    })->name('account-classifications.index');
+
+    // The CSV import template — the header row plus one worked example, so an
+    // administrator can see the expected columns before filling their own file.
+    // Same administrative gate as the module itself.
+    Route::get('/admin/account-classifications/template', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->hasAdminAccess(), 404);
+
+        $csv = implode("\n", [
+            'Account Title,RCA Code,UACS Sub-Object Code,UACS Object Code,Covering PPAS',
+            'Office Supplies Expenses,50203010,00,5020301000,PPAS 1',
+        ])."\n";
+
+        return response($csv)
+            ->header('Content-Type', 'text/csv; charset=UTF-8')
+            ->header('Content-Disposition', 'attachment; filename="account-classifications-template.csv"');
+    })->name('account-classifications.template');
 
     // Opcrf: a staff-facing page, reachable by regular users only —
     // superadmins have their own tooling, so the item is hidden from them.
@@ -294,6 +325,96 @@ Route::middleware('auth')->group(function () {
 
         return $disk->download($wfp->file_path, $wfp->fileDownloadName());
     })->name('wfp.download')->where('wfp', '[0-9]+');
+
+    /* ------------------------------------------------------------------
+     * MEM → WFP generation — School Head (SH) only, scoped to their school.
+     *
+     * The Monthly Expenditure Matrix is the source of truth; the WFP is
+     * generated from it. Every route re-checks canAccessWfp() AND that the
+     * model belongs to the caller's own school — an SH of another school
+     * gets a 404 even with a crafted id. `/template` is declared before
+     * `{matrix}` so "template" is never read as an id (it would not match
+     * `[0-9]+` anyway, but the order makes the intent explicit).
+     * ----------------------------------------------------------------- */
+
+    Route::get('/wfp/matrices', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canAccessWfp(), 404);
+
+        return view('wfp.matrices.index');
+    })->name('wfp.matrices.index');
+
+    Route::get('/wfp/matrices/template', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canAccessWfp(), 404);
+
+        $csv = implode("\n", [
+            'Section,Objective,Activity Description,Resource Kind,Quantity,Unit,Unit Cost,Account Title,Account Code,Funding Source,Organizational Classification,Activity MOVs',
+            'operations,Improved learner outcomes,Procure office supplies,MOOE,10,ream,250.00,Office Supplies Expenses,5020301000,MOOE,School,PO and RIS',
+        ])."\n";
+
+        return response($csv)
+            ->header('Content-Type', 'text/csv; charset=UTF-8')
+            ->header('Content-Disposition', 'attachment; filename="mem-template.csv"');
+    })->name('wfp.matrices.template');
+
+    // The matrix as the printed DepEd form — a .xlsx BUILT from the lines as
+    // they stand (a MEM has no archived file to serve). Declared before
+    // {matrix} for the same reason /template is.
+    Route::get('/wfp/matrices/{matrix}/export', function (App\Models\MonthlyExpenditureMatrix $matrix) {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $matrix->managedBy($user), 404);
+
+        $bytes = MemXlsxExporter::bytes($matrix, $user);
+
+        return response($bytes)
+            ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            ->header('Content-Length', (string) strlen($bytes))
+            ->header('Content-Disposition', 'attachment; filename="'.MemXlsxExporter::downloadName($matrix).'"');
+    })->name('wfp.matrices.export')->where('matrix', '[0-9]+');
+
+    Route::get('/wfp/matrices/{matrix}', function (App\Models\MonthlyExpenditureMatrix $matrix) {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $matrix->managedBy($user), 404);
+
+        return view('wfp.matrices.edit', ['matrix' => $matrix]);
+    })->name('wfp.matrices.edit')->where('matrix', '[0-9]+');
+
+    Route::get('/wfp/plans/{plan}', function (App\Models\WfpPlan $plan) {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $plan->managedBy($user), 404);
+
+        return view('wfp.plan', ['plan' => $plan]);
+    })->name('wfp.plans.edit')->where('plan', '[0-9]+');
+
+    // The generated WFP as a patched copy of the official template. Bytes are
+    // built BEFORE the response (a streamed callback's return value is
+    // discarded and would risk a 0-byte download).
+    Route::get('/wfp/plans/{plan}/export', function (App\Models\WfpPlan $plan) {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $plan->managedBy($user), 404);
+        abort_unless(WfpTemplate::exists(), 404);
+
+        try {
+            $layout = WfpTemplate::inspect();
+            $bytes = WfpTemplateFiller::fill(
+                WfpTemplate::bytes(),
+                WfpGenerator::buildExportRows($plan, (bool) config('wfp.template.months.enabled', false)),
+                $layout,
+            );
+        } catch (\RuntimeException $e) {
+            // The template could not be read: say so rather than emit a
+            // guessed workbook the SH cannot open.
+            abort(404, $e->getMessage());
+        }
+
+        $filename = 'WFP-'.$plan->year.'.xlsx';
+
+        return response($bytes)
+            ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            ->header('Content-Length', (string) strlen($bytes))
+            ->header('Content-Disposition', 'attachment; filename="'.$filename.'"');
+    })->name('wfp.plans.export')->where('plan', '[0-9]+');
 
     // MOV uploads: the staff member's Means of Verification checklist —
     // Part → Category → MOV → the document they attached to it. A separate

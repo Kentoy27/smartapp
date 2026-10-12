@@ -73,6 +73,10 @@
                         <a href="{{ route('wfp.index') }}" class="dashboard-plan-card__link" wire:navigate>
                             Open WFP workspace <span aria-hidden="true">→</span>
                         </a>
+                        <a href="{{ route('wfp.matrices.index') }}" class="dashboard-plan-card__link" wire:navigate>
+                            <x-icon name="file-spreadsheet" :size="14" />
+                            Monthly Expenditure Matrix <span aria-hidden="true">→</span>
+                        </a>
                     </article>
                 </section>
             @endif

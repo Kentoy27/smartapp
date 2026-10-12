@@ -28,9 +28,12 @@
 
         @if (isset($item['children']))
             <div class="nav-group" wire:key="sidebar-group-{{ $item['path'] }}">
+                {{-- An `active` pattern marks the whole family of pages the
+                     group holds (the WFP group lights up on any wfp.* page);
+                     without one, the group's own route is used. --}}
                 <button
                     type="button"
-                    class="nav-item nav-item--toggle{{ request()->routeIs($item['route']) ? ' active' : '' }}"
+                    class="nav-item nav-item--toggle{{ request()->routeIs($item['active'] ?? $item['route']) ? ' active' : '' }}"
                     wire:click="toggleGroup('{{ $item['path'] }}')"
                     aria-expanded="{{ isset($openGroups[$item['path']]) ? 'true' : 'false' }}"
                     aria-controls="sidebar-group-{{ $item['path'] }}"
