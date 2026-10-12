@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#f1f5f9">
     <link rel="icon" type="image/svg+xml" href="{{ public_asset('smap.svg') }}?v=2">
     <link rel="shortcut icon" href="{{ public_asset('smap.svg') }}?v=2">
-    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=2">
+    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=3">
     <title>@yield('title', 'Dashboard — SmartApp')</title>
     <script>
         /* Apply the saved theme before first paint to avoid a flash.
@@ -754,6 +754,63 @@
             font-size: 0.6875rem;
             line-height: 1.4;
             color: var(--text-muted);
+        }
+
+        /* A PLAIN LINK inside a group: one of the group's pages, one level
+           down (the WFP group's two pages). A bullet rather than a status
+           dot — nothing is uploaded from here — and the same active marking
+           as every other row, so the page you are on is never a guess. */
+        .sidebar .nav-group-link {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 1px 0 1px 8px;
+            padding: 6px 8px;
+            border-left: 3px solid transparent;
+            border-radius: 6px;
+            color: var(--text);
+            text-decoration: none;
+            font-size: 0.8125rem;
+            line-height: 1.3;
+            transition: background 0.15s, color 0.15s;
+        }
+
+        .sidebar .nav-group-link:hover {
+            background: var(--bg-hover);
+            color: var(--text-strong);
+        }
+
+        .sidebar .nav-group-link:focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: -2px;
+        }
+
+        .sidebar .nav-group-link.is-active {
+            background: var(--bg-active);
+            color: var(--primary);
+            font-weight: 600;
+            border-left-color: var(--primary);
+        }
+
+        .sidebar .nav-group-link-bullet {
+            width: 5px;
+            height: 5px;
+            flex-shrink: 0;
+            border-radius: 50%;
+            background: var(--text-faint);
+            transition: background 0.15s;
+        }
+
+        .sidebar .nav-group-link.is-active .nav-group-link-bullet {
+            background: var(--primary);
+        }
+
+        .sidebar .nav-group-link-label {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         /* ---------- USERS PAGE (live table) ---------- */

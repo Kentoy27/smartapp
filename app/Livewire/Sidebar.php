@@ -50,6 +50,12 @@ class Sidebar extends Component
     {
         abort_unless(Auth::check(), 404);
 
+        // The WFP group opens on arrival: its two pages — the plan and the
+        // Monthly Expenditure Matrix it is generated from — are one click
+        // away rather than hidden behind a disclosure to find first. It
+        // collapses like any other group once the reader says so.
+        $this->openGroups['wfp'] = true;
+
         if (! request()->routeIs('mov.index')) {
             return;
         }
@@ -228,6 +234,18 @@ class Sidebar extends Component
                     'order' => 21,
                 ];
             }
+
+            // Account Classifications: the RCA / UACS master data. Available to
+            // every administrator (both the Administrator and the Super Admin),
+            // so it sits outside the users/schools-only block above.
+            $items[] = [
+                'label' => 'Account Classifications',
+                'route' => 'account-classifications.index',
+                'path' => 'account-classifications',
+                'icon' => 'file-text',
+                'section' => 'Admin',
+                'order' => 22,
+            ];
         } else {
             // Opcrf is a staff-facing page: regular users only.
             $items[] = [
@@ -258,14 +276,37 @@ class Sidebar extends Component
 
             // WFP is for the School Head (SH) role only — hidden from the
             // SDS Viewer, and unreachable by URL regardless (route guard).
+            // It is one workflow on two pages, so it is one group: the plan
+            // itself and the Monthly Expenditure Matrix it is generated
+            // from. Both are plain links one level down (no tree of their
+            // own), and the group opens by default (see mount()).
             if (Auth::user()?->canAccessWfp()) {
                 $items[] = [
                     'label' => 'WFP',
                     'route' => 'wfp.index',
+                    // Highlighted by any WFP page, not only the plans page —
+                    // the group is where every one of them lives.
+                    'active' => 'wfp.*',
                     'path' => 'wfp',
                     'icon' => 'chart-column',
                     'section' => 'Files',
                     'order' => 11,
+                    'children' => [
+                        [
+                            'key' => 'wfp-plans',
+                            'label' => 'Work & Financial Plan',
+                            'title' => 'Download, upload and review your school\'s Work and Financial Plan',
+                            'url' => route('wfp.index'),
+                            'route' => 'wfp.index',
+                        ],
+                        [
+                            'key' => 'wfp-matrices',
+                            'label' => 'Monthly Expenditure Matrix',
+                            'title' => 'The source of truth the WFP is generated from',
+                            'url' => route('wfp.matrices.index'),
+                            'route' => 'wfp.matrices.*',
+                        ],
+                    ],
                 ];
             }
         }

@@ -16,7 +16,7 @@ class WfpTemplate
      */
     public static function templatePath(): string
     {
-        return storage_path('forms/'.(string) config('wfp.template_file', 'WFP-TEMPLATE.xlsx'));
+        return storage_path('forms/'.(string) config('wfp.template_file', 'WFP-Template.xlsx'));
     }
 
     public static function exists(): bool
@@ -43,5 +43,28 @@ class WfpTemplate
     public static function description(): string
     {
         return (string) config('wfp.description', '');
+    }
+
+    /**
+     * Inspect the shipped template's table layout: which sheet the table is on,
+     * the header row, and the resolved column letters (including month columns
+     * when enabled).
+     *
+     * This is the de-risking tool behind the export: a mis-detected column is
+     * pinned in config/wfp.php (`'column' => 'C'`) rather than guessed at. The
+     * `wfp:inspect-template` command prints exactly this.
+     *
+     * @return array<string, mixed>
+     *
+     * @throws \RuntimeException when the template is missing or has no
+     *                           recognisable header row
+     */
+    public static function inspect(): array
+    {
+        if (! self::exists()) {
+            throw new \RuntimeException('The WFP template could not be found at '.self::templatePath().'.');
+        }
+
+        return WfpTemplateFiller::locate(WfpTemplateFiller::readParts(self::bytes()));
     }
 }

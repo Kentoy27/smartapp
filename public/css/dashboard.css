@@ -601,3 +601,153 @@ body.no-scroll { overflow: hidden; }
     .header .user-info .name { display: none; }
     .role-picker { grid-template-columns: 1fr; }
 }
+
+/* ---------- ACCOUNT CLASSIFICATIONS ---------- */
+/* Codes read best in a monospaced, non-wrapping cell so columns line up. */
+.ac-table th:nth-child(2), .ac-table td:nth-child(2),
+.ac-table th:nth-child(3), .ac-table td:nth-child(3),
+.ac-table th:nth-child(4), .ac-table td:nth-child(4) { white-space: nowrap; }
+.ac-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8125rem; color: var(--text-strong); letter-spacing: 0.02em; }
+/* The code fields sit two-up in the form; they stack on narrow screens. */
+.ac-field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.field-optional { font-weight: 400; color: var(--text-faint); }
+/* Toolbar: Template + Import (outline) + Add Account (primary), pushed right. */
+.ac-toolbar-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.ac-toolbar-actions .users-add-btn { margin-left: 0; }
+/* The outline button is used for both the <button> (Import) and the <a>
+   (Template download), so it must not shrink or clip its label. */
+.ac-import-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 14px; background: none; color: var(--text); border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 0.8125rem; font-weight: 600; line-height: 1; white-space: nowrap; text-decoration: none; cursor: pointer; flex: 0 0 auto; transition: background 0.15s, border-color 0.15s, color 0.15s; }
+.ac-import-btn:hover { background: var(--bg-hover); border-color: var(--primary); color: var(--primary); }
+/* The import dialog is wider than the standard 420px modal to fit the preview. */
+.modal--wide { max-width: min(920px, calc(100vw - 32px)); }
+.ac-import-loading { margin-top: 6px; font-size: 0.75rem; color: var(--text-muted); }
+.ac-import-error { margin: 4px 0 14px; padding: 10px 12px; background: var(--danger-soft); color: var(--danger); border-radius: 8px; font-size: 0.8125rem; }
+.ac-import-summary { display: flex; gap: 8px; margin-bottom: 10px; }
+.ac-import-pill { font-size: 0.75rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; }
+.ac-import-pill--ok { background: var(--primary-soft); color: var(--primary-strong); }
+.ac-import-pill--bad { background: var(--danger-soft); color: var(--danger); }
+.ac-import-preview { max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.ac-import-preview .data-table td { padding: 8px 12px; }
+.ac-import-row--bad { background: var(--danger-soft); }
+.ac-import-template-link { color: var(--primary); font-weight: 600; text-decoration: none; }
+.ac-import-template-link:hover { text-decoration: underline; }
+@media (max-width: 480px) {
+    .ac-field-grid { grid-template-columns: 1fr; }
+}
+
+/* ---------- MONTHLY EXPENDITURE MATRIX / GENERATED WFP ---------- */
+.mem-breadcrumb { display: flex; align-items: center; gap: 8px; font-size: 0.8125rem; color: var(--text-muted); margin-bottom: 6px; }
+.mem-breadcrumb a { color: var(--primary); text-decoration: none; font-weight: 600; }
+.mem-breadcrumb a:hover { text-decoration: underline; }
+
+.mem-status { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em; background: var(--bg-muted); color: var(--text-muted); }
+.mem-status--draft { background: var(--bg-muted); color: var(--text-muted); }
+.mem-status--validated { background: var(--primary-soft); color: var(--primary-strong); }
+.mem-status--generated { background: var(--primary-soft); color: var(--primary-strong); }
+.mem-status--finalized { background: #d1fae5; color: var(--ok); }
+
+.mem-banner { display: flex; align-items: center; gap: 8px; margin: 0 0 16px; }
+.mem-banner--notice { margin: 16px; }
+.mem-banner--warn { display: block; margin: 0 0 16px; padding: 12px 14px; background: var(--warn-soft); color: var(--warn); border-radius: 8px; font-size: 0.8125rem; line-height: 1.5; }
+.mem-stale-list { margin: 6px 0 0; padding-left: 18px; }
+.mem-stale-list li { margin: 2px 0; }
+
+.mem-chip { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 999px; background: var(--bg-muted); color: var(--text-muted); font-size: 0.75rem; font-weight: 600; }
+.mem-unit { color: var(--text-faint); font-size: 0.72rem; margin-left: 4px; }
+
+.mem-toolbar { margin-left: auto; }
+/* One line of context above the grid, kept quiet so the buttons lead. */
+.mem-toolbar-copy { max-width: 46ch; font-size: 0.75rem; line-height: 1.45; color: var(--text-muted); }
+
+/* THE SECTION BLOCKS: the matrix is two lists (Operations, Project), each
+   with its own header, subtotal and add button, rather than one 15-wide
+   table with a Section dropdown in every row. */
+.mem-section { border-top: 1px solid var(--border); padding: 14px 16px 4px; }
+.mem-section:first-of-type { border-top: 0; }
+.mem-section__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.mem-section__title { display: flex; align-items: center; gap: 8px; }
+.mem-section__count { font-size: 0.75rem; font-weight: 600; color: var(--text-muted); }
+.mem-section__aside { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.mem-section__subtotal { font-size: 0.8125rem; color: var(--text-muted); }
+.mem-section__subtotal strong { font-variant-numeric: tabular-nums; color: var(--text-strong); }
+
+/* THE TOTALS STRIP: full width, always in view — the old tfoot sat at the
+   far right of a 1500px table. The monthly total is the one number to read. */
+.mem-summary { display: flex; align-items: baseline; justify-content: flex-end; gap: 28px; flex-wrap: wrap; padding: 14px 16px; border-top: 1px solid var(--border); background: var(--bg-muted); }
+.mem-summary__item { display: flex; align-items: baseline; gap: 8px; }
+.mem-summary__label { font-size: 0.75rem; font-weight: 600; color: var(--text-muted); }
+.mem-summary__value { font-size: 0.9375rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-strong); }
+.mem-summary__item--grand .mem-summary__label { color: var(--text-strong); text-transform: uppercase; letter-spacing: 0.04em; }
+.mem-summary__item--grand .mem-summary__value { font-size: 1.125rem; color: var(--primary); }
+
+/* THE EMPTY STATE: says what a line is and offers the two ways to make one. */
+.mem-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 40px 24px; text-align: center; color: var(--text-muted); }
+.mem-empty .icon { color: var(--text-faint); }
+.mem-empty h3 { margin: 4px 0 0; font-size: 1rem; color: var(--text-strong); }
+.mem-empty p { max-width: 56ch; margin: 0; font-size: 0.8125rem; line-height: 1.55; }
+.mem-empty__actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 10px; }
+.mem-empty__hint { font-size: 0.75rem; }
+
+.mem-grid-wrap { overflow-x: auto; }
+/* Narrowed from the old single 15-wide grid: the Section column is gone
+   (the blocks carry it) and two fields share one cell. */
+.mem-grid { min-width: 1120px; }
+.mem-grid th, .mem-grid td { vertical-align: top; }
+.mem-grid input, .mem-grid select, .mem-grid textarea { min-width: 80px; font: inherit; font-size: 0.8125rem; }
+.mem-grid textarea { resize: vertical; min-height: 40px; }
+/* Money and count columns are right-aligned, in the header and the cell. */
+.mem-num { text-align: right; }
+.mem-grid td.mem-num input { text-align: right; font-variant-numeric: tabular-nums; }
+/* The computed line total reads as a result, not as another field to fill. */
+.mem-linetotal--cell { background: var(--bg-muted); }
+/* Two related fields, one cell: funding source over org. classification. */
+.mem-stack { display: flex; flex-direction: column; gap: 6px; }
+/* The neutral row actions (duplicate, move section) sit beside the danger
+   one without shouting. */
+.mem-row-action { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 8px; background: none; color: var(--text); cursor: pointer; transition: background 0.15s, border-color 0.15s, color 0.15s; }
+.mem-row-action:hover { background: var(--bg-hover); border-color: var(--primary); color: var(--primary); }
+/* What the three workflow buttons at the bottom actually do. */
+.mem-actions__hint { max-width: 40ch; font-size: 0.75rem; line-height: 1.45; color: var(--text-muted); }
+
+/* THE ADD-LINE MODAL: the section is a two-way switch (it decides where the
+   finished row lands), and quantity/unit/cost/total read as one line — the
+   total is the answer the other three produce, so it sits with them. */
+.mem-line-sections { display: inline-flex; gap: 4px; padding: 3px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-muted); }
+.mem-line-section { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 6px; font-size: 0.8125rem; font-weight: 600; color: var(--text-muted); cursor: pointer; transition: background 0.15s, color 0.15s; }
+.mem-line-section:has(input:checked) { background: var(--bg-elevated); color: var(--primary); }
+.mem-line-section input { accent-color: var(--primary); }
+.mem-line-money { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 14px; align-items: start; }
+.mem-line-total { display: flex; flex-direction: column; gap: 2px; padding: 6px 12px; border-radius: 8px; background: var(--bg-muted); min-width: 110px; }
+.mem-line-total__label { font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
+.mem-line-total__value { font-size: 1.0625rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-strong); }
+.field-required { font-weight: 400; font-size: 0.6875rem; letter-spacing: 0.03em; text-transform: uppercase; color: var(--text-faint); }
+@media (max-width: 640px) {
+    .mem-line-money { grid-template-columns: 1fr; }
+}
+.mem-rownum { color: var(--text-faint); font-variant-numeric: tabular-nums; text-align: right; }
+.mem-linetotal { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
+.mem-linetotal--grand { font-size: 1rem; }
+.mem-total-label { text-align: right; font-weight: 600; color: var(--text-muted); }
+.mem-total-label--grand { color: var(--text-strong); }
+
+.mem-account { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.mem-account input { flex: 1; }
+.mem-account-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex: 0 0 auto; border: 1px solid var(--border); border-radius: 8px; background: none; color: var(--text); cursor: pointer; }
+.mem-account-btn:hover { border-color: var(--primary); color: var(--primary); }
+.mem-row-remove { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 8px; background: none; color: var(--danger); cursor: pointer; }
+.mem-row-remove:hover { background: var(--danger-soft); border-color: var(--danger); }
+
+.mem-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 16px; border-top: 1px solid var(--border); }
+.mem-actions--top { border-top: none; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+.mem-actions--total { border-top: none; justify-content: flex-end; }
+.mem-actions__group { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.mem-group { margin-bottom: 16px; }
+.mem-group__head { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.mem-group__title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mem-group__section { text-transform: uppercase; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em; color: var(--primary-strong); background: var(--primary-soft); padding: 2px 8px; border-radius: 6px; }
+.mem-group__meta { display: flex; gap: 8px; flex-wrap: wrap; }
+.mem-plan-table { min-width: 1100px; }
+.mem-plan-table td { vertical-align: top; }
+.mem-plan-table input, .mem-plan-table textarea { width: 100%; font: inherit; font-size: 0.8125rem; }
+.mem-plan-table textarea { resize: vertical; min-height: 40px; }

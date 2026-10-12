@@ -2,9 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Livewire\AccountClassificationsTable;
 use App\Livewire\DashboardSummary;
 use App\Livewire\DistrictList;
 use App\Livewire\DistrictManager;
+use App\Livewire\MemEditor;
+use App\Livewire\MemMatrixList;
 use App\Livewire\MovUploader;
 use App\Livewire\NotificationsMenu;
 use App\Livewire\OpcrfAnalytics;
@@ -16,9 +19,14 @@ use App\Livewire\OpcrfScheduleManager;
 use App\Livewire\OpcrfUpload;
 use App\Livewire\Sidebar;
 use App\Livewire\UsersTable;
+use App\Livewire\WfpPlanEditor;
+use App\Models\District;
+use App\Models\MonthlyExpenditureMatrix;
 use App\Models\OpcrfSchedule;
 use App\Models\OpcrfSubmission;
+use App\Models\School;
 use App\Models\User;
+use App\Models\WfpPlan;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
@@ -75,6 +83,7 @@ class ApplicationSmokeTest extends TestCase
             'username' => 'staffy',
             'email' => 'staff@example.com',
             'password' => Hash::make('secret123'),
+            'role' => 'user',
             'is_superadmin' => false,
         ]);
     }
@@ -91,7 +100,15 @@ class ApplicationSmokeTest extends TestCase
             '/opcrf-schedule',
             '/users',
             '/districts',
+            '/admin/account-classifications',
+            '/admin/account-classifications/template',
+            '/api/admin/account-classifications',
             '/movs',
+            '/wfp/matrices',
+            '/wfp/matrices/template',
+            '/wfp/matrices/1',
+            '/wfp/plans/1',
+            '/wfp/plans/1/export',
             '/download/opcrf-template',
             '/opcrf/part/1',
             '/opcrf/part/2',
@@ -196,6 +213,7 @@ class ApplicationSmokeTest extends TestCase
             MovUploader::class,
             OpcrfForm::class,
             OpcrfParts::class,
+            MemMatrixList::class,
         ];
 
         foreach ($staffComponents as $component) {
@@ -203,6 +221,38 @@ class ApplicationSmokeTest extends TestCase
                 ->test($component)
                 ->assertOk();
         }
+
+        // The MEM editor and the WFP plan editor take a bound model, so their
+        // views are only exercised when one is passed — give them a real,
+        // SH-owned matrix and plan.
+        $district = District::create(['name' => 'Smoke District']);
+        $school = School::create(['district_id' => $district->id, 'name' => 'Smoke School']);
+        $schoolHead = User::create([
+            'name' => 'School Head',
+            'username' => 'schoolhead',
+            'email' => 'sh@example.com',
+            'password' => Hash::make('secret123'),
+            'role' => 'user',
+            'is_superadmin' => false,
+            'school_id' => $school->id,
+        ]);
+
+        $matrix = MonthlyExpenditureMatrix::create([
+            'school_id' => $school->id,
+            'year' => (int) now()->year,
+            'month' => 1,
+            'status' => MonthlyExpenditureMatrix::STATUS_DRAFT,
+            'version' => 1,
+        ]);
+
+        $plan = WfpPlan::create([
+            'school_id' => $school->id,
+            'year' => (int) now()->year,
+            'status' => WfpPlan::STATUS_GENERATED,
+        ]);
+
+        Livewire::actingAs($schoolHead)->test(MemEditor::class, ['matrix' => $matrix])->assertOk();
+        Livewire::actingAs($schoolHead)->test(WfpPlanEditor::class, ['plan' => $plan])->assertOk();
 
         // Administrator-owned components, including opening the review modal
         // so its biggest view actually renders.
@@ -213,6 +263,7 @@ class ApplicationSmokeTest extends TestCase
             DistrictList::class,
             OpcrfAnalytics::class,
             OpcrfScheduleManager::class,
+            AccountClassificationsTable::class,
         ];
 
         foreach ($superComponents as $component) {
@@ -249,6 +300,7 @@ class ApplicationSmokeTest extends TestCase
             OpcrfAnalytics::class,
             OpcrfScheduleManager::class,
             OpcrfReview::class,
+            AccountClassificationsTable::class,
         ];
 
         foreach ($superOnly as $component) {
@@ -328,6 +380,10 @@ class ApplicationSmokeTest extends TestCase
             OpcrfAnalytics::class,
             OpcrfScheduleManager::class,
             OpcrfReview::class,
+            AccountClassificationsTable::class,
+            MemMatrixList::class,
+            MemEditor::class,
+            WfpPlanEditor::class,
         ];
 
         foreach ($components as $component) {

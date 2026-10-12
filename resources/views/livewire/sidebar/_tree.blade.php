@@ -1,7 +1,8 @@
 {{-- ONE LEVEL of a sidebar navigation tree, rendered by itself so the tree
      can be any depth: the MOV checklist's Part → Category → MOV.
 
-     Two kinds of node, and the difference is the whole point of the tree:
+     Three kinds of node, and the difference between them is the whole point
+     of the tree:
 
        · a node with children is a DISCLOSURE — a button that opens and closes
          what is under it, and nothing else: one target per row, so the row
@@ -10,6 +11,9 @@
        · a node without children is a LINK — the MOV itself, which opens that
          exact requirement on the checklist page. Nothing is uploaded from
          here: the sidebar navigates, the page uploads.
+       · a node with a `url` but no `status` is also a LINK, for a page that
+         has no tree of its own one level down — the WFP group's two pages.
+         It is marked by the route it is on rather than by a status dot.
 
      Each level steps in, so Part → category → MOV is legible at a glance, and
      the count on a Part or a category is over exactly the MOVs listed beneath
@@ -81,6 +85,23 @@
                      full text in the tooltip above. --}}
                 <span class="nav-mov-title">{{ $node['hint'] }}</span>
             </span>
+        </a>
+    @elseif (isset($node['url']))
+        {{-- A PLAIN LINK: a page one level down with no tree under it — the
+             WFP group's two pages (the plan, and the Monthly Expenditure
+             Matrix it is generated from). It is marked by the route the page
+             is on, exactly like the item rows above it, and carries a small
+             bullet rather than a status dot: nothing is uploaded from here. --}}
+        <a
+            class="nav-group-link{{ request()->routeIs($node['route']) ? ' is-active' : '' }}"
+            href="{{ $node['url'] }}"
+            wire:navigate
+            title="{{ $node['title'] ?? $node['label'] }}"
+            aria-current="{{ request()->routeIs($node['route']) ? 'true' : 'false' }}"
+            wire:key="nav-group-link-{{ $node['key'] }}"
+        >
+            <span class="nav-group-link-bullet" aria-hidden="true"></span>
+            <span class="nav-group-link-label">{{ $node['label'] }}</span>
         </a>
     @endif
 @endforeach

@@ -1,0 +1,265 @@
+<?php
+
+namespace App\Support;
+
+use App\Models\MonthlyExpenditureItem;
+use App\Models\MonthlyExpenditureMatrix;
+use App\Models\WfpItem;
+use App\Models\WfpPlan;
+use Illuminate\Support\Facades\DB;
+
+/**
+ * Maps a school's Monthly Expenditure Matrices onto its WFP plan.
+ *
+ * A MEM line maps 1:1 to a WFP line, so the target lands in the correct month
+ * and is never duplicated by construction. Generation RECONCILES the plan in
+ * place, matched by `source_expenditure_item_id`:
+ *
+ *   - MEM-derived columns are refreshed from the current MEM line;
+ *   - the WFP-only columns (`major_output`, `performance_indicator`) are never
+ *     touched, so anything the SH typed survives;
+ *   - the shared columns (`funding_source`, `organizational_classification`,
+ *     `activity_movs`) take the MEM value when the MEM now carries one, and the
+ *     existing WFP-entered value otherwise;
+ *   - lines whose MEM line is gone are deleted; new lines are inserted;
+ *   - every line records the MEM version it was mapped from.
+ *
+ * WFP-owned lines (source id null — e.g. a line the SH added by hand) are left
+ * alone.
+ */
+class WfpGenerator
+{
+    /**
+     * Generate (or regenerate) a plan from the given matrix, or, when none is
+     * given, from every matrix of the plan's school and year.
+     *
+     * @return array{created: int, updated: int, removed: int, flagged: int}
+     */
+    public static function generate(WfpPlan $plan, ?MonthlyExpenditureMatrix $matrix = null): array
+    {
+        $matrices = $matrix !== null
+            ? [$matrix]
+            : MonthlyExpenditureMatrix::query()
+                ->where('school_id', $plan->school_id)
+                ->where('year', $plan->year)
+                ->orderBy('month')
+                ->orderBy('id')
+                ->get()
+                ->all();
+
+        $desired = [];
+        $position = 0;
+
+        foreach ($matrices as $source) {
+            /** @var MonthlyExpenditureMatrix $source */
+            foreach ($source->items()->orderBy('position')->orderBy('id')->get() as $item) {
+                /** @var MonthlyExpenditureItem $item */
+                $position++;
+
+                $desired[$item->id] = self::payload($item, $source, $position);
+            }
+        }
+
+        return DB::transaction(function () use ($plan, $desired): array {
+            $existing = $plan->items()
+                ->whereNotNull('source_expenditure_item_id')
+                ->get()
+                ->keyBy('source_expenditure_item_id');
+
+            $created = 0;
+            $updated = 0;
+
+            foreach ($desired as $sourceId => $payload) {
+                $wfp = $existing->pull($sourceId) ?? new WfpItem([
+                    'wfp_plan_id' => $plan->id,
+                    'source_expenditure_item_id' => $sourceId,
+                    'major_output' => null,
+                    'performance_indicator' => null,
+                ]);
+
+                $isNew = ! $wfp->exists;
+
+                $wfp->fill($payload['fields']);
+
+                // WFP-only: only ever set on creation. Shared carried fields:
+                // the MEM value wins when it now carries one.
+                if ($isNew) {
+                    $wfp->major_output = null;
+                    $wfp->performance_indicator = null;
+                    $wfp->funding_source = $payload['funding_source'];
+                    $wfp->organizational_classification = $payload['organizational_classification'];
+                    $wfp->activity_movs = $payload['activity_movs'];
+                } else {
+                    $wfp->funding_source = self::prefer($payload['funding_source'], $wfp->funding_source);
+                    $wfp->organizational_classification = self::prefer($payload['organizational_classification'], $wfp->organizational_classification);
+                    $wfp->activity_movs = self::prefer($payload['activity_movs'], $wfp->activity_movs);
+                }
+
+                $wfp->group_key = $payload['group_key'];
+                $wfp->source_matrix_id = $payload['source_matrix_id'];
+                $wfp->source_matrix_version = $payload['source_matrix_version'];
+                $wfp->position = $payload['position'];
+
+                $wfp->refreshFlags();
+                $wfp->save();
+
+                $isNew ? $created++ : $updated++;
+            }
+
+            // Anything left over was in the plan but is no longer in the MEM.
+            $removed = 0;
+
+            foreach ($existing as $orphan) {
+                $orphan->delete();
+                $removed++;
+            }
+
+            $plan->status = WfpPlan::STATUS_GENERATED;
+            $plan->generated_at = now();
+            $plan->template_version = (string) config('wfp.template.version', '2026.1');
+            // Regeneration changes the content, so any prior approval is void.
+            $plan->approved_by = null;
+            $plan->approved_at = null;
+            $plan->save();
+
+            return [
+                'created' => $created,
+                'updated' => $updated,
+                'removed' => $removed,
+                'flagged' => $plan->items()->where('needs_review', true)->count(),
+            ];
+        });
+    }
+
+    /**
+     * The rows the Excel export writes into the template.
+     *
+     * Annual-shaped (the default): group by `group_key` and emit one row per
+     * group, with the target being the group's sum. Month-shaped (the template
+     * carries a column per month): emit one row per WFP line, keeping its month
+     * so the filler writes the target into the right column.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function buildExportRows(WfpPlan $plan, bool $monthly): array
+    {
+        $items = $plan->items()->get();
+
+        if ($monthly) {
+            return $items->map(fn (WfpItem $item): array => array_merge(self::exportRow($item), ['month' => $item->month]))->all();
+        }
+
+        return $items
+            ->groupBy('group_key')
+            ->map(static function ($group): array {
+                /** @var WfpItem $first */
+                $first = $group->first();
+
+                return array_merge(self::exportRow($first), [
+                    'physical_target' => round((float) $group->sum(fn (WfpItem $i): float => (float) $i->physical_target), 2),
+                    'financial_target' => round((float) $group->sum(fn (WfpItem $i): float => (float) $i->financial_target), 2),
+                ]);
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function exportRow(WfpItem $item): array
+    {
+        return [
+            'section' => $item->section,
+            'objective' => $item->objective,
+            'program_activity' => $item->program_activity,
+            'major_output' => $item->major_output,
+            'performance_indicator' => $item->performance_indicator,
+            'physical_target' => $item->physical_target,
+            'physical_unit' => $item->physical_unit,
+            'financial_target' => $item->financial_target,
+            'account_title' => $item->account_title,
+            'account_code' => $item->account_code,
+            'funding_source' => $item->funding_source,
+            'organizational_classification' => $item->organizational_classification,
+            'activity_movs' => $item->activity_movs,
+        ];
+    }
+
+    /**
+     * A stable grouping key for a mapped line, from the fields that define a
+     * WFP row's grouping: section + objective + activity + account title +
+     * account code + unit + unit cost, each normalised.
+     *
+     * @param  array<string, mixed>  $fields
+     */
+    public static function groupKey(array $fields): string
+    {
+        $parts = [
+            (string) ($fields['section'] ?? ''),
+            (string) ($fields['objective'] ?? ''),
+            (string) ($fields['activity_description'] ?? $fields['program_activity'] ?? ''),
+            (string) ($fields['account_title'] ?? ''),
+            (string) ($fields['account_code'] ?? ''),
+            (string) ($fields['unit'] ?? $fields['physical_unit'] ?? ''),
+            self::normalizeCost($fields['unit_cost'] ?? $fields['financial_unit_cost'] ?? ''),
+        ];
+
+        return sha1(implode('|', array_map([self::class, 'normalize'], $parts)));
+    }
+
+    /**
+     * @return array{fields: array<string, mixed>, funding_source: ?string, organizational_classification: ?string, activity_movs: ?string, group_key: string, source_matrix_id: int, source_matrix_version: int, position: int}
+     */
+    private static function payload(MonthlyExpenditureItem $item, MonthlyExpenditureMatrix $matrix, int $position): array
+    {
+        return [
+            'fields' => [
+                'month' => (int) $matrix->month,
+                'section' => $item->section,
+                'objective' => $item->objective,
+                'program_activity' => $item->activity_description,
+                'account_title' => $item->account_title,
+                'account_code' => $item->account_code,
+                'physical_target' => $item->quantity,
+                'physical_unit' => $item->unit,
+                'financial_target' => $item->calculated_total,
+            ],
+            'funding_source' => $item->funding_source,
+            'organizational_classification' => $item->organizational_classification,
+            'activity_movs' => $item->activity_movs,
+            'group_key' => self::groupKey([
+                'section' => $item->section,
+                'objective' => $item->objective,
+                'activity_description' => $item->activity_description,
+                'account_title' => $item->account_title,
+                'account_code' => $item->account_code,
+                'unit' => $item->unit,
+                'unit_cost' => $item->unit_cost,
+            ]),
+            'source_matrix_id' => (int) $matrix->id,
+            'source_matrix_version' => (int) $matrix->version,
+            'position' => $position,
+        ];
+    }
+
+    /** The MEM value when it carries one, otherwise whatever was already there. */
+    private static function prefer(?string $incoming, ?string $existing): ?string
+    {
+        return ($incoming !== null && trim($incoming) !== '') ? $incoming : $existing;
+    }
+
+    private static function normalize(string $value): string
+    {
+        return strtolower(preg_replace('/[^a-z0-9]+/i', '', $value) ?? '');
+    }
+
+    private static function normalizeCost(mixed $value): string
+    {
+        if ($value === null || $value === '') {
+            return '';
+        }
+
+        return number_format((float) $value, 2, '.', '');
+    }
+}

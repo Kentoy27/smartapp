@@ -10,10 +10,20 @@ class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
+        $this->call(AccountClassificationSeeder::class);
+
         User::create([
             'username' => 'testuser',
             'email' => 'test@smartapp.local',
             'password' => Hash::make('password123'),
+        ]);
+
+        User::create([
+            'username' => 'psds',
+            'email' => 'psds@gmail.com',
+            'password' => Hash::make('superadmin123'),
+            'role' => 'psds',
+            'is_superadmin' => true,
         ]);
 
         User::create([
