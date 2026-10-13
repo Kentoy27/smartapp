@@ -9,13 +9,7 @@ use App\Models\OpcrfSchedule;
 use App\Models\OpcrfSubmission;
 use App\Models\OpcrfTemplate;
 use App\Models\User;
-<<<<<<< HEAD
 use App\Support\AipXlsxExporter;
-=======
-use App\Models\UserMov;
-use App\Models\WfpPlan;
-use App\Models\WfpSubmission;
->>>>>>> feature/wfp
 use App\Support\MemXlsxExporter;
 use App\Support\OpcrfAccess;
 use App\Support\OpcrfPartOne;
@@ -78,7 +72,7 @@ Route::middleware('auth')->group(function () {
         abort_unless($disk->exists($user->signature_path), 404);
 
         $extension = strtolower(pathinfo((string) $user->signature_original_name, PATHINFO_EXTENSION));
-        $name = 'signature-'.$user->id.($extension !== '' ? '.'.$extension : '');
+        $name = 'signature-' . $user->id . ($extension !== '' ? '.' . $extension : '');
 
         $response = $disk->response($user->signature_path, $name);
 
@@ -159,7 +153,7 @@ Route::middleware('auth')->group(function () {
         return response($bytes)
             ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             ->header('Content-Length', (string) strlen($bytes))
-            ->header('Content-Disposition', 'attachment; filename="'.AipXlsxExporter::downloadName($plan).'"');
+            ->header('Content-Disposition', 'attachment; filename="' . AipXlsxExporter::downloadName($plan) . '"');
     })->name('aip.plans.export')->where('plan', '[0-9]+');
 
     Route::get('/users', function () {
@@ -203,7 +197,7 @@ Route::middleware('auth')->group(function () {
         $csv = implode("\n", [
             'Account Title,RCA Code,UACS Sub-Object Code,UACS Object Code,Covering PPAS',
             'Office Supplies Expenses,50203010,00,5020301000,PPAS 1',
-        ])."\n";
+        ]) . "\n";
 
         return response($csv)
             ->header('Content-Type', 'text/csv; charset=UTF-8')
@@ -236,7 +230,7 @@ Route::middleware('auth')->group(function () {
 
         return view('opcrf.part', [
             'part' => $part,
-            'partLabel' => 'Part '.$part,
+            'partLabel' => 'Part ' . $part,
             'partBlurb' => $blurbs[$part] ?? 'This Part of the OPCRF.',
             'schedule' => OpcrfAccess::scheduleFor(
                 OpcrfAccess::currentYear(),
@@ -283,7 +277,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/download/opcrf-template', function () {
         $user = Auth::user();
 
-        if (! $user instanceof User) {
+        if (!$user instanceof User) {
             abort(404);
         }
 
@@ -294,7 +288,7 @@ Route::middleware('auth')->group(function () {
         // schedule. Re-checked here, on the server: the dashboard's button is
         // only a convenience, and a staff member outside Part 1's window must
         // not be able to fetch the form by typing the URL.
-        if (! OpcrfAccess::canAccess($user, OpcrfSchedule::PART_ONE)) {
+        if (!OpcrfAccess::canAccess($user, OpcrfSchedule::PART_ONE)) {
             $state = OpcrfAccess::partState($user, OpcrfSchedule::PART_ONE);
 
             return redirect()
@@ -327,7 +321,7 @@ Route::middleware('auth')->group(function () {
         return response($bytes)
             ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             ->header('Content-Length', (string) strlen($bytes))
-            ->header('Content-Disposition', 'attachment; filename="'.$filename.'"');
+            ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
     })->name('opcrf.template');
 
     // A submission's workbook. The superadmin may fetch any submission
@@ -345,7 +339,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/opcrf-submissions/{submission}/download', function (OpcrfSubmission $submission) {
         $user = Auth::user();
 
-        if (! $user instanceof User) {
+        if (!$user instanceof User) {
             abort(404);
         }
 
@@ -361,7 +355,7 @@ Route::middleware('auth')->group(function () {
         // cannot read (or a workbook with no PART I tab) is served as-is.
         $bytes = null;
 
-        if (! $user->hasAdminAccess() && ! OpcrfPartOne::windowOpen()) {
+        if (!$user->hasAdminAccess() && !OpcrfPartOne::windowOpen()) {
             try {
                 $bytes = OpcrfWorkbookTrim::keepPart(
                     $storedPath,
@@ -379,7 +373,7 @@ Route::middleware('auth')->group(function () {
         return response($bytes)
             ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             ->header('Content-Length', (string) strlen($bytes))
-            ->header('Content-Disposition', 'attachment; filename="'.$submission->fileDownloadName().'"');
+            ->header('Content-Disposition', 'attachment; filename="' . $submission->fileDownloadName() . '"');
     })->name('opcrf.submission.download')->where('submission', '[0-9]+');
 
     // MOV evidence files. The owner always downloads their own; a superadmin
@@ -388,7 +382,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/opcrf-movs/{mov}/download', function (OpcrfMov $mov) {
         $user = Auth::user();
 
-        abort_if(! $mov->submission->canBeReviewedBy($user), 403);
+        abort_if(!$mov->submission->canBeReviewedBy($user), 403);
 
         /** @var FilesystemAdapter $disk */
         $disk = Storage::disk('local');
@@ -479,7 +473,7 @@ Route::middleware('auth')->group(function () {
         $csv = implode("\n", [
             'Section,Objective,Activity Description,Resource Kind,Quantity,Unit,Unit Cost,Account Title,Account Code,Funding Source,Organizational Classification,Activity MOVs',
             'operations,Improved learner outcomes,Procure office supplies,MOOE,10,ream,250.00,Office Supplies Expenses,5020301000,MOOE,School,PO and RIS',
-        ])."\n";
+        ]) . "\n";
 
         return response($csv)
             ->header('Content-Type', 'text/csv; charset=UTF-8')
@@ -498,7 +492,7 @@ Route::middleware('auth')->group(function () {
         return response($bytes)
             ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             ->header('Content-Length', (string) strlen($bytes))
-            ->header('Content-Disposition', 'attachment; filename="'.MemXlsxExporter::downloadName($matrix).'"');
+            ->header('Content-Disposition', 'attachment; filename="' . MemXlsxExporter::downloadName($matrix) . '"');
     })->name('wfp.matrices.export')->where('matrix', '[0-9]+');
 
     Route::get('/wfp/matrices/{matrix}', function (MonthlyExpenditureMatrix $matrix) {
@@ -546,7 +540,7 @@ Route::middleware('auth')->group(function () {
         return response($bytes)
             ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             ->header('Content-Length', (string) strlen($bytes))
-            ->header('Content-Disposition', 'attachment; filename="'.WfpAllotmentXlsxExporter::downloadName($year).'"');
+            ->header('Content-Disposition', 'attachment; filename="' . WfpAllotmentXlsxExporter::downloadName($year) . '"');
     })->name('wfp.lineitems.export');
 
     Route::get('/wfp/plans/{plan}', function (WfpPlan $plan) {
@@ -577,12 +571,12 @@ Route::middleware('auth')->group(function () {
             abort(404, $e->getMessage());
         }
 
-        $filename = 'WFP-'.$plan->year.'.xlsx';
+        $filename = 'WFP-' . $plan->year . '.xlsx';
 
         return response($bytes)
             ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             ->header('Content-Length', (string) strlen($bytes))
-            ->header('Content-Disposition', 'attachment; filename="'.$filename.'"');
+            ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
     })->name('wfp.plans.export')->where('plan', '[0-9]+');
 
     // MOV uploads: the staff member's Means of Verification checklist —
