@@ -82,14 +82,26 @@ class AccountClassificationsTest extends TestCase
         }
     }
 
+<<<<<<< HEAD
     public function test_sidebar_shows_the_item_for_the_administrator_only(): void
+=======
+    public function test_the_sidebar_offers_account_classifications_to_admins_only(): void
+>>>>>>> feature/wfp
     {
+        // The menu entry is administrative: the master data behind the RCA /
+        // UACS reference table. Both admin roles are offered it; staff are
+        // not (the page itself is gated the same way).
         Livewire::actingAs($this->administrator())->test(Sidebar::class)
             ->assertSee('Account Classifications');
 
+<<<<<<< HEAD
         // A superadmin carries their own navigation; this item is not in it.
         Livewire::actingAs($this->superadmin())->test(Sidebar::class)
             ->assertDontSee('Account Classifications');
+=======
+        Livewire::actingAs($this->superadmin())->test(Sidebar::class)
+            ->assertSee('Account Classifications');
+>>>>>>> feature/wfp
 
         Livewire::actingAs(User::factory()->create(['role' => 'user', 'is_superadmin' => false]))
             ->test(Sidebar::class)

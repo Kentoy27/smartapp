@@ -43,7 +43,7 @@
     <div class="card">
         <div class="card-head users-toolbar">
             <p class="mem-toolbar-copy">
-                Lines are grouped by section, and the totals below update as you type.
+                Lines are grouped by section. Use a row's pencil to edit it; the totals below update as you go.
             </p>
 
             <div class="ac-toolbar-actions mem-toolbar">
@@ -131,86 +131,89 @@
                     </div>
 
                     <div class="table-wrap">
-                        <table class="data-table mem-grid">
+                        <table class="data-table mem-list">
                             <thead>
                                 <tr>
                                     <th scope="col">#</th>
-                                    <th scope="col">Objective</th>
-                                    <th scope="col">Activity Description</th>
-                                    <th scope="col">Resource Kind</th>
+                                    <th scope="col">Activity</th>
+                                    <th scope="col">Account</th>
                                     <th scope="col" class="mem-num">Qty</th>
-                                    <th scope="col">Unit</th>
                                     <th scope="col" class="mem-num">Unit Cost</th>
                                     <th scope="col" class="mem-num">Total</th>
-                                    <th scope="col">Account Title / Code</th>
-                                    <th scope="col">Funding / Classification</th>
-                                    <th scope="col">Activity MOVs</th>
                                     <th scope="col" class="users-actions-col">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 @forelse ($sectionRows as $entry)
-                                    {{-- The binding is to the line's index in the WHOLE
-                                         grid, not its position in this section, so
-                                         grouping never re-points a field. --}}
+                                    {{-- A read-only LIST row. The line is changed in the
+                                         modal (the pencil), not by typing into the grid,
+                                         so a month's lines stay compact and scannable. --}}
                                     @php($i = $entry['index'])
                                     @php($row = $entry['row'])
+                                    @php($objective = trim((string) ($row['objective'] ?? '')))
+                                    @php($resourceKind = trim((string) ($row['resource_kind'] ?? '')))
+                                    @php($funding = trim((string) ($row['funding_source'] ?? '')))
+                                    @php($org = trim((string) ($row['organizational_classification'] ?? '')))
+                                    @php($movs = trim((string) ($row['activity_movs'] ?? '')))
+                                    @php($accountTitle = trim((string) ($row['account_title'] ?? '')))
+                                    @php($accountCode = trim((string) ($row['account_code'] ?? '')))
+                                    @php($quantity = trim((string) ($row['quantity'] ?? '')))
+                                    @php($unit = trim((string) ($row['unit'] ?? '')))
+                                    @php($unitCost = trim((string) ($row['unit_cost'] ?? '')))
                                     <tr wire:key="row-{{ $row['_key'] }}">
                                         <td class="mem-rownum">{{ $i + 1 }}</td>
                                         <td>
-                                            <textarea rows="2" wire:model="items.{{ $i }}.objective" placeholder="What the activity serves" aria-label="Objective"></textarea>
-                                            @error("items.$i.objective") <div class="error-text">{{ $message }}</div> @enderror
+                                            <span class="cell-strong">{{ $row['activity_description'] !== '' ? $row['activity_description'] : '—' }}</span>
+                                            @if ($objective !== '')
+                                                <span class="cell-sub">{{ \Illuminate\Support\Str::limit($objective, 140) }}</span>
+                                            @endif
+                                            @if ($resourceKind !== '' || $funding !== '' || $org !== '')
+                                                <div class="mem-list__meta">
+                                                    @if ($resourceKind !== '') <span class="mem-chip">{{ $resourceKind }}</span> @endif
+                                                    @if ($funding !== '') <span class="mem-list__meta-item">Funding: {{ $funding }}</span> @endif
+                                                    @if ($org !== '') <span class="mem-list__meta-item">{{ $org }}</span> @endif
+                                                </div>
+                                            @endif
+                                            @if ($movs !== '')
+                                                <div class="mem-list__movs">MOVs: {{ \Illuminate\Support\Str::limit($movs, 100) }}</div>
+                                            @endif
                                         </td>
                                         <td>
-                                            <textarea rows="2" wire:model="items.{{ $i }}.activity_description" placeholder="e.g. Procure office supplies" aria-label="Activity description"></textarea>
-                                            @error("items.$i.activity_description") <div class="error-text">{{ $message }}</div> @enderror
-                                        </td>
-                                        <td>
-                                            <input type="text" wire:model="items.{{ $i }}.resource_kind" placeholder="e.g. MOOE" aria-label="Resource kind">
-                                            @error("items.$i.resource_kind") <div class="error-text">{{ $message }}</div> @enderror
+                                            @if ($accountTitle !== '' || $accountCode !== '')
+                                                <span class="cell-strong">{{ $accountTitle !== '' ? $accountTitle : '—' }}</span>
+                                                @if ($accountCode !== '') <span class="cell-sub ac-code">{{ $accountCode }}</span> @endif
+                                            @else
+                                                <span class="mem-list__muted">—</span>
+                                            @endif
                                         </td>
                                         <td class="mem-num">
-                                            <input type="number" step="0.01" min="0" inputmode="decimal" wire:model.blur="items.{{ $i }}.quantity" placeholder="0" aria-label="Quantity">
-                                            @error("items.$i.quantity") <div class="error-text">{{ $message }}</div> @enderror
-                                        </td>
-                                        <td>
-                                            <input type="text" wire:model="items.{{ $i }}.unit" placeholder="e.g. ream" aria-label="Unit">
-                                            @error("items.$i.unit") <div class="error-text">{{ $message }}</div> @enderror
+                                            @if ($quantity !== '')
+                                                {{ $quantity }}@if ($unit !== '') <span class="mem-unit">{{ $unit }}</span>@endif
+                                            @else
+                                                <span class="mem-list__muted">—</span>
+                                            @endif
                                         </td>
                                         <td class="mem-num">
-                                            <input type="number" step="0.01" min="0" inputmode="decimal" wire:model.blur="items.{{ $i }}.unit_cost" placeholder="0.00" aria-label="Unit cost">
-                                            @error("items.$i.unit_cost") <div class="error-text">{{ $message }}</div> @enderror
+                                            @if ($unitCost !== '')
+                                                {{ number_format((float) $unitCost, 2) }}
+                                            @else
+                                                <span class="mem-list__muted">—</span>
+                                            @endif
                                         </td>
-                                        <td class="mem-linetotal mem-linetotal--cell">
+                                        <td class="mem-num mem-linetotal--cell">
                                             {{ number_format(\App\Livewire\MemEditor::lineTotal($row), 2) }}
-                                        </td>
-                                        <td>
-                                            <div class="mem-account">
-                                                <input type="text" wire:model="items.{{ $i }}.account_title" placeholder="Account title" aria-label="Account title">
-                                                <button
-                                                    type="button"
-                                                    class="mem-account-btn"
-                                                    wire:click="openAccountPicker('{{ $row['_key'] }}')"
-                                                    title="Pick from Account Classifications"
-                                                >
-                                                    <x-icon name="search" :size="14" />
-                                                </button>
-                                            </div>
-                                            <input type="text" wire:model="items.{{ $i }}.account_code" placeholder="Object code" aria-label="Account code">
-                                            @error("items.$i.account_title") <div class="error-text">{{ $message }}</div> @enderror
-                                            @error("items.$i.account_code") <div class="error-text">{{ $message }}</div> @enderror
-                                        </td>
-                                        <td>
-                                            <div class="mem-stack">
-                                                <input type="text" wire:model="items.{{ $i }}.funding_source" placeholder="Funding source" aria-label="Funding source">
-                                                <input type="text" wire:model="items.{{ $i }}.organizational_classification" placeholder="Org. classification" aria-label="Organizational classification">
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <textarea rows="2" wire:model="items.{{ $i }}.activity_movs" placeholder="e.g. PO and RIS" aria-label="Activity MOVs"></textarea>
                                         </td>
                                         <td class="users-actions-col">
                                             <div class="users-actions-row">
+                                                <button
+                                                    type="button"
+                                                    class="mem-row-action"
+                                                    wire:click="openEditModal('{{ $row['_key'] }}')"
+                                                    title="Edit this line"
+                                                >
+                                                    <x-icon name="pencil" :size="15" />
+                                                </button>
+
                                                 <button
                                                     type="button"
                                                     class="mem-row-action"
@@ -242,7 +245,7 @@
                                     </tr>
                                 @empty
                                     <tr>
-                                        <td colspan="12" class="table-empty">
+                                        <td colspan="7" class="table-empty">
                                             No {{ \Illuminate\Support\Str::lower($sectionLabel) }} lines yet — add one below, or import a CSV.
                                         </td>
                                     </tr>
@@ -301,55 +304,57 @@
         </div>
     </div>
 
-    {{-- ADD A LINE --}}
-    {{-- Encoding a line happens here, in one focused form, rather than as a
-         half-empty row dropped into a wide grid: the row joins the section
-         once it is filled in. The section is chosen by which button opened
-         this, and can still be switched here. --}}
+    {{-- ADD / EDIT A LINE --}}
+    {{-- One focused form is used for both: opened empty from an "Add … line"
+         button, or pre-filled from a row's pencil. The section is chosen here
+         and can still be switched before saving. --}}
     <div class="modal-backdrop {{ $showLineModal ? 'is-open' : '' }}"
          @if ($showLineModal) @click="self && $wire.closeLineModal()" @endif
          role="presentation">
-        <div class="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="memLineTitle" @click.stop>
+        <div class="modal modal--wide modal--sticky-actions" role="dialog" aria-modal="true" aria-labelledby="memLineTitle" @click.stop>
             <div class="modal-head">
-                <h2 id="memLineTitle">Add a line</h2>
+                <h2 id="memLineTitle">{{ $editingKey !== null ? 'Edit line' : 'Add a line' }}</h2>
                 <button type="button" class="modal-close" wire:click="closeLineModal" aria-label="Close" title="Close">×</button>
             </div>
 
-            <form wire:submit="addLineFromModal" class="modal-form">
-                <div class="mem-line-sections" role="group" aria-label="Section">
-                    @foreach (['operations' => 'Operations', 'project' => 'Project'] as $key => $label)
-                        <label class="mem-line-section">
-                            <input type="radio" wire:model.live="lineSection" value="{{ $key }}">
-                            <span>{{ $label }}</span>
-                        </label>
-                    @endforeach
-                </div>
+            <form wire:submit="saveLineFromModal" class="modal-form">
+                {{-- Two-column grid (.mem-line-fields) so the whole line fits
+                     on screen without scrolling; a few fields span both
+                     columns. See dashboard.css. --}}
+                <div class="mem-line-fields">
+                    <div class="mem-line-sections mem-line-span" role="group" aria-label="Section">
+                        @foreach (['operations' => 'Operations', 'project' => 'Project'] as $key => $label)
+                            <label class="mem-line-section">
+                                <input type="radio" wire:model.live="lineSection" value="{{ $key }}">
+                                <span>{{ $label }}</span>
+                            </label>
+                        @endforeach
+                    </div>
 
-                <div class="field">
-                    <label for="memLineActivity">Activity description <span class="field-required">required</span></label>
-                    <input
-                        id="memLineActivity"
-                        type="text"
-                        wire:model="lineForm.activity_description"
-                        placeholder="e.g. Procure office supplies"
-                        @class(['error' => $errors->has('lineForm.activity_description')])
-                        autofocus
-                    >
-                    @error('lineForm.activity_description') <div class="error-text">{{ $message }}</div> @enderror
-                </div>
+                    <div class="field mem-line-span">
+                        <label for="memLineActivity">Activity description <span class="field-required">required</span></label>
+                        <input
+                            id="memLineActivity"
+                            type="text"
+                            wire:model="lineForm.activity_description"
+                            placeholder="e.g. Procure office supplies"
+                            @class(['error' => $errors->has('lineForm.activity_description')])
+                            autofocus
+                        >
+                        @error('lineForm.activity_description') <div class="error-text">{{ $message }}</div> @enderror
+                    </div>
 
-                <div class="field">
-                    <label for="memLineObjective">Objective</label>
-                    <input
-                        id="memLineObjective"
-                        type="text"
-                        wire:model="lineForm.objective"
-                        placeholder="What the activity serves"
-                    >
-                    @error('lineForm.objective') <div class="error-text">{{ $message }}</div> @enderror
-                </div>
+                    <div class="field">
+                        <label for="memLineObjective">Objective</label>
+                        <textarea
+                            id="memLineObjective"
+                            rows="2"
+                            wire:model="lineForm.objective"
+                            placeholder="What the activity serves"
+                        ></textarea>
+                        @error('lineForm.objective') <div class="error-text">{{ $message }}</div> @enderror
+                    </div>
 
-                <div class="ac-field-grid">
                     <div class="field">
                         <label for="memLineKind">Resource kind</label>
                         <input id="memLineKind" type="text" wire:model="lineForm.resource_kind" placeholder="e.g. MOOE">
@@ -361,59 +366,57 @@
                         <input id="memLineMovs" type="text" wire:model="lineForm.activity_movs" placeholder="e.g. PO and RIS">
                         @error('lineForm.activity_movs') <div class="error-text">{{ $message }}</div> @enderror
                     </div>
-                </div>
-
-                {{-- Quantity, unit, unit cost and the computed line total sit
-                     on one row — they are read together. --}}
-                <div class="mem-line-money">
-                    <div class="field">
-                        <label for="memLineQty">Quantity</label>
-                        <input id="memLineQty" type="number" step="0.01" min="0" inputmode="decimal" wire:model="lineForm.quantity" placeholder="0">
-                        @error('lineForm.quantity') <div class="error-text">{{ $message }}</div> @enderror
-                    </div>
 
                     <div class="field">
-                        <label for="memLineUnit">Unit</label>
-                        <input id="memLineUnit" type="text" wire:model="lineForm.unit" placeholder="e.g. ream">
-                        @error('lineForm.unit') <div class="error-text">{{ $message }}</div> @enderror
+                        <label for="memLineAccount">Account title / code</label>
+                        <div class="mem-account">
+                            <input
+                                id="memLineAccount"
+                                type="text"
+                                wire:model="lineForm.account_title"
+                                placeholder="Account title"
+                            >
+                            <button
+                                type="button"
+                                class="mem-account-btn"
+                                wire:click="openAccountPicker('form')"
+                                title="Pick from Account Classifications"
+                            >
+                                <x-icon name="search" :size="14" />
+                            </button>
+                        </div>
+                        <input type="text" wire:model="lineForm.account_code" placeholder="Object code" aria-label="Account code">
+                        @error('lineForm.account_title') <div class="error-text">{{ $message }}</div> @enderror
+                        @error('lineForm.account_code') <div class="error-text">{{ $message }}</div> @enderror
                     </div>
 
-                    <div class="field">
-                        <label for="memLineCost">Unit cost</label>
-                        <input id="memLineCost" type="number" step="0.01" min="0" inputmode="decimal" wire:model="lineForm.unit_cost" placeholder="0.00">
-                        @error('lineForm.unit_cost') <div class="error-text">{{ $message }}</div> @enderror
+                    {{-- Quantity, unit, unit cost and the computed line total sit
+                         on one row — they are read together. --}}
+                    <div class="mem-line-money mem-line-span">
+                        <div class="field">
+                            <label for="memLineQty">Quantity</label>
+                            <input id="memLineQty" type="number" step="0.01" min="0" inputmode="decimal" wire:model="lineForm.quantity" placeholder="0">
+                            @error('lineForm.quantity') <div class="error-text">{{ $message }}</div> @enderror
+                        </div>
+
+                        <div class="field">
+                            <label for="memLineUnit">Unit</label>
+                            <input id="memLineUnit" type="text" wire:model="lineForm.unit" placeholder="e.g. ream">
+                            @error('lineForm.unit') <div class="error-text">{{ $message }}</div> @enderror
+                        </div>
+
+                        <div class="field">
+                            <label for="memLineCost">Unit cost</label>
+                            <input id="memLineCost" type="number" step="0.01" min="0" inputmode="decimal" wire:model="lineForm.unit_cost" placeholder="0.00">
+                            @error('lineForm.unit_cost') <div class="error-text">{{ $message }}</div> @enderror
+                        </div>
+
+                        <div class="mem-line-total" aria-live="polite">
+                            <span class="mem-line-total__label">Line total</span>
+                            <span class="mem-line-total__value">{{ number_format(\App\Livewire\MemEditor::lineTotal($lineForm), 2) }}</span>
+                        </div>
                     </div>
 
-                    <div class="mem-line-total" aria-live="polite">
-                        <span class="mem-line-total__label">Line total</span>
-                        <span class="mem-line-total__value">{{ number_format(\App\Livewire\MemEditor::lineTotal($lineForm), 2) }}</span>
-                    </div>
-                </div>
-
-                <div class="field">
-                    <label for="memLineAccount">Account title / code</label>
-                    <div class="mem-account">
-                        <input
-                            id="memLineAccount"
-                            type="text"
-                            wire:model="lineForm.account_title"
-                            placeholder="Account title"
-                        >
-                        <button
-                            type="button"
-                            class="mem-account-btn"
-                            wire:click="openAccountPicker('form')"
-                            title="Pick from Account Classifications"
-                        >
-                            <x-icon name="search" :size="14" />
-                        </button>
-                    </div>
-                    <input type="text" wire:model="lineForm.account_code" placeholder="Object code" aria-label="Account code">
-                    @error('lineForm.account_title') <div class="error-text">{{ $message }}</div> @enderror
-                    @error('lineForm.account_code') <div class="error-text">{{ $message }}</div> @enderror
-                </div>
-
-                <div class="ac-field-grid">
                     <div class="field">
                         <label for="memLineFunding">Funding source</label>
                         <input id="memLineFunding" type="text" wire:model="lineForm.funding_source" placeholder="e.g. MOOE">
@@ -429,9 +432,9 @@
 
                 <div class="modal-actions">
                     <button type="button" class="btn-ghost" wire:click="closeLineModal">Cancel</button>
-                    <button type="submit" class="btn-primary" wire:loading.attr="disabled" wire:target="addLineFromModal">
-                        <span wire:loading.remove wire:target="addLineFromModal">Add line</span>
-                        <span wire:loading wire:target="addLineFromModal">Adding…</span>
+                    <button type="submit" class="btn-primary" wire:loading.attr="disabled" wire:target="saveLineFromModal">
+                        <span wire:loading.remove wire:target="saveLineFromModal">{{ $editingKey !== null ? 'Save changes' : 'Add line' }}</span>
+                        <span wire:loading wire:target="saveLineFromModal">Saving…</span>
                     </button>
                 </div>
             </form>

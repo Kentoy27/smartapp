@@ -108,6 +108,43 @@ class WfpSubmission extends Model
     }
 
     /**
+     * Who may download the archived workbook: the owner, or an
+     * administrator — the superadmin's "WFP Uploads" dashboard list serves
+     * every school's file, and the School Head keeps their own copy.
+     */
+    public function canBeDownloadedBy(?User $user): bool
+    {
+        if ($user === null) {
+            return false;
+        }
+
+        return $user->hasAdminAccess() || $this->user_id === $user->id;
+    }
+
+    /**
+     * The school this upload is attributed to, for the superadmin's list:
+     * the school named inside the workbook when it carried one, otherwise
+     * the uploader's assigned school, and finally their username so a row
+     * is never blank.
+     */
+    public function schoolLabel(): string
+    {
+        $detected = trim((string) $this->school_name);
+
+        if ($detected !== '') {
+            return $detected;
+        }
+
+        $assigned = trim((string) ($this->user?->school?->name ?? ''));
+
+        if ($assigned !== '') {
+            return $assigned;
+        }
+
+        return (string) ($this->user?->username ?? 'Unknown');
+    }
+
+    /**
      * Deleting the row deletes the stored file. Done with a model hook (not
      * a DB cascade) so the file on disk is never orphaned.
      */

@@ -51,10 +51,11 @@ class Sidebar extends Component
     {
         abort_unless(Auth::check(), 404);
 
-        // The WFP group opens on arrival: its two pages — the plan and the
-        // Monthly Expenditure Matrix it is generated from — are one click
-        // away rather than hidden behind a disclosure to find first. It
-        // collapses like any other group once the reader says so.
+        // The WFP group opens on arrival: its three pages — the Monthly
+        // Expenditure Matrix, the plan generated from it, and the annual
+        // allotment report it adds up to — are one click away rather than
+        // hidden behind a disclosure to find first. It collapses like any
+        // other group once the reader says so.
         $this->openGroups['wfp'] = true;
 
         if (! request()->routeIs('mov.index')) {
@@ -235,6 +236,7 @@ class Sidebar extends Component
                 'order' => 11,
             ];
 
+<<<<<<< HEAD
             // Review AIP: the superadmin's queue of submitted Annual
             // Implementation Plans. The badge counts the ones still awaiting
             // the signed-in reviewer's own action (see aipCount).
@@ -247,6 +249,32 @@ class Sidebar extends Component
                 'badge_title' => '%d plans awaiting your review',
                 'section' => 'Files',
                 'order' => 13,
+=======
+            // WFP for admins: every school's uploaded Work and Financial
+            // Plan (the dashboard card's list, as its own page). The SH's
+            // /wfp workspace stays closed to admins — this points at the
+            // uploads list, which is what an admin can act on.
+            $items[] = [
+                'label' => 'WFP',
+                'route' => 'wfp.submissions.index',
+                'path' => 'wfp-uploads',
+                'icon' => 'chart-column',
+                'section' => 'Files',
+                'order' => 12,
+            ];
+
+            // Account Classifications: the RCA / UACS master data the WFP
+            // tooling reads. Administrative only — the route and the table
+            // component re-check the same gate, so this link is a
+            // convenience, not the boundary.
+            $items[] = [
+                'label' => 'Account Classifications',
+                'route' => 'account-classifications.index',
+                'path' => 'account-classifications',
+                'icon' => 'tags',
+                'section' => 'Admin',
+                'order' => 22,
+>>>>>>> feature/wfp
             ];
 
             if (Auth::user()?->canManageUsersAndSchools()) {
@@ -270,6 +298,7 @@ class Sidebar extends Component
                     'order' => 21,
                 ];
             }
+<<<<<<< HEAD
 
             // Account Classifications: the RCA / UACS master data. It belongs
             // to the Administrator side only — superadmins do not carry it in
@@ -285,6 +314,8 @@ class Sidebar extends Component
                     'order' => 22,
                 ];
             }
+=======
+>>>>>>> feature/wfp
         } else {
             // Opcrf is a staff-facing page: regular users only.
             $items[] = [
@@ -328,12 +359,16 @@ class Sidebar extends Component
                 'children' => $this->movTree(),
             ];
 
+            // Account Classifications is an administrative page (see the
+            // hasAdminAccess() branch above), so it is not offered to staff.
+
             // WFP is for the School Head (SH) role only — hidden from the
             // SDS Viewer, and unreachable by URL regardless (route guard).
-            // It is one workflow on two pages, so it is one group: the plan
-            // itself and the Monthly Expenditure Matrix it is generated
-            // from. Both are plain links one level down (no tree of their
-            // own), and the group opens by default (see mount()).
+            // It is one workflow on three pages, so it is one group: the
+            // matrix the lines are entered in, the plan generated from them,
+            // and the annual allotment report they add up to. All three are
+            // plain links one level down (no tree of their own), and the
+            // group opens by default (see mount()).
             if (Auth::user()?->canAccessWfp()) {
                 $items[] = [
                     'label' => 'WFP',
@@ -359,6 +394,17 @@ class Sidebar extends Component
                             'title' => 'The source of truth the WFP is generated from',
                             'url' => route('wfp.matrices.index'),
                             'route' => 'wfp.matrices.*',
+                        ],
+                        // The report the matrices add up to: the year's lines
+                        // rolled up per account code, as the printed form. It
+                        // sits last because it is what the two pages above it
+                        // produce.
+                        [
+                            'key' => 'wfp-line-items',
+                            'label' => 'Per Line Item Expenditure',
+                            'title' => 'Your school\'s annual MOOE allotment, allocated per line item or object of expenditure',
+                            'url' => route('wfp.lineitems.index'),
+                            'route' => 'wfp.lineitems.*',
                         ],
                     ],
                 ];

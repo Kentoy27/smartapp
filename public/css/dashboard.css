@@ -380,6 +380,38 @@ body.no-scroll { overflow: hidden; }
     text-decoration: underline;
 }
 
+/* The Upload WFP button sits beside Generate and Download on the /wfp
+   page's template row. */
+.opcr-template-row .wfp-upload-component {
+    display: flex;
+}
+
+/* WFP Uploads — the superadmin's dashboard list of every school's upload. */
+.wfp-uploads-count {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.wfp-uploads-list .table-wrap {
+    margin-top: 4px;
+}
+
+/* Visually hidden but read aloud — used on empty table headers. */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
 .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
 .stat-card, .card { background: var(--bg-panel); border-radius: 10px; padding: 20px; box-shadow: var(--shadow-card); border: 1px solid var(--border); }
 .card { padding: 24px; margin-bottom: 16px; }
@@ -741,6 +773,25 @@ control to a real radio size and keep it from growing as a flex item. */
 @media (max-width: 640px) {
     .mem-line-money { grid-template-columns: 1fr; }
 }
+/* The Add-a-line dialog is tall; a two-column grid keeps every field on screen
+   without scrolling on a normal laptop. Fields that read as a single unit (the
+   section switch, the description box, the money four-up) span both columns;
+   the rest fall into pairs. Collapses back to one column when narrow. Scoped
+   under .modal-form so the margin reset outranks the layout's
+   `.modal-form .field` rule (equal specificity, later source). */
+.mem-line-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 16px;
+    align-items: start;
+}
+.modal-form .mem-line-fields .field { margin-bottom: 0; }
+.mem-line-fields .mem-line-span { grid-column: 1 / -1; }
+.mem-line-fields .mem-line-sections { justify-self: start; }
+@media (max-width: 720px) {
+    .mem-line-fields { grid-template-columns: 1fr; }
+    .mem-line-fields .mem-line-span { grid-column: auto; }
+}
 .mem-rownum { color: var(--text-faint); font-variant-numeric: tabular-nums; text-align: right; }
 .mem-linetotal { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
 .mem-linetotal--grand { font-size: 1rem; }
@@ -769,6 +820,7 @@ control to a real radio size and keep it from growing as a flex item. */
 .mem-plan-table input, .mem-plan-table textarea { width: 100%; font: inherit; font-size: 0.8125rem; }
 .mem-plan-table textarea { resize: vertical; min-height: 40px; }
 
+<<<<<<< HEAD
 /* ---------- AIP (Annual Implementation Plan) module ---------- */
 .aip-sub { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; }
 .aip-muted { color: var(--text-faint); }
@@ -987,10 +1039,90 @@ control to a real radio size and keep it from growing as a flex item. */
     padding: 10px 12px;
     background: var(--bg-muted);
     border-bottom: 1px solid var(--border);
+=======
+/* ---------- MEM editor: the read-only LIST of lines ----------
+   The section grid stopped being a wall of inputs: a line now reads as a
+   compact list row (what it is, what it costs, what it is charged to), and
+   the row's pencil opens the one focused line form to change it. A month's
+   lines stay scannable instead of a tall stack of mostly-empty fields. */
+.mem-list { min-width: 760px; }
+.mem-list td { vertical-align: top; }
+.mem-list__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 4px; font-size: 0.75rem; color: var(--text-muted); }
+.mem-list__meta .mem-chip { font-size: 0.68rem; }
+.mem-list__meta-item { color: var(--text-muted); }
+.mem-list__movs { margin-top: 4px; font-size: 0.75rem; color: var(--text-muted); }
+.mem-list__muted { color: var(--text-faint); }
+
+/* ---------- PER LINE ITEM EXPENDITURE (annual allotment report) ----------
+   The report is the printed form: a letterhead, the MONTH / BUDGET column
+   beside the year's lines rolled up per account code, and the signature
+   block. It is drawn as a document rather than as an app table — squared
+   borders and plain type, so what is on screen is what comes off the
+   printer — and @media print strips the application chrome around it. */
+.wfp-allotment {
+    padding: 24px 20px 20px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-panel);
+}
+
+.wfp-allotment-letterhead {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    margin-bottom: 18px;
+    text-align: center;
+    line-height: 1.35;
+}
+
+.wfp-allotment-letterhead span {
+    font-size: 0.8125rem;
+    color: var(--text);
+}
+
+.wfp-allotment-letterhead strong {
+    font-size: 0.9375rem;
+    font-weight: 700;
+    color: var(--text-strong);
+    text-transform: uppercase;
+}
+
+.wfp-allotment-letterhead h2 {
+    margin-top: 12px;
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: var(--text-strong);
+    text-transform: uppercase;
+    letter-spacing: 0.01em;
+}
+
+.wfp-allotment-grid {
+    display: flex;
+    align-items: flex-start;
+    gap: 22px;
+}
+
+.wfp-allotment-table {
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+    color: var(--text);
+}
+
+.wfp-allotment-table th,
+.wfp-allotment-table td {
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    vertical-align: top;
+}
+
+.wfp-allotment-table thead th {
+>>>>>>> feature/wfp
     font-size: 0.6875rem;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
+<<<<<<< HEAD
     color: var(--text-muted);
     white-space: nowrap;
 }
@@ -1134,3 +1266,180 @@ control to a real radio size and keep it from growing as a flex item. */
 .sig-file-label:focus-within { outline: 2px solid var(--primary-strong); outline-offset: 2px; }
 
 .sig-help { margin-top: 14px; color: var(--text-faint); font-size: 0.75rem; line-height: 1.5; }
+=======
+    background: var(--bg-muted);
+    color: var(--text-strong);
+    text-align: center;
+}
+
+/* The head of the MONTH / BUDGET column: the month names down the side. */
+.wfp-allotment-table--months {
+    flex: 0 0 auto;
+    min-width: 168px;
+}
+
+.wfp-allotment-table--months tbody th {
+    font-weight: 600;
+    text-align: left;
+    white-space: nowrap;
+}
+
+/* The year's lines: the wider half of the report, and the half that can run
+   long, so it takes the room that is left and wraps its titles. */
+.wfp-allotment-table--items {
+    flex: 1;
+    min-width: 0;
+}
+
+.wfp-allotment-num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.wfp-allotment-table tbody tr.is-pending td,
+.wfp-allotment-table tbody tr.is-pending th {
+    color: var(--text-faint);
+}
+
+.wfp-allotment-table tfoot .is-total th,
+.wfp-allotment-table tfoot .is-total td {
+    font-weight: 700;
+    color: var(--text-strong);
+    background: var(--bg-muted);
+}
+
+.wfp-allotment-table tfoot .is-total th {
+    text-align: right;
+}
+
+.wfp-allotment-table--items tfoot .is-total th {
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.wfp-allotment-empty {
+    padding: 18px 8px;
+    text-align: center;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+.wfp-allotment-signatures {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 18px 22px;
+    margin-top: 34px;
+}
+
+.wfp-allotment-signatory {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.wfp-allotment-signatory__label {
+    min-height: 2.6em;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    line-height: 1.35;
+}
+
+.wfp-allotment-signatory__name {
+    margin-top: 6px;
+    font-size: 0.8125rem;
+    font-weight: 700;
+    color: var(--text-strong);
+    text-transform: uppercase;
+    overflow-wrap: anywhere;
+}
+
+.wfp-allotment-signatory__role {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+@media (max-width: 900px) {
+    .wfp-allotment-grid {
+        flex-direction: column;
+    }
+
+    .wfp-allotment-table--months {
+        min-width: 0;
+        width: 100%;
+    }
+
+    .wfp-allotment-table--items {
+        width: 100%;
+    }
+
+    .wfp-allotment-signatures {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+/* On paper the report is the whole page: the navigation, header, footer and
+   the page's own title are scaffolding around a form, not part of it. */
+@media print {
+    @page {
+        size: landscape;
+        margin: 12mm;
+    }
+
+    .sidebar,
+    .header,
+    .footer,
+    .page-header,
+    .wfp-allotment-toolbar {
+        display: none !important;
+    }
+
+    .layout {
+        display: block;
+        min-height: 0;
+    }
+
+    .content-area {
+        overflow: visible;
+    }
+
+    .main {
+        padding: 0;
+        overflow: visible;
+    }
+
+    .card,
+    .wfp-allotment {
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+    }
+
+    .wfp-allotment-table thead th,
+    .wfp-allotment-table tfoot .is-total th,
+    .wfp-allotment-table tfoot .is-total td {
+        background: none;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+
+    .wfp-allotment-table th,
+    .wfp-allotment-table td {
+        border-color: #000;
+    }
+
+    .wfp-allotment-table--items {
+        break-inside: auto;
+    }
+
+    .wfp-allotment-table tr {
+        break-inside: avoid;
+    }
+
+    .wfp-allotment-signatures {
+        break-inside: avoid;
+    }
+}
+>>>>>>> feature/wfp
