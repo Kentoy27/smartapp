@@ -75,9 +75,15 @@ class AccountClassificationsTest extends TestCase
         $this->assertStringContainsString('Page Not Found', $html);
     }
 
-    public function test_sidebar_shows_the_item_for_admins_only(): void
+    public function test_the_sidebar_offers_account_classifications_to_admins_only(): void
     {
+        // The menu entry is administrative: the master data behind the RCA /
+        // UACS reference table. Both admin roles are offered it; staff are
+        // not (the page itself is gated the same way).
         Livewire::actingAs($this->administrator())->test(Sidebar::class)
+            ->assertSee('Account Classifications');
+
+        Livewire::actingAs($this->superadmin())->test(Sidebar::class)
             ->assertSee('Account Classifications');
 
         Livewire::actingAs(User::factory()->create(['role' => 'user', 'is_superadmin' => false]))

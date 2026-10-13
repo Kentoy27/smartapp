@@ -69,6 +69,9 @@ class MemEditor extends Component
     /** The fields of one line being encoded in the modal. */
     public array $lineForm = [];
 
+    /** The _key of the line being edited in the modal, or null when adding one. */
+    public ?string $editingKey = null;
+
     /** Which row's account the picker fills: a grid row's _key, or 'form'. */
     public ?string $accountPickerKey = null;
 
@@ -217,7 +220,7 @@ class MemEditor extends Component
         $this->items[] = $this->blankRow($section);
     }
 
-    /* ---------------------------------------------------------- add modal */
+    /* ---------------------------------------------------------- line modal */
 
     /**
      * Open the add-line modal for a section. Encoding a line happens here,
@@ -228,31 +231,81 @@ class MemEditor extends Component
     {
         $this->guard();
 
+        $this->editingKey = null;
         $this->lineSection = in_array($section, ['operations', 'project'], true) ? $section : 'operations';
         $this->lineForm = $this->blankRow($this->lineSection);
         $this->showLineModal = true;
         $this->resetValidation();
     }
 
+    /**
+     * Open the SAME modal pre-filled with an existing line. The grid is a
+     * read-only list, so this is how a line is changed: the row's pencil
+     * loads it into the one focused form.
+     */
+    public function openEditModal(string $key): void
+    {
+        $this->guard();
+
+        foreach ($this->items as $row) {
+            if (($row['_key'] ?? null) !== $key) {
+                continue;
+            }
+
+            $this->editingKey = $key;
+            $this->lineSection = in_array($row['section'] ?? '', ['operations', 'project'], true)
+                ? $row['section']
+                : 'operations';
+            $this->lineForm = $row;
+            $this->showLineModal = true;
+            $this->resetValidation();
+
+            return;
+        }
+    }
+
     public function closeLineModal(): void
     {
         $this->showLineModal = false;
+        $this->editingKey = null;
         $this->lineForm = [];
         $this->resetValidation();
     }
 
     /**
-     * Validate the modal's line and append it to the grid. The row joins the
-     * others unsaved, so it still needs Save Draft — same as a duplicated or
-     * imported line.
+     * Validate the modal's line and either append it to the grid (add) or
+     * write it back over the row it was opened for (edit). Either way the
+     * change joins the others unsaved, so it still needs Save Draft — same
+     * as a duplicated or imported line.
      */
-    public function addLineFromModal(): void
+    public function saveLineFromModal(): void
     {
         $this->guard();
 
         $this->lineForm['section'] = $this->lineSection;
 
         $this->validate($this->lineRules(), $this->lineAttributes());
+
+        if ($this->editingKey !== null) {
+            foreach ($this->items as $index => $row) {
+                if (($row['_key'] ?? null) !== $this->editingKey) {
+                    continue;
+                }
+
+                // Keep the row's identity; the form only carries its fields.
+                $updated = array_merge($row, $this->lineForm);
+                $updated['_key'] = $row['_key'];
+                $updated['id'] = $row['id'];
+
+                $this->items[$index] = $updated;
+
+                break;
+            }
+
+            $this->closeLineModal();
+
+            return;
+        }
 
         $row = array_merge($this->blankRow($this->lineSection), $this->lineForm);
         $row['_key'] = 'new-'.bin2hex(random_bytes(8));

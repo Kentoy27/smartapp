@@ -19,6 +19,8 @@ use App\Livewire\OpcrfScheduleManager;
 use App\Livewire\OpcrfUpload;
 use App\Livewire\Sidebar;
 use App\Livewire\UsersTable;
+use App\Livewire\WfpGenerateButton;
+use App\Livewire\WfpLineItemAllotment;
 use App\Livewire\WfpPlanEditor;
 use App\Models\District;
 use App\Models\MonthlyExpenditureMatrix;
@@ -104,6 +106,9 @@ class ApplicationSmokeTest extends TestCase
             '/admin/account-classifications/template',
             '/api/admin/account-classifications',
             '/movs',
+            '/wfp',
+            '/wfp/line-items',
+            '/wfp/line-items/export',
             '/wfp/matrices',
             '/wfp/matrices/template',
             '/wfp/matrices/1',
@@ -214,6 +219,8 @@ class ApplicationSmokeTest extends TestCase
             OpcrfForm::class,
             OpcrfParts::class,
             MemMatrixList::class,
+            WfpGenerateButton::class,
+            WfpLineItemAllotment::class,
         ];
 
         foreach ($staffComponents as $component) {
@@ -384,6 +391,7 @@ class ApplicationSmokeTest extends TestCase
             MemMatrixList::class,
             MemEditor::class,
             WfpPlanEditor::class,
+            WfpGenerateButton::class,
         ];
 
         foreach ($components as $component) {

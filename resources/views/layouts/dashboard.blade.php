@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#f1f5f9">
     <link rel="icon" type="image/svg+xml" href="{{ public_asset('smap.svg') }}?v=2">
     <link rel="shortcut icon" href="{{ public_asset('smap.svg') }}?v=2">
-    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=3">
+    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=5">
     <title>@yield('title', 'Dashboard — SmartApp')</title>
     <script>
         /* Apply the saved theme before first paint to avoid a flash.
@@ -1311,6 +1311,30 @@
             border-color: #ef4444;
         }
 
+        .modal-form textarea {
+            width: 100%;
+            padding: 9px 12px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-strong);
+            font-size: 16px; /* stops iOS auto-zoom on focus */
+            font-family: inherit;
+            line-height: 1.5;
+            resize: vertical;
+            transition: border-color 0.2s, background 0.2s;
+        }
+
+        .modal-form textarea:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+
+        .modal-form textarea.error {
+            border-color: #ef4444;
+        }
+
         .modal-form select {
             width: 100%;
             padding: 9px 12px;
@@ -1461,6 +1485,38 @@
             margin-top: 20px;
         }
 
+        /* Tall dialogs (the Add-a-line form): the title and the submit button
+           stay pinned and only the fields scroll, so "Add line" is always in
+           reach instead of sitting below the fold. */
+        .modal--sticky-actions {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .modal--sticky-actions .modal-head {
+            flex: 0 0 auto;
+            padding: 18px 22px 14px;
+            background: var(--bg-panel);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .modal--sticky-actions .modal-form {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+            padding-bottom: 0;
+        }
+
+        .modal--sticky-actions .modal-actions {
+            position: sticky;
+            bottom: 0;
+            margin: 20px -22px 0;
+            padding: 14px 22px;
+            background: var(--bg-panel);
+            border-top: 1px solid var(--border);
+        }
+
         .btn-ghost,
         .btn-primary {
             padding: 9px 18px;
@@ -1508,6 +1564,10 @@
         }
 
         .success-alert-sentinel {
+            display: none;
+        }
+
+        .error-alert-sentinel {
             display: none;
         }
 
@@ -6871,6 +6931,20 @@
                 });
             }
 
+            function error(title, text) {
+                Swal.fire({
+                    icon: 'error',
+                    title: title,
+                    text: text || '',
+                    toast: true,
+                    position: 'top-end',
+                    showConfirmButton: false,
+                    timer: 6000,
+                    timerProgressBar: true,
+                    ...themeOptions()
+                });
+            }
+
             function confirmDelete(options) {
                 return Swal.fire(Object.assign({
                     icon: 'warning',
@@ -6909,6 +6983,7 @@
 
             return {
                 success: success,
+                error: error,
                 confirmDelete: confirmDelete,
                 confirm: confirm,
                 sessionExpired: sessionExpired

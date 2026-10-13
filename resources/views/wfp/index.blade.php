@@ -5,12 +5,11 @@
 @section('content')
     <div class="page-header">
         <h1>Work and Financial Plan</h1>
-        <p>Download the official WFP template, complete it, then upload it here to review or update your plan.</p>
+        <p>Generate your school's Work and Financial Plan from the official template and download it, ready to complete.</p>
     </div>
 
-    {{-- The whole WFP workflow (template download, upload, status, preview,
-         download/remove) lives in one Livewire component. Access is
-         restricted to the School Head role — the route guard and the
-         component both enforce it. --}}
+    {{-- The WFP workflow (generate and download from the account-code list)
+         lives in one Livewire component. Access is restricted to the School
+         Head role — the route guard and the component both enforce it. --}}
     <livewire:wfp-manager />
 @endsection

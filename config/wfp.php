@@ -19,7 +19,7 @@ return [
     // The card's short description.
     'description' => env(
         'WFP_DESCRIPTION',
-        'Work and Financial Plan template for the school. Download the official template, complete the required financial and activity information, then upload the completed file.'
+        'Work and Financial Plan for the school. Generate the official template from your account-code list and download it, ready to complete.'
     ),
 
     // Upload size ceiling (KB).
