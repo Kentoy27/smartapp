@@ -6,11 +6,7 @@
     <meta name="theme-color" content="#f1f5f9">
     <link rel="icon" type="image/svg+xml" href="{{ public_asset('smap.svg') }}?v=2">
     <link rel="shortcut icon" href="{{ public_asset('smap.svg') }}?v=2">
-<<<<<<< HEAD
     <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=10">
-=======
-    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=5">
->>>>>>> feature/wfp
     <title>@yield('title', 'Dashboard — SmartApp')</title>
     <script>
         /* Apply the saved theme before first paint to avoid a flash.
