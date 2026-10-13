@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#f1f5f9">
     <link rel="icon" type="image/svg+xml" href="{{ public_asset('smap.svg') }}?v=2">
     <link rel="shortcut icon" href="{{ public_asset('smap.svg') }}?v=2">
-    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=3">
+    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=10">
     <title>@yield('title', 'Dashboard — SmartApp')</title>
     <script>
         /* Apply the saved theme before first paint to avoid a flash.
@@ -1197,6 +1197,20 @@
             animation: modal-in 0.18s ease;
         }
 
+        /* Wider dialog variants. They have to live in THIS sheet, declared
+           after the base rule: this block is loaded after dashboard.css, so
+           the base max-width above was overriding a variant defined only
+           there and every wide dialog collapsed back to 420px. */
+        .modal--wide {
+            max-width: min(920px, calc(100vw - 32px));
+        }
+
+        .aip-preview-modal,
+        .aip-review-modal {
+            max-width: 980px;
+            width: 100%;
+        }
+
         @keyframes modal-in {
             from { opacity: 0; transform: translateY(-10px) scale(0.98); }
             to   { opacity: 1; transform: translateY(0) scale(1); }
@@ -1532,22 +1546,30 @@
             color: var(--primary);
         }
 
+        /* The text block of the row. The flex-basis is what keeps the card
+           readable on a narrow screen: the row already wraps, so a "LOCKED"
+           pill or a download button that no longer fits drops onto its own
+           line instead of squeezing this column. Measured before this: on a
+           390px screen the pill (100px) and the badge (46px) left the text
+           133px wide — twelve lines of two or three words. */
         .opcr-file-meta {
             display: flex;
             flex-direction: column;
             gap: 2px;
             min-width: 0;
-            flex: 1;
+            flex: 1 1 220px;
         }
 
         .opcr-file-name {
             font-weight: 600;
             color: var(--text-strong);
+            overflow-wrap: anywhere;
         }
 
         .opcr-file-sub {
             font-size: 0.8125rem;
             color: var(--text-muted);
+            overflow-wrap: anywhere;
         }
 
         .opcr-download-btn {
@@ -2697,8 +2719,8 @@
         .opcrf-excelwin-tabs {
             display: flex;
             align-items: stretch;
-            gap: 2px;
-            padding: 6px 10px;
+            gap: 4px;
+            padding: 8px 12px;
             background: #e8edf5;
             border-top: 1px solid var(--border);
             overflow-x: auto;
@@ -2713,10 +2735,10 @@
             border-radius: 6px 6px 0 0;
             background: #d7e0ee;
             color: #1f3864;
-            font-size: 0.6875rem;
+            font-size: 0.8125rem;
             font-weight: 700;
             letter-spacing: 0.03em;
-            padding: 6px 12px;
+            padding: 10px 16px;
             cursor: pointer;
             white-space: nowrap;
         }
@@ -2739,7 +2761,7 @@
         /* Sticky in-grid headers: the column captions stay visible while
            a long part scrolls (the Excel freeze-panes feel). */
         .opcrf-sheet-tablewrap {
-            max-height: min(58vh, 620px);
+            max-height: min(72vh, 820px);
             overflow: auto;
         }
 
@@ -2755,22 +2777,26 @@
         }
 
         .opcrf-sheet {
-            font-size: 0.75rem;
-            line-height: 1.45;
+            /* Readability first: this is a full government form read on
+               screen, so the sheet runs at near-body size with generous
+               leading instead of spreadsheet density. */
+            font-size: 0.9375rem;
+            line-height: 1.6;
         }
 
         .opcrf-sheet-banner {
             background: #1f3864;
             color: #ffffff;
             font-weight: 700;
-            font-size: 0.8125rem;
+            font-size: 1.0625rem;
+            line-height: 1.4;
             letter-spacing: 0.02em;
             text-align: center;
-            padding: 12px 16px;
+            padding: 16px 18px;
         }
 
         .opcrf-sheet-headerblock {
-            padding: 10px 16px;
+            padding: 16px 18px;
             border-bottom: 1px solid var(--border);
             display: grid;
             gap: 0;
@@ -2801,9 +2827,9 @@
 
         .opcrf-sheet-headrow {
             display: grid;
-            grid-template-columns: minmax(150px, 240px) 1fr;
-            gap: 4px 12px;
-            padding: 5px 0;
+            grid-template-columns: minmax(170px, 260px) 1fr;
+            gap: 6px 16px;
+            padding: 9px 0;
             border-bottom: 1px dashed var(--border);
             align-items: baseline;
         }
@@ -2819,13 +2845,13 @@
            letter by letter ("DOLL / OSA"). */
         .opcrf-sheet-headercol--evaluator .opcrf-sheet-headrow {
             grid-template-columns: 1fr;
-            gap: 2px;
-            padding: 7px 0;
+            gap: 3px;
+            padding: 10px 0;
         }
 
         .opcrf-sheet-headercol--evaluator .opcrf-sheet-headlabel {
             color: #5a3e1f;
-            font-size: 0.6875rem;
+            font-size: 0.75rem;
             text-transform: uppercase;
             letter-spacing: 0.04em;
         }
@@ -2843,6 +2869,7 @@
 
         .opcrf-sheet-headvalue {
             color: var(--text-strong);
+            font-weight: 500;
             word-break: break-word;
         }
 
@@ -2861,19 +2888,20 @@
             gap: 10px;
             background: #1f3864;
             color: #ffffff;
-            padding: 8px 12px;
+            padding: 12px 16px;
         }
 
         .opcrf-sheet-partkey {
             font-weight: 700;
-            font-size: 0.75rem;
+            font-size: 0.8125rem;
             letter-spacing: 0.03em;
             white-space: nowrap;
         }
 
         .opcrf-sheet-parttitle {
             font-weight: 700;
-            font-size: 0.78rem;
+            font-size: 1rem;
+            line-height: 1.4;
         }
 
         /* The template's own two column-band headings — "TO BE ACCOMPLISHED
@@ -2884,10 +2912,10 @@
             display: flex;
             flex-wrap: wrap;
             gap: 6px 16px;
-            padding: 6px 12px;
+            padding: 10px 16px;
             background: var(--bg-muted);
             border-bottom: 1px solid var(--border);
-            font-size: 0.625rem;
+            font-size: 0.75rem;
             font-weight: 700;
             letter-spacing: 0.06em;
             text-transform: uppercase;
@@ -2899,9 +2927,9 @@
         }
 
         .opcrf-sheet-partnote {
-            font-size: 0.6875rem;
-            color: var(--text-faint);
-            padding: 6px 12px;
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            padding: 12px 16px;
             border-bottom: 1px solid var(--border);
         }
 
@@ -2916,11 +2944,11 @@
         }
 
         .opcrf-sheet-signers-head {
-            font-size: 0.6875rem;
+            font-size: 0.75rem;
             text-transform: uppercase;
             letter-spacing: 0.04em;
-            color: var(--text-faint);
-            margin-bottom: 10px;
+            color: var(--text-muted);
+            margin-bottom: 12px;
         }
 
         .opcrf-sheet-signers-row {
@@ -2944,6 +2972,7 @@
 
         .opcrf-sheet-signer-name {
             font-weight: 700;
+            font-size: 1rem;
             color: var(--text-strong);
             word-break: break-word;
         }
@@ -2955,7 +2984,7 @@
         }
 
         .opcrf-sheet-signer-role {
-            font-size: 0.6875rem;
+            font-size: 0.75rem;
             text-transform: uppercase;
             letter-spacing: 0.04em;
             color: #1f3864;
@@ -2989,6 +3018,10 @@
 
         .opcrf-sheet-table {
             width: 100%;
+            /* Ten columns of government form: give them a floor so the type
+               stays readable and the table scrolls sideways (Excel-like)
+               instead of crushing every word onto its own line. */
+            min-width: 1120px;
             border-collapse: collapse;
             table-layout: fixed;
         }
@@ -2999,9 +3032,10 @@
             font-weight: 700;
             text-align: left;
             vertical-align: bottom;
-            padding: 8px;
+            padding: 12px 10px;
             border: 1px solid var(--border);
-            font-size: 0.6875rem;
+            font-size: 0.75rem;
+            line-height: 1.4;
             text-transform: uppercase;
             letter-spacing: 0.03em;
         }
@@ -3017,21 +3051,35 @@
 
         .opcrf-sheet-table td {
             border: 1px solid var(--border);
-            padding: 8px;
+            padding: 12px 10px;
             vertical-align: top;
             word-break: break-word;
             color: var(--text);
+            line-height: 1.6;
+        }
+
+        /* Zebra rows: a full-width government table is hard to track line by
+           line, so alternating tints keep the eye on the right row. */
+        .opcrf-sheet-table tbody tr:nth-child(even) td {
+            background: color-mix(in srgb, var(--bg-muted) 45%, transparent);
+        }
+
+        .opcrf-sheet-table tbody tr:hover td {
+            background: var(--bg-hover);
         }
 
         .opcrf-sheet-num {
-            width: 34px;
+            width: 42px;
             text-align: center !important;
             font-weight: 700;
+            font-size: 0.9375rem;
             color: var(--text-muted) !important;
         }
 
         .opcrf-sheet-obj {
             width: 22%;
+            font-weight: 500;
+            color: var(--text-strong);
         }
 
         .opcrf-sheet-time {
@@ -3048,7 +3096,7 @@
 
         /* Slim numeric columns (weight, per-block average/weighted). */
         .opcrf-sheet-wcol {
-            width: 52px;
+            width: 68px;
             text-align: center !important;
             white-space: nowrap;
         }
@@ -3056,12 +3104,13 @@
         /* The 5-level Rating Scale column: each level its own line. */
         .opcrf-sheet-scale {
             width: 22%;
-            font-size: 0.6875rem;
+            font-size: 0.8125rem;
+            line-height: 1.55;
         }
 
         .opcrf-sheet-scalelevel {
             display: block;
-            padding: 1px 0;
+            padding: 2px 0;
         }
 
         .opcrf-sheet-scalelevel b {
@@ -3075,10 +3124,11 @@
            the objective text. */
         .opcrf-sheet-cellsub {
             display: block;
-            margin-top: 5px;
-            padding-top: 4px;
+            margin-top: 8px;
+            padding-top: 6px;
             border-top: 1px dashed var(--border);
-            font-size: 0.6875rem;
+            font-size: 0.875rem;
+            line-height: 1.55;
             color: var(--text-muted);
         }
 
@@ -3091,17 +3141,19 @@
             width: 8%;
             text-align: center !important;
             font-weight: 700;
+            font-size: 1rem;
             white-space: nowrap;
         }
 
         .opcrf-sheet-table tfoot td {
             background: var(--bg-muted);
             font-weight: 700;
+            font-size: 0.9375rem;
             color: var(--text-strong);
         }
 
         .opcrf-sheet-table tfoot .opcrf-sheet-rate {
-            font-size: 0.875rem;
+            font-size: 1.0625rem;
         }
 
         .opcrf-sheet-remarks {
@@ -6674,6 +6726,9 @@
                                 <span>{{ Auth::user()->email }}</span>
                             @endif
                         </div>
+                        <a href="{{ route('profile.index') }}" class="user-dropdown-link" role="menuitem" wire:navigate>
+                            <x-icon name="user-round" :size="16" /> Profile
+                        </a>
                         <form method="POST" action="{{ route('logout') }}">
                             @csrf
                             <button type="submit" class="user-dropdown-item" role="menuitem">

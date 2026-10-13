@@ -17,8 +17,9 @@ use RuntimeException;
  * The Account Classifications admin module: a searchable, filterable table of
  * the RCA / UACS reference data with create, edit, and activate/deactivate.
  *
- * Only accounts with administrative access may reach this component — checked
- * in mount() and re-checked at the top of every mutating action, because the
+ * This module belongs to the Administrator side of the app, not to superadmins:
+ * only an account that manages users and schools may reach it — checked in
+ * mount() and re-checked at the top of every mutating action, because the
  * hidden menu item is a convenience, never the security boundary.
  *
  * Classifications are retired, never hard-deleted: "Delete" sets
@@ -104,7 +105,7 @@ class AccountClassificationsTable extends Component
 
     public function mount(): void
     {
-        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
     }
 
     /**
@@ -155,7 +156,7 @@ class AccountClassificationsTable extends Component
 
     public function openCreate(): void
     {
-        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
 
         $this->resetForm();
         $this->resetValidation();
@@ -166,7 +167,7 @@ class AccountClassificationsTable extends Component
 
     public function openEdit(AccountClassification $classification): void
     {
-        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
 
         $this->resetForm();
         $this->resetValidation();
@@ -190,7 +191,7 @@ class AccountClassificationsTable extends Component
 
     public function save(): void
     {
-        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
 
         $this->prepare();
         $this->validate();
@@ -241,7 +242,7 @@ class AccountClassificationsTable extends Component
 
     public function openConfirmDelete(AccountClassification $classification): void
     {
-        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
 
         $this->confirmId = $classification->id;
         $this->confirmTitle = (string) $classification->account_title;
@@ -261,7 +262,7 @@ class AccountClassificationsTable extends Component
      */
     public function confirmDelete(): void
     {
-        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
 
         $classification = AccountClassification::findOrFail($this->confirmId);
         $before = $classification->auditSnapshot();
@@ -281,7 +282,7 @@ class AccountClassificationsTable extends Component
      */
     public function activate(AccountClassification $classification): void
     {
-        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
 
         if ($classification->is_active) {
             return;
@@ -342,7 +343,7 @@ class AccountClassificationsTable extends Component
 
     public function openImport(): void
     {
-        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
 
         $this->resetImport();
         $this->showImport = true;
@@ -360,7 +361,7 @@ class AccountClassificationsTable extends Component
      */
     public function updatedImportFile(): void
     {
-        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
 
         $this->importError = null;
         $this->importRows = [];
@@ -407,7 +408,7 @@ class AccountClassificationsTable extends Component
      */
     public function commitImport(): void
     {
-        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
 
         if ($this->importFile === null) {
             $this->importError = 'Choose a CSV file to import.';

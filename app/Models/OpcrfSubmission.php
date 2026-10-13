@@ -560,10 +560,20 @@ class OpcrfSubmission extends Model
      * $routeTo is given (the workflow's next superadmin), the compliant
      * submission is immediately forwarded onward, and the trail records
      * both steps.
+     *
+     * $action distinguishes the two compliance paths in the review trail:
+     * the routing mark (ACTION_COMPLIANCE, the Approve action) and the
+     * final sign-off (ACTION_COMPLIANCE_FINAL, which is always called with
+     * no $routeTo so the chain ends with this reviewer).
      */
-    public function markCompliant(User $reviewer, ?string $remarks = null, ?User $routeTo = null): void
-    {
+    public function markCompliant(
+        User $reviewer,
+        ?string $remarks = null,
+        ?User $routeTo = null,
+        string $action = OpcrfReview::ACTION_COMPLIANCE
+    ): void {
         $current = $this->assigned_to ?? $this->reviewer_id;
+        $previousStatus = (string) $this->status;
 
         $this->approved_at = now();
         $this->approved_by = $reviewer->id;
@@ -572,10 +582,12 @@ class OpcrfSubmission extends Model
 
         $this->reviews()->create([
             'reviewer_id' => $reviewer->id,
-            'action' => OpcrfReview::ACTION_COMPLIANCE,
+            'action' => $action,
             'remarks' => $remarks,
             'from_id' => $this->reviewer_id === $reviewer->id ? null : $this->reviewer_id,
             'to_id' => $routeTo?->id,
+            'previous_status' => $previousStatus,
+            'new_status' => self::STATUS_FOR_COMPLIANCE,
             'reviewed_at' => now(),
         ]);
 

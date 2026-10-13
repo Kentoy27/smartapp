@@ -44,14 +44,18 @@ class AccountClassificationsTest extends TestCase
         $this->get(route('account-classifications.index'))->assertRedirect(route('login'));
     }
 
-    public function test_administrator_and_superadmin_can_open_the_page(): void
+    public function test_only_the_administrator_can_open_the_page(): void
     {
-        foreach ([$this->administrator(), $this->superadmin()] as $admin) {
-            $this->actingAs($admin)
-                ->get(route('account-classifications.index'))
-                ->assertOk()
-                ->assertSeeLivewire('account-classifications-table');
-        }
+        $this->actingAs($this->administrator())
+            ->get(route('account-classifications.index'))
+            ->assertOk()
+            ->assertSeeLivewire('account-classifications-table');
+
+        // The module belongs to the Administrator side, so a superadmin is
+        // refused exactly like any other non-administrator account.
+        $this->actingAs($this->superadmin())
+            ->get(route('account-classifications.index'))
+            ->assertNotFound();
     }
 
     public function test_staff_and_viewer_cannot_open_the_page(): void
@@ -69,16 +73,23 @@ class AccountClassificationsTest extends TestCase
 
         // Livewire's test harness renders the framework's error page for a
         // mount guard rather than throwing (see ApplicationSmokeTest), so the
-        // refusal is asserted on what came back.
-        $html = Livewire::actingAs($staff)->test('account-classifications-table')->html();
+        // refusal is asserted on what came back. A superadmin must be refused
+        // by the component itself, not only by the hidden menu item.
+        foreach ([$staff, $this->superadmin()] as $refused) {
+            $html = Livewire::actingAs($refused)->test('account-classifications-table')->html();
 
-        $this->assertStringContainsString('Page Not Found', $html);
+            $this->assertStringContainsString('Page Not Found', $html);
+        }
     }
 
-    public function test_sidebar_shows_the_item_for_admins_only(): void
+    public function test_sidebar_shows_the_item_for_the_administrator_only(): void
     {
         Livewire::actingAs($this->administrator())->test(Sidebar::class)
             ->assertSee('Account Classifications');
+
+        // A superadmin carries their own navigation; this item is not in it.
+        Livewire::actingAs($this->superadmin())->test(Sidebar::class)
+            ->assertDontSee('Account Classifications');
 
         Livewire::actingAs(User::factory()->create(['role' => 'user', 'is_superadmin' => false]))
             ->test(Sidebar::class)
@@ -95,11 +106,16 @@ class AccountClassificationsTest extends TestCase
             ->assertSee('Office Supplies Expenses,50203010,00,5020301000,PPAS 1', false);
     }
 
-    public function test_template_download_is_admin_only(): void
+    public function test_template_download_is_administrator_only(): void
     {
         $staff = User::factory()->create(['role' => 'user', 'is_superadmin' => false]);
 
         $this->actingAs($staff)
+            ->get(route('account-classifications.template'))
+            ->assertNotFound();
+
+        // The superadmin is refused here too — same gate as the module.
+        $this->actingAs($this->superadmin())
             ->get(route('account-classifications.template'))
             ->assertNotFound();
     }

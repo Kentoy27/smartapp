@@ -35,6 +35,7 @@ class UserMov extends Model
     protected $fillable = [
         'user_id',
         'mov_requirement_id',
+        'aip_plan_id',
         'original_name',
         'stored_path',
         'mime_type',
@@ -72,6 +73,16 @@ class UserMov extends Model
     public function requirement(): BelongsTo
     {
         return $this->belongsTo(MovRequirement::class, 'mov_requirement_id');
+    }
+
+    /**
+     * The approved AIP this document is the evidence for, when the upload was
+     * generated from one (see AipEditor::attachToMov()). Null for a document
+     * the person uploaded themselves.
+     */
+    public function aipPlan(): BelongsTo
+    {
+        return $this->belongsTo(AipPlan::class, 'aip_plan_id');
     }
 
     public function reviewer(): BelongsTo

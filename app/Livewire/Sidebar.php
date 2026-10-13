@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Models\AipPlan;
 use App\Models\MovCategory;
 use App\Models\MovPart;
 use App\Models\MovRequirement;
@@ -176,6 +177,12 @@ class Sidebar extends Component
     public ?int $opcrfCount = null;
 
     /**
+     * Number of AIP submissions still awaiting the superadmin's approval,
+     * shown as a live badge on the superadmin Review AIP item.
+     */
+    public ?int $aipCount = null;
+
+    /**
      * The navigation items, in the order they are listed.
      *
      * Role checks decide which items exist. Each item's section and order
@@ -204,15 +211,6 @@ class Sidebar extends Component
             'order' => 12,
         ];
 
-        $items[] = [
-            'label' => 'AIP',
-            'route' => 'aip.index',
-            'path' => 'aip',
-            'icon' => 'file-spreadsheet',
-            'section' => 'Files',
-            'order' => 13,
-        ];
-
         if (Auth::user()?->hasAdminAccess()) {
             $items[] = [
                 'label' => 'OPCRF',
@@ -220,6 +218,9 @@ class Sidebar extends Component
                 'path' => 'opcrf-review',
                 'icon' => 'eye',
                 'badge' => $this->opcrfCount,
+                // The badge's tooltip, per item — the wording is the item's
+                // own, not inferred from its path.
+                'badge_title' => '%d submissions to review',
                 'section' => 'Files',
                 'order' => 10,
             ];
@@ -234,6 +235,20 @@ class Sidebar extends Component
                 'order' => 11,
             ];
 
+            // Review AIP: the superadmin's queue of submitted Annual
+            // Implementation Plans. The badge counts the ones still awaiting
+            // the signed-in reviewer's own action (see aipCount).
+            $items[] = [
+                'label' => 'Review AIP',
+                'route' => 'aip.review',
+                'path' => 'aip-review',
+                'icon' => 'eye',
+                'badge' => $this->aipCount,
+                'badge_title' => '%d plans awaiting your review',
+                'section' => 'Files',
+                'order' => 13,
+            ];
+
             if (Auth::user()?->canManageUsersAndSchools()) {
                 $items[] = [
                     'label' => 'Users',
@@ -241,6 +256,7 @@ class Sidebar extends Component
                     'path' => 'users',
                     'icon' => 'users-round',
                     'badge' => $this->usersCount,
+                    'badge_title' => '%d accounts',
                     'section' => 'Admin',
                     'order' => 20,
                 ];
@@ -255,17 +271,20 @@ class Sidebar extends Component
                 ];
             }
 
-            // Account Classifications: the RCA / UACS master data. Available to
-            // every administrator (both the Administrator and the Super Admin),
-            // so it sits outside the users/schools-only block above.
-            $items[] = [
-                'label' => 'Account Classifications',
-                'route' => 'account-classifications.index',
-                'path' => 'account-classifications',
-                'icon' => 'file-text',
-                'section' => 'Admin',
-                'order' => 22,
-            ];
+            // Account Classifications: the RCA / UACS master data. It belongs
+            // to the Administrator side only — superadmins do not carry it in
+            // their own navigation, so it is gated on the same check as the
+            // Users / Districts items above.
+            if (Auth::user()?->canManageUsersAndSchools()) {
+                $items[] = [
+                    'label' => 'Account Classifications',
+                    'route' => 'account-classifications.index',
+                    'path' => 'account-classifications',
+                    'icon' => 'file-text',
+                    'section' => 'Admin',
+                    'order' => 22,
+                ];
+            }
         } else {
             // Opcrf is a staff-facing page: regular users only.
             $items[] = [
@@ -276,6 +295,21 @@ class Sidebar extends Component
                 'section' => 'Files',
                 'order' => 10,
             ];
+
+            // AIP is for the School Head (SH) role only — the school owns
+            // one Annual Implementation Plan per year, and the SH authors it.
+            // Hidden from the SDS Viewer, and unreachable by URL regardless
+            // (route guard).
+            if (Auth::user()?->canAccessAip()) {
+                $items[] = [
+                    'label' => 'AIP',
+                    'route' => 'aip.index',
+                    'path' => 'aip',
+                    'icon' => 'file-spreadsheet',
+                    'section' => 'Files',
+                    'order' => 13,
+                ];
+            }
 
             // The MOV checklist is its own page, deliberately not folded
             // into the OPCR upload: the checklist is the standing set of
@@ -625,6 +659,31 @@ class Sidebar extends Component
     }
 
     /**
+     * Fired the moment an AIP is submitted, and again once a decision lands
+     * — the superadmin's badge follows without a reload.
+     */
+    #[On('aip-plan-submitted')]
+    #[On('aip-plan-reviewed')]
+    public function refreshAipBadge(): void
+    {
+        if (Auth::user()?->hasAdminAccess()) {
+            $this->aipCount = $this->pendingAipPlans();
+        }
+    }
+
+    /**
+     * AIP submissions still awaiting the signed-in reviewer's own action.
+     */
+    private function pendingAipPlans(): int
+    {
+        $user = Auth::user();
+
+        return $user instanceof User
+            ? AipPlan::awaitingReviewFrom($user)->count()
+            : 0;
+    }
+
+    /**
      * Submissions still awaiting the signed-in superadmin's own action —
      * the current holder of the review step counts a row, not the original
      * reviewer it auto-routed onward from (Eve sees a forwarded submission
@@ -643,9 +702,11 @@ class Sidebar extends Component
         if (Auth::user()?->hasAdminAccess()) {
             $this->usersCount = User::count();
             $this->opcrfCount = $this->pendingSubmissions();
+            $this->aipCount = $this->pendingAipPlans();
         } else {
             $this->usersCount = null;
             $this->opcrfCount = null;
+            $this->aipCount = null;
         }
 
         return view('livewire.sidebar');

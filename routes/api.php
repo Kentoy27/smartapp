@@ -8,13 +8,14 @@ Route::get('/user', function (Illuminate\Http\Request $request) {
 })->middleware('auth:sanctum');
 
 /*
- * Account Classifications API — administrative master data.
+ * Account Classifications API — Administrator-only master data.
  *
  * These endpoints use the application's existing (session) authentication via
  * the `web` + `auth` middleware rather than a second token system, and each
- * action independently re-checks administrative access inside the controller
- * (guests get 401, signed-in non-administrators get 403). The `pageSize` query
- * parameter paginates the list; `search`, `status` and `sort` filter it.
+ * action independently re-checks access inside the controller: only the
+ * Administrator role may call them (guests get 401, everyone else — including
+ * superadmins — gets 403). The `pageSize` query parameter paginates the list;
+ * `search`, `status` and `sort` filter it.
  */
 Route::middleware(['web', 'auth'])->prefix('admin')->group(function () {
     Route::get('account-classifications', [AccountClassificationController::class, 'index']);

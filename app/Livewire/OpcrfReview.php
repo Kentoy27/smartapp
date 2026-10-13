@@ -3,6 +3,7 @@
 namespace App\Livewire;
 
 use App\Models\OpcrfMov;
+use App\Models\OpcrfReview as OpcrfReviewEntry;
 use App\Models\OpcrfSubmission;
 use App\Models\OpcrfSubmissionVersion;
 use App\Models\User;
@@ -381,6 +382,61 @@ class OpcrfReview extends Component
         if ($routeTo !== null) {
             $this->dispatch('opcrf-submission-forwarded');
         }
+    }
+
+    /**
+     * Compliance: the reviewer's FINAL sign-off. The submitted OPCRF is
+     * marked compliant exactly like an approve, but the review chain ends
+     * with this reviewer — the submission is never routed onward to the
+     * next superadmin. The trail records it as its own action
+     * (ACTION_COMPLIANCE_FINAL) so the history distinguishes a final
+     * sign-off from an approve that passed the submission on.
+     */
+    public function complianceSubmission(): void
+    {
+        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+
+        $submission = $this->reviewSubmission();
+
+        if ($submission === null) {
+            abort(403);
+        }
+
+        // Same act-guard as approve/return: only the superadmin currently
+        // holding the review step decides.
+        abort_unless($submission->isAssignedTo(Auth::user()), 403);
+
+        $remarks = trim($this->reviewRemarks) !== '' ? trim($this->reviewRemarks) : null;
+
+        // No onward routing: the final sign-off deliberately passes null, so
+        // the chain ends with the signed-in reviewer.
+        $submission->markCompliant(
+            Auth::user(),
+            $remarks,
+            null,
+            OpcrfReviewEntry::ACTION_COMPLIANCE_FINAL,
+        );
+
+        // The staff member's bell carries the decision; "finished" is true
+        // here because a final sign-off never routes onward.
+        $submission->user?->notify(new OpcrfDecided(
+            $submission,
+            Auth::user(),
+            $remarks,
+            false,
+        ));
+
+        $this->showReview = false;
+        $this->reviewId = null;
+        $this->reviewRemarks = '';
+        $this->resetValidation();
+
+        unset($this->submissions, $this->reviewSubmission, $this->reviewMovs, $this->reviewSheet, $this->reviewSheetRating, $this->reviewWorkbook, $this->reviewHistory);
+
+        $this->successMessage = 'OPCR marked compliant — final sign-off recorded.';
+
+        $this->dispatch('opcrf-submission-approved')->to(OpcrfMovs::class);
+        $this->dispatch('opcrf-submission-approved');
     }
 
     /**

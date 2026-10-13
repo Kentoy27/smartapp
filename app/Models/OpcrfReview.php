@@ -15,6 +15,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  *                'for_compliance', i.e. compliant as reviewed). If the
  *                workflow requires it, the compliant submission is then
  *                routed onward to the next superadmin (SY).
+ *   compliance_final — the reviewer's FINAL sign-off: the submission is
+ *                marked compliant and the review chain ends there — no
+ *                onward routing to the next superadmin.
  *   forward    — handed to the next superadmin without a final decision
  *                (status stays/becomes 'forwarded').
  *   return     — sent back to the staff member for revision (status →
@@ -25,6 +28,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class OpcrfReview extends Model
 {
     public const ACTION_COMPLIANCE = 'compliance';
+
+    public const ACTION_COMPLIANCE_FINAL = 'compliance_final';
 
     public const ACTION_FORWARD = 'forward';
 
@@ -75,6 +80,7 @@ class OpcrfReview extends Model
     {
         return match ($this->action) {
             self::ACTION_COMPLIANCE => 'Compliance / Approved',
+            self::ACTION_COMPLIANCE_FINAL => 'Compliance — Final Sign-off',
             self::ACTION_FORWARD => 'Forwarded',
             self::ACTION_RETURN => 'Returned for Revision',
             self::ACTION_RESUBMIT => 'Resubmitted',

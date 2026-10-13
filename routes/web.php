@@ -4,6 +4,7 @@ use App\Http\Controllers\Auth\GoogleAuthController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\DashboardController;
 use App\Models\User;
+use App\Support\AipXlsxExporter;
 use App\Support\MemXlsxExporter;
 use App\Support\OpcrfPartOne;
 use App\Support\OpcrfTemplatePersonalizer;
@@ -38,13 +39,114 @@ Route::get('/auth/google/callback', [GoogleAuthController::class, 'callback'])->
 Route::get('/home', [DashboardController::class, 'index'])->middleware('auth')->name('home');
 
 Route::middleware('auth')->group(function () {
+    /* ------------------------------------------------------------------
+     * Profile — the same page for every signed-in account.
+     *
+     * A digital signature belongs to an account rather than to a role, so a
+     * user and a superadmin manage theirs identically here; there is no
+     * separate "superadmin profile". The stored image lives on the private
+     * `local` disk and is only readable through the route below, which
+     * resolves the file from the caller's own row — no path is ever accepted
+     * from the client, so one account can never read another's signature.
+     * ----------------------------------------------------------------- */
+
+    Route::get('/profile', function () {
+        return view('profile.index');
+    })->name('profile.index');
+
+    Route::get('/profile/signature', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->hasSignature(), 404);
+
+        /** @var FilesystemAdapter $disk */
+        $disk = Storage::disk('local');
+
+        abort_unless($disk->exists($user->signature_path), 404);
+
+        $extension = strtolower(pathinfo((string) $user->signature_original_name, PATHINFO_EXTENSION));
+        $name = 'signature-'.$user->id.($extension !== '' ? '.'.$extension : '');
+
+        $response = $disk->response($user->signature_path, $name);
+
+        // The preview is shown inline in an <img>; a signature is personal
+        // data, so it must never be cached by a shared cache or kept in the
+        // browser's history as a downloadable file.
+        $response->headers->set(
+            'Content-Disposition',
+            $response->headers->makeDisposition(ResponseHeaderBag::DISPOSITION_INLINE, $name),
+        );
+
+        if ($user->signature_mime_type) {
+            $response->headers->set('Content-Type', $user->signature_mime_type);
+        }
+
+        $response->headers->set('Cache-Control', 'private, no-store, max-age=0');
+
+        return $response;
+    })->name('profile.signature');
+
     Route::get('/app', function () {
         return view('procurement.app.index');
     })->name('procurement.app.index');
 
+    /* ------------------------------------------------------------------
+     * AIP (Annual Implementation Plan) — School Head authoring, Superadmin
+     * review.
+     *
+     * Every AIP route re-checks the role AND, for a plan's own pages, that
+     * the caller may see it (the owning School Head always; a reviewer once
+     * it is submitted). The Livewire components re-check the same gates on
+     * every action, so hiding a menu item is never the boundary.
+     * ----------------------------------------------------------------- */
+
     Route::get('/aip', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canAccessAip(), 404);
+
         return view('aip.index');
     })->name('aip.index');
+
+    // The superadmin's review queue. Declared before /aip/{plan} so the
+    // literal path is never read as a plan id (it would not match [0-9]+
+    // anyway, but the order makes the intent explicit).
+    Route::get('/aip-review', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->hasAdminAccess(), 404);
+
+        return view('aip.review');
+    })->name('aip.review');
+
+    Route::get('/aip/{plan}', function (App\Models\AipPlan $plan) {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $plan->managedBy($user), 404);
+
+        return view('aip.edit', ['plan' => $plan]);
+    })->name('aip.plans.edit')->where('plan', '[0-9]+');
+
+    // The plan as the printed DepEd form, for the browser's Print → Save as
+    // PDF. The owner may print their own at any time; a reviewer may print
+    // one that has been submitted.
+    Route::get('/aip/{plan}/print', function (App\Models\AipPlan $plan) {
+        $user = Auth::user();
+        abort_unless($plan->canBeViewedBy($user), 404);
+
+        return view('aip.print', ['plan' => $plan]);
+    })->name('aip.plans.print')->where('plan', '[0-9]+');
+
+    // The plan as an .xlsx built from its own contents. Bytes are built
+    // BEFORE the response (a streamed callback's return value is discarded
+    // and would risk a 0-byte download).
+    Route::get('/aip/{plan}/export', function (App\Models\AipPlan $plan) {
+        $user = Auth::user();
+        abort_unless($plan->canBeViewedBy($user), 404);
+
+        $bytes = AipXlsxExporter::bytes($plan, $user);
+
+        return response($bytes)
+            ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            ->header('Content-Length', (string) strlen($bytes))
+            ->header('Content-Disposition', 'attachment; filename="'.AipXlsxExporter::downloadName($plan).'"');
+    })->name('aip.plans.export')->where('plan', '[0-9]+');
 
     Route::get('/users', function () {
         $user = Auth::user();
@@ -66,11 +168,13 @@ Route::middleware('auth')->group(function () {
 
     // ACCOUNT CLASSIFICATIONS: the master data behind the RCA / UACS reference
     // table (Account Title, RCA Code, UACS Sub-Object / Object Code, Covering
-    // PPAS). Administrative only — the component re-checks the same gate on
-    // every create/update/delete, so hiding the menu item is not the boundary.
+    // PPAS). Administrator-only — this master data belongs to the Administrator
+    // side, so a superadmin gets the same 404 a non-admin would. The component
+    // re-checks the same gate on every create/update/delete, so hiding the menu
+    // item is never the boundary.
     Route::get('/admin/account-classifications', function () {
         $user = Auth::user();
-        abort_unless($user instanceof User && $user->hasAdminAccess(), 404);
+        abort_unless($user instanceof User && $user->canManageUsersAndSchools(), 404);
 
         return view('account-classifications.index');
     })->name('account-classifications.index');
@@ -80,7 +184,7 @@ Route::middleware('auth')->group(function () {
     // Same administrative gate as the module itself.
     Route::get('/admin/account-classifications/template', function () {
         $user = Auth::user();
-        abort_unless($user instanceof User && $user->hasAdminAccess(), 404);
+        abort_unless($user instanceof User && $user->canManageUsersAndSchools(), 404);
 
         $csv = implode("\n", [
             'Account Title,RCA Code,UACS Sub-Object Code,UACS Object Code,Covering PPAS',

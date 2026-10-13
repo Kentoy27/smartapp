@@ -12,9 +12,10 @@ use Illuminate\Support\Facades\Auth;
 /**
  * Account Classification master-data API.
  *
- * Administrative only. Every endpoint re-checks the caller's access with the
- * application's own rule (User::hasAdminAccess()) rather than trusting
- * anything the client sent, and answers 403 to a signed-in non-administrator
+ * Administrator-only master data: superadmins do not manage it. Every endpoint
+ * re-checks the caller's access with the application's own rule
+ * (User::canManageUsersAndSchools()) rather than trusting anything the client
+ * sent, and answers 403 to anyone else — a superadmin or a regular user alike
  * (the `auth` middleware answers 401 to a guest before we get here).
  */
 class AccountClassificationController extends Controller
@@ -249,6 +250,6 @@ class AccountClassificationController extends Controller
 
     private function authorizeAdmin(): void
     {
-        abort_unless(Auth::user()?->hasAdminAccess(), 403);
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 403);
     }
 }

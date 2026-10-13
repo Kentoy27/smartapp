@@ -270,7 +270,10 @@
                             @if ($this->reviewSubmission()->isAssignedTo(auth()->user()))
                                 <p class="opcrf-review-card-desc">
                                     Review the submission and choose an appropriate action.
-                                    Add remarks when necessary.
+                                    Add remarks when necessary. <strong>Approve</strong> marks it
+                                    compliant and routes it onward to the next reviewer;
+                                    <strong>Compliance</strong> is a final sign-off that ends the
+                                    chain with you.
                                 </p>
 
                                 <label for="opcrfReviewRemarks">Remarks / Comments</label>
@@ -299,13 +302,26 @@
                                     </button>
                                     <button
                                         type="button"
+                                        class="btn-ghost"
+                                        wire:click="complianceSubmission"
+                                        wire:loading.attr="disabled"
+                                        wire:target="complianceSubmission"
+                                        title="Final sign-off: mark compliant and end the review chain here (no onward routing)"
+                                    >
+                                        <x-icon name="check-circle" :size="14" />
+                                        <span wire:loading.remove wire:target="complianceSubmission">Compliance</span>
+                                        <span wire:loading wire:target="complianceSubmission">Saving…</span>
+                                    </button>
+                                    <button
+                                        type="button"
                                         class="btn-primary"
                                         wire:click="approveSubmission"
                                         wire:loading.attr="disabled"
                                         wire:target="approveSubmission"
+                                        title="Mark compliant and route onward to the next reviewer"
                                     >
                                         <x-icon name="shield" :size="14" />
-                                        <span wire:loading.remove wire:target="approveSubmission">Approve / Compliance</span>
+                                        <span wire:loading.remove wire:target="approveSubmission">Approve</span>
                                         <span wire:loading wire:target="approveSubmission">Saving…</span>
                                     </button>
                                 </div>

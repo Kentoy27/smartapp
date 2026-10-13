@@ -46,9 +46,7 @@
                     @isset($item['badge'])
                         <span
                             class="nav-badge"
-                            title="{{ $item['path'] === 'opcrf-review'
-                                ? $item['badge'].' submissions to review'
-                                : $item['badge'].' accounts' }}"
+                    title="{{ sprintf($item['badge_title'] ?? '%d', $item['badge']) }}"
                         >{{ $item['badge'] }}</span>
                     @endisset
 
@@ -104,9 +102,7 @@
                 @isset($item['badge'])
                     <span
                         class="nav-badge"
-                        title="{{ $item['path'] === 'opcrf-review'
-                            ? $item['badge'].' submissions to review'
-                            : $item['badge'].' accounts' }}"
+                        title="{{ sprintf($item['badge_title'] ?? '%d', $item['badge']) }}"
                     >{{ $item['badge'] }}</span>
                 @endisset
             </a>
