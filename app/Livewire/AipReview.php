@@ -257,6 +257,26 @@ class AipReview extends Component
 
     /** Fired when an owner submits a plan — the table re-renders live. */
     #[On('aip-plan-submitted')]
+    public function deletePlan(int $planId): void
+    {
+        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+
+        $plan = AipPlan::query()->visibleTo(Auth::user())->find($planId);
+        if ($plan === null) {
+            return;
+        }
+
+        $plan->delete();
+
+        unset($this->plans);
+        $this->successMessage = 'AIP deleted.';
+
+        if ($this->reviewId === $planId) {
+            $this->closeReview();
+        }
+    }
+
+    #[On('aip-plan-submitted')]
     public function refreshPlans(): void
     {
         unset($this->plans);
