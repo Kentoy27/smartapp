@@ -78,8 +78,7 @@ class DashboardLiveTest extends TestCase
             ->assertSee('Financial plan')
             ->assertSee('Download OPCRF Template')
             ->assertSee('Upload Completed OPCRF')
-            ->assertSee('Upload WFP')
-            ->assertSee(route('wfp.template'), false)
+            ->assertSee('Generate and Download WFP')
             ->assertSee(route('wfp.index'), false);
     }
 

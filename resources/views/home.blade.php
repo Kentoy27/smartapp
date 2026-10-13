@@ -26,6 +26,11 @@
 
     @if ($user->hasAdminAccess())
         <livewire:opcrf-analytics />
+
+        {{-- Every school's uploaded Work and Financial Plan — the other
+             half of the WfpUpload flow on /wfp, listed here so the
+             superadmin sees who has handed their plan in. --}}
+        <livewire:wfp-uploads-list />
     @else
         <div class="staff-dashboard-grid{{ $wfpTemplate !== null ? ' has-wfp' : '' }}">
             <section class="staff-dashboard-panel" aria-labelledby="dashboard-opcrf-heading">
@@ -48,7 +53,7 @@
                         <span class="staff-dashboard-panel__step">02</span>
                         <div>
                             <h2 id="dashboard-wfp-heading">Financial plan</h2>
-                            <p>Upload and review your school’s WFP workbook.</p>
+                            <p>Generate and download your school’s WFP workbook.</p>
                         </div>
                     </div>
 
@@ -64,11 +69,7 @@
                         </div>
                         <p class="dashboard-plan-card__description">{{ $wfpTemplate['description'] }}</p>
                         <div class="dashboard-plan-card__actions">
-                            <a href="{{ route('wfp.template') }}" class="opcr-download-btn" download>
-                                <x-icon name="download" :size="16" />
-                                <span>Download</span>
-                            </a>
-                            <livewire:wfp-upload :key="'wfp-upload-card'" />
+                            <livewire:wfp-generate-button :key="'wfp-generate-card'" />
                         </div>
                         <a href="{{ route('wfp.index') }}" class="dashboard-plan-card__link" wire:navigate>
                             Open WFP workspace <span aria-hidden="true">→</span>

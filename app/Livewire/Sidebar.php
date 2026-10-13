@@ -51,13 +51,14 @@ class Sidebar extends Component
     {
         abort_unless(Auth::check(), 404);
 
-        // The WFP group opens on arrival: its two pages — the plan and the
-        // Monthly Expenditure Matrix it is generated from — are one click
-        // away rather than hidden behind a disclosure to find first. It
-        // collapses like any other group once the reader says so.
+        // The WFP group opens on arrival: its three pages — the Monthly
+        // Expenditure Matrix, the plan generated from it, and the annual
+        // allotment report it adds up to — are one click away rather than
+        // hidden behind a disclosure to find first. It collapses like any
+        // other group once the reader says so.
         $this->openGroups['wfp'] = true;
 
-        if (! request()->routeIs('mov.index')) {
+        if (!request()->routeIs('mov.index')) {
             return;
         }
 
@@ -73,8 +74,8 @@ class Sidebar extends Component
         // everything, so the dropdown points at "All" too.
         $this->movSection = $requested === null || $requested === ''
             || MovCategory::query()->active()->whereKey($requested)->exists()
-                ? (string) ($requested ?? 'all')
-                : 'all';
+            ? (string) ($requested ?? 'all')
+            : 'all';
 
         // The MOV the URL is on (`/movs?mov=101`), which is how the tree
         // marks the line the page is showing. A requirement that is not on
@@ -83,8 +84,8 @@ class Sidebar extends Component
 
         $this->movFocus = $requestedMov !== null && $requestedMov !== ''
             && MovRequirement::query()->active()->whereKey($requestedMov)->exists()
-                ? (string) $requestedMov
-                : null;
+            ? (string) $requestedMov
+            : null;
 
         if ($this->movFocus !== null) {
             $requirement = MovRequirement::query()
@@ -95,7 +96,7 @@ class Sidebar extends Component
             if ($requirement?->category?->part !== null) {
                 $partId = $requirement->category->part->id;
                 $this->movOpenParts[$partId] = true;
-                $this->movOpenCategories[$partId.':'.$requirement->category->id] = true;
+                $this->movOpenCategories[$partId . ':' . $requirement->category->id] = true;
 
                 if ($requirement->kra_label !== null && trim($requirement->kra_label) !== '') {
                     $this->movOpenKras[$this->kraNodeKey($requirement->category->id, $requirement->kra_label)] = true;
@@ -328,12 +329,16 @@ class Sidebar extends Component
                 'children' => $this->movTree(),
             ];
 
+            // Account Classifications is an administrative page (see the
+            // hasAdminAccess() branch above), so it is not offered to staff.
+
             // WFP is for the School Head (SH) role only — hidden from the
             // SDS Viewer, and unreachable by URL regardless (route guard).
-            // It is one workflow on two pages, so it is one group: the plan
-            // itself and the Monthly Expenditure Matrix it is generated
-            // from. Both are plain links one level down (no tree of their
-            // own), and the group opens by default (see mount()).
+            // It is one workflow on three pages, so it is one group: the
+            // matrix the lines are entered in, the plan generated from them,
+            // and the annual allotment report they add up to. All three are
+            // plain links one level down (no tree of their own), and the
+            // group opens by default (see mount()).
             if (Auth::user()?->canAccessWfp()) {
                 $items[] = [
                     'label' => 'WFP',
@@ -359,6 +364,17 @@ class Sidebar extends Component
                             'title' => 'The source of truth the WFP is generated from',
                             'url' => route('wfp.matrices.index'),
                             'route' => 'wfp.matrices.*',
+                        ],
+                        // The report the matrices add up to: the year's lines
+                        // rolled up per account code, as the printed form. It
+                        // sits last because it is what the two pages above it
+                        // produce.
+                        [
+                            'key' => 'wfp-line-items',
+                            'label' => 'Per Line Item Expenditure',
+                            'title' => 'Your school\'s annual MOOE allotment, allocated per line item or object of expenditure',
+                            'url' => route('wfp.lineitems.index'),
+                            'route' => 'wfp.lineitems.*',
                         ],
                     ],
                 ];
@@ -416,7 +432,7 @@ class Sidebar extends Component
         if (str_starts_with($node, 'category-')) {
             $segments = explode('-', substr($node, 9));
 
-            $this->toggleKey($this->movOpenCategories, ($segments[0] ?? '').':'.($segments[1] ?? ''));
+            $this->toggleKey($this->movOpenCategories, ($segments[0] ?? '') . ':' . ($segments[1] ?? ''));
 
             return;
         }
@@ -466,7 +482,7 @@ class Sidebar extends Component
 
         $parts = MovPart::query()
             ->active()
-            ->with(['categories' => fn ($query) => $query->active()->with(['requirements' => fn ($q) => $q->active()])])
+            ->with(['categories' => fn($query) => $query->active()->with(['requirements' => fn($q) => $q->active()])])
             ->orderBy('part_order')
             ->orderBy('id')
             ->get();
@@ -504,13 +520,13 @@ class Sidebar extends Component
                     $categoryDone += $own->isEmpty() ? 0 : 1;
 
                     $mov = [
-                        'key' => 'mov-'.$requirement->id,
+                        'key' => 'mov-' . $requirement->id,
                         'section' => (string) $requirement->id,
                         'label' => $requirement->label(),
                         'hint' => $requirement->title,
                         // A MOV number means nothing on its own in a list
                         // this deep, so the tooltip carries the whole trail.
-                        'title' => $requirement->trail().' — '.$requirement->title,
+                        'title' => $requirement->trail() . ' — ' . $requirement->title,
                         'url' => route('mov.index', ['mov' => $requirement->id]),
                         'status' => $status['key'],
                         'status_label' => $status['label'],
@@ -529,12 +545,12 @@ class Sidebar extends Component
 
                     $kraKey = $this->kraNodeKey($category->id, $kraLabel);
 
-                    if (! isset($kraGroups[$kraKey])) {
+                    if (!isset($kraGroups[$kraKey])) {
                         $kraGroups[$kraKey] = [
                             'key' => $kraKey,
                             'section' => null,
                             'label' => $kraLabel,
-                            'title' => $category->trail().' → '.$kraLabel,
+                            'title' => $category->trail() . ' → ' . $kraLabel,
                             'meta' => '0/0',
                             'open' => isset($this->movOpenKras[$kraKey]),
                             'children' => [],
@@ -544,7 +560,7 @@ class Sidebar extends Component
 
                     $kraGroups[$kraKey]['children'][] = $mov;
                     $kraGroups[$kraKey]['done'] += $own->isEmpty() ? 0 : 1;
-                    $kraGroups[$kraKey]['meta'] = $kraGroups[$kraKey]['done'].'/'.count($kraGroups[$kraKey]['children']);
+                    $kraGroups[$kraKey]['meta'] = $kraGroups[$kraKey]['done'] . '/' . count($kraGroups[$kraKey]['children']);
                 }
 
                 $movs = array_merge(array_values($kraGroups), $movs);
@@ -555,15 +571,15 @@ class Sidebar extends Component
                 $partDone += $categoryDone;
 
                 $categories[] = [
-                    'key' => 'category-'.$part->id.'-'.$category->id,
+                    'key' => 'category-' . $part->id . '-' . $category->id,
                     'section' => (string) $category->id,
                     'label' => $category->name,
                     'title' => $category->trail(),
                     // The letter alone is ambiguous this deep; the trail says
                     // where it sits, and the count says how far it is.
-                    'meta' => $categoryDone.'/'.$categoryTotal,
+                    'meta' => $categoryDone . '/' . $categoryTotal,
                     'url' => route('mov.index', ['category' => $category->id]),
-                    'open' => isset($this->movOpenCategories[$part->id.':'.$category->id]),
+                    'open' => isset($this->movOpenCategories[$part->id . ':' . $category->id]),
                     'children' => $movs,
                 ];
             }
@@ -574,11 +590,11 @@ class Sidebar extends Component
             }
 
             $tree[] = [
-                'key' => 'part-'.$part->id,
+                'key' => 'part-' . $part->id,
                 'section' => null,
                 'label' => $part->name,
                 'title' => $part->name,
-                'meta' => $partDone.'/'.$partTotal,
+                'meta' => $partDone . '/' . $partTotal,
                 'open' => isset($this->movOpenParts[$part->id]),
                 'children' => $categories,
             ];
@@ -589,7 +605,7 @@ class Sidebar extends Component
 
     private function kraNodeKey(int $categoryId, string $kraLabel): string
     {
-        return 'kra-'.$categoryId.'-'.sha1($kraLabel);
+        return 'kra-' . $categoryId . '-' . sha1($kraLabel);
     }
 
     /**

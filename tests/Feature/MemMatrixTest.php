@@ -199,7 +199,7 @@ class MemMatrixTest extends TestCase
             ->set('lineForm.activity_description', 'Procure supplies')
             ->set('lineForm.quantity', '10')
             ->set('lineForm.unit_cost', '250')
-            ->call('addLineFromModal')
+            ->call('saveLineFromModal')
             ->assertSet('showLineModal', false)
             ->assertHasNoErrors();
 
@@ -230,7 +230,7 @@ class MemMatrixTest extends TestCase
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
             ->call('openLineModal')
             ->set('lineForm.quantity', '5')
-            ->call('addLineFromModal')
+            ->call('saveLineFromModal')
             ->assertHasErrors(['lineForm.activity_description'])
             ->assertSet('showLineModal', true);
     }
@@ -249,6 +249,44 @@ class MemMatrixTest extends TestCase
             ->call('openLineModal', 'operations')
             ->assertSet('lineSection', 'operations')
             ->assertSet('lineForm.activity_description', '');
+    }
+
+    public function test_an_existing_line_is_edited_through_the_same_modal(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        $component = Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('addRow')
+            ->set('items.0.activity_description', 'Old description')
+            ->set('items.0.quantity', '1')
+            ->set('items.0.unit_cost', '10');
+
+        $key = $component->get('items.0._key');
+
+        $component->call('openEditModal', $key)
+            ->assertSet('showLineModal', true)
+            ->assertSet('editingKey', $key)
+            // The modal opens pre-filled with the line's current values.
+            ->assertSet('lineForm.activity_description', 'Old description')
+            ->set('lineForm.activity_description', 'New description')
+            ->set('lineForm.quantity', '4')
+            ->set('lineForm.unit_cost', '25')
+            ->call('saveLineFromModal')
+            ->assertSet('showLineModal', false)
+            ->assertSet('editingKey', null)
+            // Edited in place: still one line, not a new one appended.
+            ->assertCount('items', 1)
+            ->assertSet('items.0.activity_description', 'New description')
+            ->call('saveDraft')
+            ->assertHasNoErrors();
+
+        $this->assertSame(1, MonthlyExpenditureItem::count());
+
+        $item = MonthlyExpenditureItem::firstOrFail();
+
+        $this->assertSame('New description', $item->activity_description);
+        $this->assertEquals(100.0, (float) $item->calculated_total);
     }
 
     public function test_the_account_picker_fills_the_modal_form(): void

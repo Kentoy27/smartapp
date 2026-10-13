@@ -84,6 +84,9 @@ class AccountClassificationsTest extends TestCase
 
     public function test_sidebar_shows_the_item_for_the_administrator_only(): void
     {
+        // The menu entry is administrative: the master data behind the RCA /
+        // UACS reference table. Both admin roles are offered it; staff are
+        // not (the page itself is gated the same way).
         Livewire::actingAs($this->administrator())->test(Sidebar::class)
             ->assertSee('Account Classifications');
 
@@ -354,13 +357,13 @@ class AccountClassificationsTest extends TestCase
 
         // Show.
         $this->actingAs($admin)
-            ->getJson('/api/admin/account-classifications/'.$created['id'])
+            ->getJson('/api/admin/account-classifications/' . $created['id'])
             ->assertOk()
             ->assertJsonPath('data.account_title', 'Office Supplies Expenses');
 
         // Update.
         $this->actingAs($admin)
-            ->putJson('/api/admin/account-classifications/'.$created['id'], [
+            ->putJson('/api/admin/account-classifications/' . $created['id'], [
                 'account_title' => 'Office Supplies Expense',
                 'rca_code' => '50203010',
                 'uacs_sub_object_code' => '00',
@@ -371,7 +374,7 @@ class AccountClassificationsTest extends TestCase
 
         // Delete = soft delete.
         $this->actingAs($admin)
-            ->deleteJson('/api/admin/account-classifications/'.$created['id'])
+            ->deleteJson('/api/admin/account-classifications/' . $created['id'])
             ->assertOk()
             ->assertJsonPath('data.is_active', false);
 
@@ -382,7 +385,7 @@ class AccountClassificationsTest extends TestCase
 
         // Reactivate.
         $this->actingAs($admin)
-            ->postJson('/api/admin/account-classifications/'.$created['id'].'/activate')
+            ->postJson('/api/admin/account-classifications/' . $created['id'] . '/activate')
             ->assertOk()
             ->assertJsonPath('data.is_active', true);
     }
@@ -520,12 +523,14 @@ class AccountClassificationsTest extends TestCase
 
         $this->actingAs($staff)
             ->postJson('/api/admin/account-classifications/import', [
-                'rows' => [[
-                    'account_title' => 'Nope',
-                    'rca_code' => '1',
-                    'uacs_sub_object_code' => '0',
-                    'uacs_object_code' => '10',
-                ]],
+                'rows' => [
+                    [
+                        'account_title' => 'Nope',
+                        'rca_code' => '1',
+                        'uacs_sub_object_code' => '0',
+                        'uacs_object_code' => '10',
+                    ]
+                ],
             ])
             ->assertForbidden();
 
