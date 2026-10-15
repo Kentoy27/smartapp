@@ -5,7 +5,7 @@
 @section('content')
     <div class="page-header">
         <h1>Opcrf</h1>
-        <p>Each Part of the OPCRF opens on its own schedule. A locked Part is still listed, with when it opens — nothing here is hidden from you.</p>
+        <p>Part 1 has its own schedule. Parts 2, 3, and 4 open together during the end-of-year term. Submitted work remains saved and available after the deadline.</p>
     </div>
 
     {{-- THE PARTS GRID: one card per OPCRF Part, state computed on the

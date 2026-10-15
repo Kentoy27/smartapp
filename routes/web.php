@@ -56,6 +56,8 @@ Route::middleware('auth')->group(function () {
      * `local` disk and is only readable through the route below, which
      * resolves the file from the caller's own row — no path is ever accepted
      * from the client, so one account can never read another's signature.
+     * (The one deliberate second reader is a reviewer: an OPCRF submission
+     * shows its ratee's signature through the submission's own route.)
      * ----------------------------------------------------------------- */
 
     Route::get('/profile', function () {
@@ -66,31 +68,10 @@ Route::middleware('auth')->group(function () {
         $user = Auth::user();
         abort_unless($user instanceof User && $user->hasSignature(), 404);
 
-        /** @var FilesystemAdapter $disk */
-        $disk = Storage::disk('local');
-
-        abort_unless($disk->exists($user->signature_path), 404);
-
-        $extension = strtolower(pathinfo((string) $user->signature_original_name, PATHINFO_EXTENSION));
-        $name = 'signature-' . $user->id . ($extension !== '' ? '.' . $extension : '');
-
-        $response = $disk->response($user->signature_path, $name);
-
-        // The preview is shown inline in an <img>; a signature is personal
-        // data, so it must never be cached by a shared cache or kept in the
-        // browser's history as a downloadable file.
-        $response->headers->set(
-            'Content-Disposition',
-            $response->headers->makeDisposition(ResponseHeaderBag::DISPOSITION_INLINE, $name),
-        );
-
-        if ($user->signature_mime_type) {
-            $response->headers->set('Content-Type', $user->signature_mime_type);
-        }
-
-        $response->headers->set('Cache-Control', 'private, no-store, max-age=0');
-
-        return $response;
+        // The account's own file, via the account: the headers (inline, no
+        // shared caching) and the row-only path rule live in
+        // User::signatureImageResponse(), shared with the OPCRF route below.
+        return $user->signatureImageResponse();
     })->name('profile.signature');
 
     Route::get('/app', function () {
@@ -217,12 +198,16 @@ Route::middleware('auth')->group(function () {
 
     // One OPCRF Part. Guarded server-side by the schedule: a Part outside its
     // access window (not yet open, closed, or disabled) redirects back to the
-    // grid with the reason, and a Part already submitted stays readable after
-    // the deadline passes. Part 1 carries the form; 2-4 open on their own
+    // grid with the reason, and a Part already submitted stays reachable after
+    // the deadline passes. Part 1 access opens the dashboard, where the user
+    // can download their personalized template; Parts 2-4 open on their own
     // schedules.
     Route::get('/opcrf/part/{part}', function (int $part) {
+        if ($part === OpcrfSchedule::PART_ONE) {
+            return redirect()->route('home');
+        }
+
         $blurbs = [
-            1 => 'Your commitments, targets and accomplishments — pre-filled with your registered details.',
             2 => 'Leadership and core behavioural competencies.',
             3 => 'The summary of ratings and the agreement block.',
             4 => 'The office improvement plan and your individual development plan.',
@@ -284,11 +269,13 @@ Route::middleware('auth')->group(function () {
         abort_if($user->hasAdminAccess(), 404);
         abort_unless(is_file(OpcrfPartOne::templatePath()), 404);
 
-        // The personalized template IS Part 1, so it answers to Part 1's
-        // schedule. Re-checked here, on the server: the dashboard's button is
-        // only a convenience, and a staff member outside Part 1's window must
-        // not be able to fetch the form by typing the URL.
-        if (!OpcrfAccess::canAccess($user, OpcrfSchedule::PART_ONE)) {
+        // The full workbook is also needed during the shared Parts 2–4 term.
+        // Re-check both entry points here; the dashboard and Part pages are
+        // only conveniences, not authorization boundaries.
+        $partOneAccessible = OpcrfAccess::canAccess($user, OpcrfSchedule::PART_ONE);
+        $includeAllParts = OpcrfPartOne::fullTemplateAvailable();
+
+        if (! $partOneAccessible && ! $includeAllParts) {
             $state = OpcrfAccess::partState($user, OpcrfSchedule::PART_ONE);
 
             return redirect()
@@ -304,7 +291,7 @@ Route::middleware('auth')->group(function () {
             // The bytes are built before the response is created: a streamed
             // callback must echo its output (its return value is ignored),
             // and anything else risks an empty 0-byte download.
-            $bytes = OpcrfTemplatePersonalizer::personalizeFor($user);
+            $bytes = OpcrfTemplatePersonalizer::personalizeFor($user, $includeAllParts);
         } catch (RuntimeException $e) {
             // The shipped template is missing or unreadable: say so rather
             // than serving a 0-byte workbook the user cannot open.
@@ -329,13 +316,15 @@ Route::middleware('auth')->group(function () {
     // fetch their own once it is approved — the stored file is then the
     // official approved copy.
     //
-    // The response is ALWAYS the literal file the staff member uploaded (or
-    // the corrected copy the superadmin attached while approving) — never a
-    // sheet synthesized from the recorded fields: that would hand the
-    // reviewer a plain stand-in instead of the actual OPCRF. Submissions
-    // that predate file archiving (or were typed by hand) have no original
-    // document, so the route 404s and the review modal says so — the
-    // approval panel is where the official copy is attached.
+    // The response is ALWAYS the staff member's own workbook (or the copy the
+    // superadmin attached while approving) — never a sheet synthesized from the
+    // recorded fields: that would hand the reviewer a plain stand-in instead of
+    // the actual OPCRF. When the submission has a signature-stamped copy of
+    // that workbook, the stamped one is what comes back: the account's digital
+    // signature is encoded into it, and that is the document the review is
+    // about. Submissions that predate file archiving (or were typed by hand)
+    // have no original document, so the route 404s and the review modal says so
+    // — the approval panel is where the official copy is attached.
     Route::get('/opcrf-submissions/{submission}/download', function (OpcrfSubmission $submission) {
         $user = Auth::user();
 
@@ -346,7 +335,7 @@ Route::middleware('auth')->group(function () {
         abort_unless($submission->canBeDownloadedBy($user), 404);
         abort_unless($submission->hasFile(), 404);
 
-        $storedPath = Storage::disk('local')->path($submission->file_path);
+        $storedPath = Storage::disk('local')->path((string) $submission->downloadPath());
 
         // The owner's official copy follows the same part rule as their
         // template: Part I only until the school year's final term. The
@@ -375,6 +364,51 @@ Route::middleware('auth')->group(function () {
             ->header('Content-Length', (string) strlen($bytes))
             ->header('Content-Disposition', 'attachment; filename="' . $submission->fileDownloadName() . '"');
     })->name('opcrf.submission.download')->where('submission', '[0-9]+');
+
+    // The ratee's digital signature, for the signer block the review modal
+    // renders: the same account signature the stamped workbook carries, shown
+    // where the document signs. The boundary is the workbook's own — whoever
+    // may download the stamped copy may see the signature it encodes, and
+    // nobody else — and it is served only while that stamped copy exists, so
+    // a signature is never readable on its own.
+    Route::get('/opcrf-submissions/{submission}/signature', function (OpcrfSubmission $submission) {
+        $user = Auth::user();
+
+        if (!$user instanceof User) {
+            abort(404);
+        }
+
+        abort_unless($submission->canBeDownloadedBy($user), 404);
+        abort_unless($submission->hasSignedFile(), 404);
+
+        $ratee = $submission->user;
+        abort_unless($ratee instanceof User && $ratee->hasSignature(), 404);
+
+        return $ratee->signatureImageResponse();
+    })->name('opcrf.submission.signature')->where('submission', '[0-9]+');
+
+    // A reviewer signature can only be fetched for a compliance action on
+    // this submission, by an administrator allowed to review the workbook.
+    Route::get('/opcrf-submissions/{submission}/review-signature/{review}', function (
+        OpcrfSubmission $submission,
+        \App\Models\OpcrfReview $review
+    ) {
+        $viewer = Auth::user();
+
+        abort_unless($viewer instanceof User && $viewer->hasAdminAccess(), 404);
+        abort_unless($submission->canBeReviewedBy($viewer), 404);
+        abort_unless((int) $review->opcrf_submission_id === (int) $submission->id, 404);
+        abort_unless(in_array($review->action, [
+            \App\Models\OpcrfReview::ACTION_COMPLIANCE,
+            \App\Models\OpcrfReview::ACTION_COMPLIANCE_FINAL,
+        ], true), 404);
+        abort_unless($submission->hasSignedFile(), 404);
+
+        $reviewer = $review->reviewer;
+        abort_unless($reviewer instanceof User && $reviewer->hasSignature(), 404);
+
+        return $reviewer->signatureImageResponse();
+    })->name('opcrf.review.signature')->where(['submission' => '[0-9]+', 'review' => '[0-9]+']);
 
     // MOV evidence files. The owner always downloads their own; a superadmin
     // only for submissions routed to them (or unassigned ones) — routing is

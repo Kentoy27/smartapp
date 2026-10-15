@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Notifications\OpcrfReturned;
+use App\Support\OpcrfSignatureStamper;
 use App\Support\OpcrfTemplatePersonalizer;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -55,6 +56,7 @@ class OpcrfSubmission extends Model
         'file_path',
         'file_original_name',
         'file_updated_at',
+        'signed_file_path',
         'approved_at',
         'approved_by',
         'reviewer_id',
@@ -202,6 +204,10 @@ class OpcrfSubmission extends Model
             if ($submission->file_path !== null) {
                 Storage::disk('local')->delete($submission->file_path);
             }
+
+            if ($submission->signed_file_path !== null) {
+                Storage::disk('local')->delete($submission->signed_file_path);
+            }
         });
     }
 
@@ -251,6 +257,249 @@ class OpcrfSubmission extends Model
     {
         return $this->file_path !== null
             && Storage::disk('local')->exists($this->file_path);
+    }
+
+    /**
+     * Does this submission carry the signature-stamped copy of that workbook —
+     * the one with the account's digital signature encoded into the signer
+     * block at the bottom of every part that has one?
+     */
+    public function hasSignedFile(): bool
+    {
+        return $this->signed_file_path !== null
+            && $this->signed_file_path !== ''
+            && Storage::disk('local')->exists($this->signed_file_path);
+    }
+
+    /**
+     * The stored workbook a download should serve: the stamped copy when there
+     * is one, otherwise the file exactly as the staff member uploaded it, and
+     * null when neither is on disk.
+     */
+    public function downloadPath(): ?string
+    {
+        if ($this->hasSignedFile()) {
+            return $this->signed_file_path;
+        }
+
+        return $this->file_path !== null && $this->file_path !== '' ? $this->file_path : null;
+    }
+
+    /**
+     * The ratee's digital signature, as the review's signer block shows it:
+     * where the image is fetched from, and whose signature it is.
+     *
+     * Only when this submission carries the stamped workbook the signature
+     * was encoded into. That is what keeps the on-screen form and the file in
+     * step: the signature shows exactly while the document the reviewer may
+     * download carries it, while a submission filed without one (or whose
+     * stamp could not be written) shows its printed names alone — just like
+     * the bytes it serves.
+     *
+     * @return array{url: string, name: string}|null
+     */
+    public function rateeSignature(): ?array
+    {
+        $owner = $this->user;
+
+        if (! $this->hasSignedFile() || $owner === null || ! $owner->hasSignature()) {
+            return null;
+        }
+
+        // A row that points at a file that is gone would render a broken
+        // image; the block then falls back to the printed name itself.
+        if (! Storage::disk('local')->exists((string) $owner->signature_path)) {
+            return null;
+        }
+
+        return [
+            'url' => route('opcrf.submission.signature', $this),
+            'name' => (string) ($owner->name ?: $owner->username),
+        ];
+    }
+
+    /**
+     * Reviewer signatures that belong in the workbook's signer slots,
+     * keyed by normalized role name for the shared review partial.
+     *
+     * @return array<string, array{url: string, name: string}>
+     */
+    public function reviewerSignatures(): array
+    {
+        if (! $this->hasSignedFile()) {
+            return [];
+        }
+
+        $signatures = [];
+
+        foreach ($this->reviews()->with('reviewer')->get() as $review) {
+            $role = match ($review->action) {
+                OpcrfReview::ACTION_COMPLIANCE => 'rater',
+                OpcrfReview::ACTION_COMPLIANCE_FINAL => 'approvingauthority',
+                default => null,
+            };
+            $reviewer = $review->reviewer;
+
+            if ($role === null
+                || $reviewer === null
+                || ! $reviewer->hasSignature()
+                || ! Storage::disk('local')->exists((string) $reviewer->signature_path)) {
+                continue;
+            }
+
+            $signatures[$role] = [
+                'url' => route('opcrf.review.signature', [
+                    'submission' => $this,
+                    'review' => $review,
+                ]),
+                'name' => (string) ($reviewer->name ?: $reviewer->username),
+            ];
+        }
+
+        return $signatures;
+    }
+
+    /**
+     * Encode the account's digital signature into the archived workbook, as
+     * the signature-stamped copy this submission hands to its reviewer.
+     *
+     * This is what happens automatically the moment an OPCR is filed (and
+     * again when a revision is filed): the ratee signs the form by having a
+     * signature on their profile — there is no signing step to forget. The
+     * signer is always the submission's own account, never whoever happens to
+     * be signed in, so a reviewer opening the file sees the ratee's signature
+     * and nothing else.
+     *
+     * The uploaded file is never touched: the stamped bytes are written beside
+     * it as a second file, and file_path keeps pointing at the original.
+     *
+     * Nothing here can fail a submission. No signature on the account, a
+     * missing signature file, a workbook with no signer block, a package the
+     * reader cannot open — each simply leaves the submission without a stamped
+     * copy, and downloads fall back to the uploaded bytes.
+     *
+     * @return bool whether a stamped copy was written
+     */
+    public function stampSignature(): bool
+    {
+        $owner = $this->user;
+
+        if (! $this->hasFile() || $owner === null || ! $owner->hasSignature()) {
+            return false;
+        }
+
+        return $this->stampAccountSignature($owner, 'RATEE', $this->file_path);
+    }
+
+    /**
+     * Add a reviewer's digital signature to their named signer slot in the
+     * workbook (RATER for an onward approval, APPROVING AUTHORITY for final
+     * sign-off). The prior stamped copy is used as input so earlier signatures
+     * remain embedded.
+     */
+    public function stampReviewerSignature(User $reviewer, string $role): bool
+    {
+        if (! $this->hasFile()
+            || ! $reviewer->hasAdminAccess()
+            || ! in_array($role, ['RATER', 'APPROVING AUTHORITY'], true)
+            || ! $reviewer->hasSignature()) {
+            return false;
+        }
+
+        $sourcePath = $this->hasSignedFile() ? $this->signed_file_path : $this->file_path;
+
+        return $this->stampAccountSignature($reviewer, $role, (string) $sourcePath);
+    }
+
+    private function stampAccountSignature(User $signer, string $role, string $sourcePath): bool
+    {
+        $disk = Storage::disk('local');
+
+        try {
+            $workbook = (string) $disk->get($sourcePath);
+            $signature = (string) $disk->get((string) $signer->signature_path);
+        } catch (\Throwable) {
+            return false; // A file that cannot be read is not a file to stamp.
+        }
+
+        try {
+            $stamped = OpcrfSignatureStamper::stamp(
+                $workbook,
+                $signature,
+                pathinfo((string) ($signer->signature_original_name ?? 'signature.png'), PATHINFO_EXTENSION),
+                (string) $signer->name,
+                $role
+            );
+        } catch (\Throwable) {
+            return false; // Not a workbook we can edit — it is served as uploaded.
+        }
+
+        if ($stamped === null) {
+            return false; // No signer block on any sheet: nothing to sign.
+        }
+
+        $path = 'opcrf-submissions/'.$this->user_id.'/'.uniqid().'-signed-'.$this->storedOriginalName();
+
+        try {
+            $disk->put($path, $stamped);
+        } catch (\Throwable) {
+            return false;
+        }
+
+        $previous = $this->signed_file_path;
+
+        $this->forceFill(['signed_file_path' => $path])->save();
+
+        // The copy this one replaces is only removed once the row points at
+        // the new file, so a failure above can never leave a submission with
+        // a stamped path pointing at nothing.
+        if ($previous !== null && $previous !== $path) {
+            try {
+                $disk->delete($previous);
+            } catch (\Throwable) {
+                // Orphaned file only — the stamped copy itself is correct.
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Drop the signature-stamped copy: the file on disk, and the attribute the
+     * caller's next save() clears. Used when the workbook it was stamped from
+     * is replaced (a resubmission), because a stamp of the previous file is
+     * worse than no stamp at all.
+     */
+    public function forgetSignedCopy(): void
+    {
+        if ($this->signed_file_path === null) {
+            return;
+        }
+
+        try {
+            Storage::disk('local')->delete($this->signed_file_path);
+        } catch (\Throwable) {
+            // A file that is already gone is not an error here.
+        }
+
+        $this->signed_file_path = null;
+    }
+
+    /**
+     * The archived workbook's own file name, made safe to append to a stored
+     * path, with the .xlsx extension the upload was validated for.
+     */
+    private function storedOriginalName(): string
+    {
+        $name = basename((string) ($this->file_original_name ?? ''));
+        $name = preg_replace('/[^A-Za-z0-9._-]+/', '-', $name) ?? '';
+        $name = trim($name, '-.');
+
+        if ($name === '' || strtolower(pathinfo($name, PATHINFO_EXTENSION)) !== 'xlsx') {
+            return 'OPCRF.xlsx';
+        }
+
+        return $name;
     }
 
     /**
@@ -649,6 +898,11 @@ class OpcrfSubmission extends Model
         $this->archiveCurrentFileAsVersion();
 
         if ($newFilePath !== null) {
+            // The stamped copy described the file this revision replaces, so
+            // it goes with it; the caller stamps the new workbook once the
+            // resubmission is recorded.
+            $this->forgetSignedCopy();
+
             $this->file_path = $newFilePath;
             $this->file_original_name = $newOriginalName;
             $this->file_updated_at = now();
@@ -669,6 +923,75 @@ class OpcrfSubmission extends Model
             'previous_status' => self::STATUS_RETURNED,
             'new_status' => self::STATUS_RESUBMITTED,
             'reviewed_at' => now(),
+        ]);
+    }
+
+    /**
+     * Replace the owner's workbook while its Part 1 schedule is open.
+     * The former file and review history remain attached to this submission;
+     * any previous approval is cleared and the new version returns to review.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    public function replaceDuringDeadline(
+        string $newFilePath,
+        string $newOriginalName,
+        array $attributes,
+    ): void {
+        $previousStatus = (string) $this->status;
+        $reviewerId = $this->returningReviewer()?->id
+            ?? ($this->assigned_to ?? $this->reviewer_id);
+
+        $this->archiveCurrentFileAsVersion();
+        $this->forgetSignedCopy();
+        $this->fill($attributes);
+        $this->file_path = $newFilePath;
+        $this->file_original_name = $newOriginalName;
+        $this->file_updated_at = now();
+        $this->submitted_at = now();
+        $this->approved_at = null;
+        $this->approved_by = null;
+        $this->assigned_to = $reviewerId;
+        $this->status = self::STATUS_RESUBMITTED;
+        $this->save();
+
+        $this->reviews()->create([
+            'reviewer_id' => $this->user_id,
+            'action' => OpcrfReview::ACTION_RESUBMIT,
+            'previous_status' => $previousStatus,
+            'new_status' => self::STATUS_RESUBMITTED,
+            'reviewed_at' => now(),
+            'to_id' => $reviewerId,
+        ]);
+    }
+
+    /**
+     * Update the Part 1 form fields in place when no replacement workbook is
+     * being uploaded. The submission row and its existing file stay intact.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    public function updateFormDuringDeadline(array $attributes): void
+    {
+        $previousStatus = (string) $this->status;
+        $reviewerId = $this->returningReviewer()?->id
+            ?? ($this->assigned_to ?? $this->reviewer_id);
+
+        $this->fill($attributes);
+        $this->submitted_at = now();
+        $this->approved_at = null;
+        $this->approved_by = null;
+        $this->assigned_to = $reviewerId;
+        $this->status = self::STATUS_RESUBMITTED;
+        $this->save();
+
+        $this->reviews()->create([
+            'reviewer_id' => $this->user_id,
+            'action' => OpcrfReview::ACTION_RESUBMIT,
+            'previous_status' => $previousStatus,
+            'new_status' => self::STATUS_RESUBMITTED,
+            'reviewed_at' => now(),
+            'to_id' => $reviewerId,
         ]);
     }
 

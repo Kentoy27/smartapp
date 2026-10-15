@@ -3,10 +3,12 @@
 namespace Tests\Feature;
 
 use App\Livewire\OpcrfUpload;
+use App\Models\OpcrfSchedule;
 use App\Models\OpcrfSubmission;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
@@ -397,6 +399,7 @@ class OpcrfUploadTest extends TestCase
             ->assertSee('2.00')
             // The signer block at the end.
             ->assertSee('Signed after the review')
+            ->assertSee('Jane D. Doe')
             ->assertSee('EVA M. DOLLOSA RN')
             ->assertSee('FERDINAND S. SY PhD, CESO VI')
             ->assertSee('RATEE')
@@ -540,7 +543,7 @@ class OpcrfUploadTest extends TestCase
             ->assertSet('showUpload', false)
             ->call('openUpload')
             ->assertSet('showUpload', true)
-            ->assertSee('Upload Completed OPCRF')
+            ->assertSee('Upload Commitment')
             ->assertSee('Complete the OPCRF template you downloaded')
             // The accepted format and size are stated before a file is chosen.
             ->assertSee('.xlsx')
@@ -636,6 +639,143 @@ class OpcrfUploadTest extends TestCase
         $this->assertStringStartsWith('opcrf-submissions/'.$user->id.'/', $submission->file_path);
     }
 
+    public function test_a_staff_member_can_update_their_submission_during_the_part_one_deadline(): void
+    {
+        $user = $this->staffUser();
+        $this->partOneSchedule(now()->subDay(), now()->addDay());
+        $previousPath = 'opcrf-submissions/'.$user->id.'/previous.xlsx';
+        Storage::disk('local')->put($previousPath, 'previous workbook');
+        $submission = OpcrfSubmission::create([
+            'user_id' => $user->id,
+            'employee_name' => 'Jane D. Doe',
+            'position' => 'Teacher I',
+            'review_period' => 'Old review period',
+            'division_office' => 'Schools Division Office',
+            'objectives' => 'Previous objectives',
+            'accomplishments' => 'Previous accomplishments',
+            'self_rating' => 3.0,
+            'file_path' => $previousPath,
+            'file_original_name' => 'previous.xlsx',
+            'submitted_at' => now()->subHour(),
+            'reviewer_id' => $this->reviewer->id,
+            'status' => OpcrfSubmission::STATUS_PENDING,
+        ]);
+
+        Livewire::actingAs($user)
+            ->test(OpcrfUpload::class)
+            ->assertSee('Update OPCRF')
+            ->call('openUpload')
+            ->set('file', $this->uploadedWorkbook($this->buildFilledOpcrf()))
+            ->call('confirmSubmit')
+            ->assertHasNoErrors()
+            ->assertSee('OPCR updated');
+
+        $submission->refresh();
+        $this->assertSame(1, OpcrfSubmission::where('user_id', $user->id)->count());
+        $this->assertSame(OpcrfSubmission::STATUS_RESUBMITTED, $submission->status);
+        $this->assertNotSame($previousPath, $submission->file_path);
+        $this->assertSame('January to December 2026', $submission->review_period);
+        $this->assertSame(1, $submission->versions()->count());
+        $this->assertSame($previousPath, $submission->versions()->firstOrFail()->stored_path);
+        $this->assertSame(OpcrfSubmission::STATUS_PENDING, $submission->latestReview->previous_status);
+        Storage::disk('local')->assertExists($previousPath);
+        Storage::disk('local')->assertExists($submission->file_path);
+    }
+
+    public function test_a_submitted_opcrf_cannot_be_updated_after_the_part_one_deadline(): void
+    {
+        $user = $this->staffUser();
+        $this->partOneSchedule(now()->subDays(2), now()->subDay());
+        OpcrfSubmission::create([
+            'user_id' => $user->id,
+            'employee_name' => 'Jane D. Doe',
+            'position' => 'Teacher I',
+            'review_period' => 'January to December 2026',
+            'division_office' => 'Schools Division Office',
+            'objectives' => 'Objective 1',
+            'accomplishments' => 'Accomplished objective 1',
+            'self_rating' => 4.5,
+            'submitted_at' => now()->subDays(2),
+            'status' => OpcrfSubmission::STATUS_PENDING,
+        ]);
+
+        Livewire::actingAs($user)
+            ->test(OpcrfUpload::class)
+            ->assertDontSee('Update OPCRF')
+            ->call('openUpload')
+            ->assertForbidden();
+    }
+
+    public function test_the_deadline_is_rechecked_when_confirming_an_update(): void
+    {
+        $user = $this->staffUser();
+        $startedAt = now();
+        Carbon::setTestNow($startedAt);
+        $this->partOneSchedule($startedAt->copy()->subHour(), $startedAt->copy()->addHour());
+        $submission = OpcrfSubmission::create([
+            'user_id' => $user->id,
+            'employee_name' => 'Jane D. Doe',
+            'position' => 'Teacher I',
+            'review_period' => 'January to December 2026',
+            'division_office' => 'Schools Division Office',
+            'objectives' => 'Objective 1',
+            'accomplishments' => 'Accomplished objective 1',
+            'self_rating' => 4.5,
+            'submitted_at' => $startedAt->copy()->subMinutes(5),
+            'status' => OpcrfSubmission::STATUS_PENDING,
+        ]);
+
+        $component = Livewire::actingAs($user)
+            ->test(OpcrfUpload::class)
+            ->call('openUpload')
+            ->set('file', $this->uploadedWorkbook($this->buildFilledOpcrf()));
+
+        Carbon::setTestNow($startedAt->copy()->addHours(2));
+
+        try {
+            $component->call('confirmSubmit')->assertForbidden();
+        } finally {
+            Carbon::setTestNow();
+        }
+
+        $this->assertSame(OpcrfSubmission::STATUS_PENDING, $submission->fresh()->status);
+        $this->assertSame(0, $submission->versions()->count());
+    }
+
+    public function test_a_staff_member_cannot_update_another_users_submission(): void
+    {
+        $user = $this->staffUser();
+        $otherUser = User::create([
+            'name' => 'Other Staff',
+            'username' => 'otherstaff',
+            'email' => 'otherstaff@example.com',
+            'password' => Hash::make('password123'),
+            'is_superadmin' => false,
+        ]);
+        $this->partOneSchedule(now()->subDay(), now()->addDay());
+        $otherSubmission = OpcrfSubmission::create([
+            'user_id' => $otherUser->id,
+            'employee_name' => 'Other Staff',
+            'position' => 'Teacher I',
+            'review_period' => 'January to December 2026',
+            'division_office' => 'Schools Division Office',
+            'objectives' => 'Objective 1',
+            'accomplishments' => 'Accomplished objective 1',
+            'self_rating' => 4.5,
+            'submitted_at' => now(),
+            'status' => OpcrfSubmission::STATUS_PENDING,
+        ]);
+
+        Livewire::actingAs($user)
+            ->test(OpcrfUpload::class)
+            ->call('openUpload')
+            ->set('submissionId', $otherSubmission->id)
+            ->call('confirmSubmit')
+            ->assertNotFound();
+
+        $this->assertSame(OpcrfSubmission::STATUS_PENDING, $otherSubmission->fresh()->status);
+    }
+
     public function test_a_confirmed_submission_locks_the_dashboard_card(): void
     {
         Storage::fake('local');
@@ -648,6 +788,8 @@ class OpcrfUploadTest extends TestCase
             ->set('file', $this->uploadedWorkbook($path))
             ->call('confirmSubmit');
 
+        $this->partOneSchedule(now()->subDays(2), now()->subDay());
+
         // The OPCRF alone completes the cycle now — the card locks without
         // any MOV step.
         $this->actingAs($user)
@@ -655,5 +797,17 @@ class OpcrfUploadTest extends TestCase
             ->assertOk()
             ->assertSee('OPCRF submitted — locked')
             ->assertDontSee('Click to choose your OPCRF file');
+    }
+
+    private function partOneSchedule(\Illuminate\Support\Carbon $start, \Illuminate\Support\Carbon $end): void
+    {
+        OpcrfSchedule::create([
+            'opcrf_year' => (int) now()->format('Y'),
+            'part_number' => OpcrfSchedule::PART_ONE,
+            'start_datetime' => $start,
+            'end_datetime' => $end,
+            'is_enabled' => true,
+            'created_by' => $this->reviewer->id,
+        ]);
     }
 }

@@ -1,9 +1,10 @@
 {{-- THE REST OF THE WORKBOOK: every tab beyond PART I, in the same
      Excel-style design as the main sheet partial. Expects $workbook (the
-     analyzer's workbook() array) and $uid (a per-instance key prefix so
-     several modals on one page never collide). Each section carries
-     data-sheet="part2|part3|part4|extra" so the modal's sheet-tab strip
-     can filter the worksheets live. --}}
+     analyzer's workbook() array), $uid (a per-instance key prefix so
+     several modals on one page never collide) and, like the sheet partial,
+     $rateeSignature (the ratee's array{url, name} or null). Each section
+     carries data-sheet="part2|part3|part4|extra" so the modal's sheet-tab
+     strip can filter the worksheets live. --}}
 @php $wbUid = $uid ?? 'wb'; @endphp
 
 @if (! empty($workbook['part_two']['sections']))
@@ -23,6 +24,7 @@
                         <tr>
                             <th scope="col">Competencies</th>
                             <th scope="col">Behavioural Indicators</th>
+                            <th scope="col">Remarks / Observations</th>
                             <th scope="col" class="opcrf-sheet-rate">Rating</th>
                         </tr>
                     </thead>
@@ -39,12 +41,13 @@
                                         </td>
                                     @endif
                                     <td>{{ $indicator['text'] }}</td>
+                                    <td>{{ $indicator['remarks'] !== '' ? $indicator['remarks'] : '—' }}</td>
                                     <td class="opcrf-sheet-rate">{{ $indicator['rating'] !== null ? number_format($indicator['rating'], 2) : '—' }}</td>
                                 </tr>
                             @endforeach
                         @empty
                             <tr>
-                                <td colspan="3" class="opcrf-sheet-empty">No competencies were found in this section.</td>
+                                <td colspan="4" class="opcrf-sheet-empty">No competencies were found in this section.</td>
                             </tr>
                         @endforelse
                     </tbody>
@@ -53,8 +56,36 @@
         </div>
     @endforeach
 
+    @if (! empty($workbook['part_two']['scale']['levels']))
+        <div class="opcrf-sheet opcrf-sheet--tab" data-sheet="part2" wire:key="{{ $wbUid }}-p2scale">
+            <div class="opcrf-sheet-partbanner">
+                <span class="opcrf-sheet-parttitle">{{ $workbook['part_two']['scale']['title'] !== '' ? $workbook['part_two']['scale']['title'] : 'DepEd Competencies Scale' }}</span>
+            </div>
+            <div class="opcrf-sheet-tablewrap">
+                <table class="opcrf-sheet-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Numerical Rating</th>
+                            <th scope="col">Adjectival Rating</th>
+                            <th scope="col">Definition</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach ($workbook['part_two']['scale']['levels'] as $li => $level)
+                            <tr wire:key="{{ $wbUid }}-p2scale-{{ $li }}">
+                                <td class="opcrf-sheet-rate">{{ $level['number'] }}</td>
+                                <td>{{ $level['adjectival'] !== '' ? $level['adjectival'] : '—' }}</td>
+                                <td>{{ $level['definition'] !== '' ? $level['definition'] : '—' }}</td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    @endif
+
     @if (! empty($workbook['part_two']['total_rows']))
-        <div class="opcrf-sheet opcrf-sheet--tab" wire:key="{{ $wbUid }}-p2totals">
+        <div class="opcrf-sheet opcrf-sheet--tab" data-sheet="part2" wire:key="{{ $wbUid }}-p2totals">
             <div class="opcrf-sheet-tablewrap">
                 <table class="opcrf-sheet-table">
                     <tbody>
@@ -71,17 +102,17 @@
     @endif
 
     @if (! empty($workbook['part_two']['signers']))
-        <div class="opcrf-sheet opcrf-sheet--tab" wire:key="{{ $wbUid }}-p2signers">
+        <div class="opcrf-sheet opcrf-sheet--tab" data-sheet="part2" wire:key="{{ $wbUid }}-p2signers">
             <div class="opcrf-sheet-signers">
                 <div class="opcrf-sheet-signers-head">Signed on this tab</div>
                 <div class="opcrf-sheet-signers-row">
                     @foreach ($workbook['part_two']['signers'] as $signer)
-                        <div class="opcrf-sheet-signer" wire:key="{{ $wbUid }}-p2s-{{ $signer['ref'] }}">
-                            <span class="opcrf-sheet-signer-name {{ $signer['name'] === '' ? 'is-empty' : '' }}">
-                                {{ $signer['name'] !== '' ? $signer['name'] : '—' }}
-                            </span>
-                            <span class="opcrf-sheet-signer-role">{{ $signer['role'] }}</span>
-                        </div>
+                        @include('livewire.opcrf.partials.opcrf-signer', [
+                            'signer' => $signer,
+                            'keyPrefix' => $wbUid.'-p2s',
+                            'rateeSignature' => $rateeSignature ?? null,
+                            'reviewSignatures' => $reviewSignatures ?? [],
+                        ])
                     @endforeach
                 </div>
             </div>
@@ -89,7 +120,7 @@
     @endif
 @endif
 
-@if (! empty($workbook['part_three']['components']) || ! empty($workbook['part_three']['agreement']))
+@if (! empty($workbook['part_three']['components']) || ! empty($workbook['part_three']['agreement']) || ! empty($workbook['part_three']['rating_table']) || $workbook['part_three']['overall'] !== null || $workbook['part_three']['rating'] !== '')
     <div class="opcrf-sheet opcrf-sheet--tab" data-sheet="part3" wire:key="{{ $wbUid }}-p3">
         <div class="opcrf-sheet-banner">PART III: SUMMARY OF RATINGS</div>
 
@@ -116,16 +147,56 @@
             </div>
         @endif
 
+        <div class="opcrf-sheet-review-summary">
+            <div>
+                <span class="opcrf-review-label">Overall Score</span>
+                <strong>{{ $workbook['part_three']['overall'] !== null ? number_format($workbook['part_three']['overall'], 2) : '—' }}</strong>
+            </div>
+            <div>
+                <span class="opcrf-review-label">RPMS Rating</span>
+                <strong>{{ $workbook['part_three']['rating'] !== '' ? $workbook['part_three']['rating'] : '—' }}</strong>
+            </div>
+        </div>
+
+        @if (! empty($workbook['part_three']['rating_table']))
+            <div class="opcrf-sheet-partbanner">
+                <span class="opcrf-sheet-parttitle">RPMS Rating Table</span>
+            </div>
+            <div class="opcrf-sheet-tablewrap">
+                <table class="opcrf-sheet-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Range</th>
+                            <th scope="col">Numerical Rating</th>
+                            <th scope="col">Adjectival Rating</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach ($workbook['part_three']['rating_table'] as $ri => $band)
+                            <tr wire:key="{{ $wbUid }}-p3rating-{{ $ri }}">
+                                <td>{{ $band['range'] }}</td>
+                                <td class="opcrf-sheet-rate">{{ $band['numerical'] !== '' ? $band['numerical'] : '—' }}</td>
+                                <td>{{ $band['adjectival'] }}</td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        @endif
+
         @if (! empty($workbook['part_three']['agreement']))
             <div class="opcrf-sheet-signers">
                 <div class="opcrf-sheet-signers-head">Ratee–Rater agreement</div>
                 <div class="opcrf-sheet-signers-row">
                     @foreach ($workbook['part_three']['agreement'] as $ai => $who)
+                        @php($agreementLines = $workbook['part_three']['signatures'][$ai] ?? ['signature' => '', 'date' => ''])
                         <div class="opcrf-sheet-signer" wire:key="{{ $wbUid }}-ag-{{ $ai }}">
                             <span class="opcrf-sheet-signer-name {{ $who['name'] === '' ? 'is-empty' : '' }}">
                                 {{ $who['name'] !== '' ? $who['name'] : '—' }}
                             </span>
                             <span class="opcrf-sheet-signer-role">{{ $who['role'] }}</span>
+                            <span class="opcrf-sheet-signer-role">Signature: {{ $agreementLines['signature'] !== '' ? $agreementLines['signature'] : '—' }}</span>
+                            <span class="opcrf-sheet-signer-role">Date: {{ $agreementLines['date'] !== '' ? $agreementLines['date'] : '—' }}</span>
                         </div>
                     @endforeach
                 </div>
@@ -134,15 +205,16 @@
     </div>
 @endif
 
-@if (! empty($workbook['part_four']['office_plan']) || ! empty($workbook['part_four']['development_plan']) || ! empty($workbook['part_four']['signers']))
+@if (! empty($workbook['part_four']['sections']) || ! empty($workbook['part_four']['office_plan']) || ! empty($workbook['part_four']['development_plan']) || ! empty($workbook['part_four']['signers']))
     <div class="opcrf-sheet opcrf-sheet--tab" data-sheet="part4" wire:key="{{ $wbUid }}-p4">
         <div class="opcrf-sheet-banner">PART IV: IMPROVEMENT AND DEVELOPMENT PLANS</div>
 
-        @if (! empty($workbook['part_four']['office_plan']))
+        @if (in_array('IV-A', $workbook['part_four']['sections'] ?? [], true) || ! empty($workbook['part_four']['office_plan']))
             <div class="opcrf-sheet-partbanner">
                 <span class="opcrf-sheet-partkey">PART IV-A</span>
                 <span class="opcrf-sheet-parttitle">Office Improvement Plan</span>
             </div>
+            <div class="opcrf-sheet-partnote">Action Plan</div>
             <div class="opcrf-sheet-tablewrap">
                 <table class="opcrf-sheet-table">
                     <thead>
@@ -156,7 +228,7 @@
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach ($workbook['part_four']['office_plan'] as $ri => $row)
+                        @forelse ($workbook['part_four']['office_plan'] as $ri => $row)
                             <tr wire:key="{{ $wbUid }}-op-{{ $row['row'] }}-{{ $ri }}">
                                 <td>{{ $row['gap'] !== '' ? $row['gap'] : '—' }}</td>
                                 <td>{{ $row['area'] !== '' ? $row['area'] : '—' }}</td>
@@ -165,7 +237,9 @@
                                 <td>{{ $row['timeline'] !== '' ? $row['timeline'] : '—' }}</td>
                                 <td>{{ $row['resources'] !== '' ? $row['resources'] : '—' }}</td>
                             </tr>
-                        @endforeach
+                        @empty
+                            <tr><td colspan="6" class="opcrf-sheet-empty">No plan entries were found in this section.</td></tr>
+                        @endforelse
                     </tbody>
                 </table>
             </div>
@@ -174,11 +248,12 @@
             @endif
         @endif
 
-        @if (! empty($workbook['part_four']['development_plan']))
+        @if (in_array('IV-B', $workbook['part_four']['sections'] ?? [], true) || ! empty($workbook['part_four']['development_plan']))
             <div class="opcrf-sheet-partbanner">
                 <span class="opcrf-sheet-partkey">PART IV-B</span>
                 <span class="opcrf-sheet-parttitle">Individual Development Plan</span>
             </div>
+            <div class="opcrf-sheet-partnote">Action Plan</div>
             <div class="opcrf-sheet-tablewrap">
                 <table class="opcrf-sheet-table">
                     <thead>
@@ -192,7 +267,7 @@
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach ($workbook['part_four']['development_plan'] as $ri => $row)
+                        @forelse ($workbook['part_four']['development_plan'] as $ri => $row)
                             <tr wire:key="{{ $wbUid }}-dp-{{ $row['row'] }}-{{ $ri }}">
                                 <td>{{ $row['gap'] !== '' ? $row['gap'] : '—' }}</td>
                                 <td>{{ $row['area'] !== '' ? $row['area'] : '—' }}</td>
@@ -201,7 +276,9 @@
                                 <td>{{ $row['timeline'] !== '' ? $row['timeline'] : '—' }}</td>
                                 <td>{{ $row['resources'] !== '' ? $row['resources'] : '—' }}</td>
                             </tr>
-                        @endforeach
+                        @empty
+                            <tr><td colspan="6" class="opcrf-sheet-empty">No plan entries were found in this section.</td></tr>
+                        @endforelse
                     </tbody>
                 </table>
             </div>
@@ -215,12 +292,12 @@
                 <div class="opcrf-sheet-signers-head">Signed on this tab</div>
                 <div class="opcrf-sheet-signers-row">
                     @foreach ($workbook['part_four']['signers'] as $signer)
-                        <div class="opcrf-sheet-signer" wire:key="{{ $wbUid }}-p4s-{{ $signer['ref'] }}">
-                            <span class="opcrf-sheet-signer-name {{ $signer['name'] === '' ? 'is-empty' : '' }}">
-                                {{ $signer['name'] !== '' ? $signer['name'] : '—' }}
-                            </span>
-                            <span class="opcrf-sheet-signer-role">{{ $signer['role'] }}</span>
-                        </div>
+                        @include('livewire.opcrf.partials.opcrf-signer', [
+                            'signer' => $signer,
+                            'keyPrefix' => $wbUid.'-p4s',
+                            'rateeSignature' => $rateeSignature ?? null,
+                            'reviewSignatures' => $reviewSignatures ?? [],
+                        ])
                     @endforeach
                 </div>
             </div>

@@ -1,8 +1,7 @@
 <div class="dashboard-summary" wire:poll.15s>
 
     {{-- OPCR tools: staff-facing only. The card's lock state follows the
-         submission's fate live: submitting locks it, a return-for-revision
-         unlocks it — no reload needed.
+         Part 1/Parts 2–4 template windows and submission status live — no reload needed.
 
          The superadmin's District List is deliberately NOT here: it has its
          own page behind the sidebar's "Districts & Schools" item. --}}
@@ -87,6 +86,11 @@
                          the review modal away seconds after it appeared and
                          sent the user back to the upload window. --}}
                 </div>
+                @if ($opcrfPartOne['full_open'])
+                         <p class="opcr-file-sub">
+                             The complete form — Parts 1–4 — is available now. Your saved Part 1 submission remains stored separately and is not changed by this download.
+                         </p>
+                @endif
 
                 {{-- STATUS: where this account's OPCRF actually stands —
                      template generated, submitted, or back for revision with

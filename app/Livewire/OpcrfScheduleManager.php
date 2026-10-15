@@ -11,7 +11,8 @@ use Livewire\Attributes\Title;
 use Livewire\Component;
 
 /**
- * The superadmin's OPCRF calendar: when each Part of the form may be opened.
+ * The superadmin's OPCRF calendar: Part 1 and the shared Parts 2–4 end-of-year
+ * access window.
  *
  * One row per (year, Part). Saving a row decides, from that moment, whether
  * a staff member can open the Part — the access rules themselves live in
@@ -118,10 +119,7 @@ class OpcrfScheduleManager extends Component
             'part_number' => [
                 'required',
                 'integer',
-                'in:1,2,3,4',
-                // One window per Part per year. Reported on the Part control,
-                // because that is the field the superadmin has to change to
-                // fix it.
+                'in:1,2',
                 \Illuminate\Validation\Rule::unique('opcrf_schedules', 'part_number')
                     ->where('opcrf_year', $this->year)
                     ->ignore($this->editingId),
@@ -205,6 +203,10 @@ class OpcrfScheduleManager extends Component
 
         $this->editingId = null;
         $this->part_number = $part ?: OpcrfSchedule::PART_ONE;
+        abort_unless(
+            in_array($this->part_number, [OpcrfSchedule::PART_ONE, OpcrfSchedule::PART_TWO], true),
+            404
+        );
         $this->start_date = now()->addDay()->format('Y-m-d');
         $this->start_time = '08:00';
         $this->end_date = now()->addDays(30)->format('Y-m-d');
@@ -227,6 +229,10 @@ class OpcrfScheduleManager extends Component
         $this->successMessage = null;
 
         $schedule = OpcrfSchedule::findOrFail($scheduleId);
+        abort_unless(
+            in_array($schedule->part_number, [OpcrfSchedule::PART_ONE, OpcrfSchedule::PART_TWO], true),
+            404
+        );
 
         $this->editingId = $schedule->id;
         $this->year = $schedule->opcrf_year;
@@ -265,6 +271,10 @@ class OpcrfScheduleManager extends Component
 
         if ($this->editingId !== null) {
             $schedule = OpcrfSchedule::findOrFail($this->editingId);
+            abort_unless(
+                in_array($schedule->part_number, [OpcrfSchedule::PART_ONE, OpcrfSchedule::PART_TWO], true),
+                404
+            );
             $before = $schedule->snapshot();
 
             $schedule->update([
@@ -340,6 +350,10 @@ class OpcrfScheduleManager extends Component
         $this->ensureSuperadmin();
 
         $schedule = OpcrfSchedule::findOrFail($scheduleId);
+        abort_unless(
+            in_array($schedule->part_number, [OpcrfSchedule::PART_ONE, OpcrfSchedule::PART_TWO], true),
+            404
+        );
         $before = $schedule->snapshot();
 
         $schedule->update(['is_enabled' => ! $schedule->is_enabled]);
@@ -377,6 +391,10 @@ class OpcrfScheduleManager extends Component
         $this->ensureSuperadmin();
 
         $schedule = OpcrfSchedule::findOrFail($scheduleId);
+        abort_unless(
+            in_array($schedule->part_number, [OpcrfSchedule::PART_ONE, OpcrfSchedule::PART_TWO], true),
+            404
+        );
         $label = $schedule->partLabel();
 
         OpcrfScheduleLog::record(
@@ -403,18 +421,22 @@ class OpcrfScheduleManager extends Component
         $this->ensureSuperadmin();
 
         $year = $this->year ?: OpcrfAccess::currentYear();
-        $schedules = OpcrfSchedule::forYear($year)->get();
+        $schedules = OpcrfSchedule::forYear($year)
+            ->whereIn('part_number', [OpcrfSchedule::PART_ONE, OpcrfSchedule::PART_TWO])
+            ->get();
         $now = now();
 
         // One row per Part, scheduled or not: the superadmin's table shows
         // the whole year so a missing Part is visible as "not scheduled"
         // rather than silently absent.
-        $rows = collect(OpcrfSchedule::parts())->map(function (int $part) use ($schedules, $now) {
+        $rows = collect([OpcrfSchedule::PART_ONE, OpcrfSchedule::PART_TWO])->map(function (int $part) use ($schedules, $now) {
             $schedule = $schedules->firstWhere('part_number', $part);
 
             return [
                 'part' => $part,
-                'label' => 'Part '.$part,
+                'label' => $part === OpcrfSchedule::PART_TWO
+                    ? 'Parts 2–4 (End-of-year term)'
+                    : 'Part 1',
                 'schedule' => $schedule,
                 'status' => $schedule?->statusAt($now) ?? OpcrfAccess::STATUS_NOT_SCHEDULED,
             ];
@@ -429,7 +451,7 @@ class OpcrfScheduleManager extends Component
                 ->latest('id')
                 ->limit(15)
                 ->get(),
-            'canCreate' => $schedules->count() < count(OpcrfSchedule::parts()),
+            'canCreate' => $schedules->count() < 2,
         ]);
     }
 }

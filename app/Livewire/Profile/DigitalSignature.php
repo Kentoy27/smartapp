@@ -11,9 +11,10 @@ use Livewire\Component;
 use Livewire\WithFileUploads;
 
 /**
- * The digital signature block on the profile page — the same component for a
- * user and for a superadmin, because a signature belongs to an account rather
- * than to a role.
+ * The digital signature block: what the account menu's "Digital Signature"
+ * dialog hosts on every page. The same component for a user and for a
+ * superadmin, because a signature belongs to an account rather than to a role —
+ * and the account menu is the one place every role reaches it from.
  *
  * The workflow is a two-step one on purpose: picking a file shows it (name,
  * size and a real preview) and stores nothing, so the choice can still be

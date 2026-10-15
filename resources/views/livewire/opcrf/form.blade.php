@@ -19,17 +19,25 @@
 
     <div class="card">
         <div class="card-head">
-            <div class="card-title">Submit your OPCRF</div>
+            <div class="card-title">{{ $submissionId !== null ? 'Update your OPCRF' : 'Submit your OPCRF' }}</div>
             <a href="{{ route('opcrf.template') }}" class="card-link opcrf-card-link" download>
                 <x-icon name="download" :size="14" />
                 <span>Download template</span>
             </a>
         </div>
         <p class="card-text">
-            Fill in the same details as the OPCRF-TEMPLATE.xlsx form, then press
+            @if (! $this->canEdit())
+                The Part 1 deadline has closed. Your submitted OPCRF is available here as read-only.
+            @elseif ($submissionId !== null)
+                Update the details below, then press
+            @else
+                Fill in the same details as the OPCRF-TEMPLATE.xlsx form, then press
+            @endif
+            @if ($this->canEdit())
             <strong>Submit</strong>. A review panel will pop up first so you can
             double-check everything before it is recorded — nothing is saved until
             you confirm it there.
+            @endif
         </p>
 
         <form wire:submit="submitForReview" class="opcrf-form">
@@ -42,6 +50,7 @@
                         placeholder="e.g. Jane D. Doe"
                         autocomplete="name"
                         wire:model="employee_name"
+                        @disabled(! $this->canEdit())
                         @class(['error' => $errors->has('employee_name')])
                     >
                     @error('employee_name') <div class="error-text">{{ $message }}</div> @enderror
@@ -55,6 +64,7 @@
                         placeholder="e.g. Teacher I"
                         autocomplete="organization-title"
                         wire:model="position"
+                        @disabled(! $this->canEdit())
                         @class(['error' => $errors->has('position')])
                     >
                     @error('position') <div class="error-text">{{ $message }}</div> @enderror
@@ -67,6 +77,7 @@
                         type="text"
                         placeholder="e.g. January to December {{ date('Y') }}"
                         wire:model="review_period"
+                        @disabled(! $this->canEdit())
                         @class(['error' => $errors->has('review_period')])
                     >
                     @error('review_period') <div class="error-text">{{ $message }}</div> @enderror
@@ -79,6 +90,7 @@
                         type="text"
                         placeholder="e.g. Schools Division Office"
                         wire:model="division_office"
+                        @disabled(! $this->canEdit())
                         @class(['error' => $errors->has('division_office')])
                     >
                     @error('division_office') <div class="error-text">{{ $message }}</div> @enderror
@@ -91,6 +103,7 @@
                         rows="4"
                         placeholder="List each objective, one per line…"
                         wire:model="objectives"
+                        @disabled(! $this->canEdit())
                         @class(['error' => $errors->has('objectives')])
                     ></textarea>
                     @error('objectives') <div class="error-text">{{ $message }}</div> @enderror
@@ -103,6 +116,7 @@
                         rows="4"
                         placeholder="What was actually delivered, per objective…"
                         wire:model="accomplishments"
+                        @disabled(! $this->canEdit())
                         @class(['error' => $errors->has('accomplishments')])
                     ></textarea>
                     @error('accomplishments') <div class="error-text">{{ $message }}</div> @enderror
@@ -118,6 +132,7 @@
                         max="5"
                         placeholder="e.g. 4.50"
                         wire:model="self_rating"
+                        @disabled(! $this->canEdit())
                         @class(['error' => $errors->has('self_rating')])
                     >
                     <small class="opcrf-rating-scale">5 = Outstanding · 4 = Very Satisfactory · 3 = Satisfactory · 2 = Unsatisfactory · 1 = Poor</small>
@@ -131,22 +146,25 @@
                         type="text"
                         placeholder="Anything the reviewing officer should know"
                         wire:model="remarks"
+                        @disabled(! $this->canEdit())
                         @class(['error' => $errors->has('remarks')])
                     >
                     @error('remarks') <div class="error-text">{{ $message }}</div> @enderror
                 </div>
             </div>
 
+            @if ($this->canEdit())
             <div class="opcrf-form-actions">
                 <span class="opcrf-review-hint">
                     <x-icon name="shield" :size="14" />
                     You'll get a chance to review everything before it's submitted.
                 </span>
                 <button type="submit" class="opcrf-submit-btn" wire:loading.attr="disabled" wire:target="submitForReview">
-                    <span wire:loading.remove wire:target="submitForReview">Submit OPCRF</span>
+                    <span wire:loading.remove wire:target="submitForReview">{{ $submissionId !== null ? 'Review OPCRF Update' : 'Submit OPCRF' }}</span>
                     <span wire:loading wire:target="submitForReview">Checking…</span>
                 </button>
             </div>
+            @endif
         </form>
     </div>
 
@@ -189,7 +207,7 @@
 
                 <p class="opcrf-review-note">
                     Please check every detail below — shown exactly like the Excel
-                    form. This is what will be recorded.
+                    form. This is what will be recorded on this OPCRF submission.
                 </p>
 
                 <div class="modal-form opcrf-review-body">
@@ -279,7 +297,7 @@
                     <div class="modal-actions">
                         <button type="button" class="btn-ghost" wire:click="cancelReview">Go back &amp; edit</button>
                         <button type="button" class="btn-primary" wire:click="confirmSubmit" wire:loading.attr="disabled" wire:target="confirmSubmit">
-                            <span wire:loading.remove wire:target="confirmSubmit">Confirm &amp; Submit</span>
+                            <span wire:loading.remove wire:target="confirmSubmit">{{ $submissionId !== null ? 'Confirm &amp; Update' : 'Confirm &amp; Submit' }}</span>
                             <span wire:loading wire:target="confirmSubmit">Submitting…</span>
                         </button>
                     </div>

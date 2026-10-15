@@ -97,7 +97,8 @@ class OpcrfReview extends Component
     }
 
     /**
-     * The archived workbook rendered as the complete Excel-style sheet —
+     * The archived (stamped when available) workbook rendered as the complete
+     * Excel-style sheet —
      * the same full layout the staff member saw before submitting (title
      * banner, header + evaluator blocks, every part's objectives table with
      * timelines, performance measures, accomplishments and per-criteria
@@ -117,7 +118,7 @@ class OpcrfReview extends Component
         }
 
         try {
-            $storedPath = Storage::disk('local')->path($submission->file_path);
+            $storedPath = Storage::disk('local')->path((string) $submission->downloadPath());
 
             $spreadsheet = new OpcrfSpreadsheet($storedPath);
 
@@ -140,6 +141,11 @@ class OpcrfReview extends Component
                         // planning/evaluation band captions, read from the
                         // workbook's header row.
                         'captions' => $part['captions'] ?? [],
+                        'fields' => array_keys($part['captions'] ?? []) ?: [
+                            'kra', 'attribution', 'objective', 'timeline', 'weight',
+                            'target_value', 'target_description', 'measure', 'scale',
+                            'movs', 'accomplishments', 'rating', 'average', 'weighted_average',
+                        ],
                         'bands' => $part['bands'] ?? ['planning' => '', 'evaluation' => ''],
                     ],
                     $spreadsheet->parts()
@@ -171,7 +177,7 @@ class OpcrfReview extends Component
     }
 
     /**
-     * Every tab of the archived workbook beyond PART I — PART II's
+     * Every tab of the archived (stamped when available) workbook beyond PART I — PART II's
      * competency sections, PART III's rating summary and agreement block,
      * PART IV's improvement plans, plus any non-standard tabs as raw cell
      * grids — so the review modal shows the whole file. Null when there is
@@ -188,11 +194,22 @@ class OpcrfReview extends Component
 
         try {
             return (new OpcrfSpreadsheet(
-                Storage::disk('local')->path($submission->file_path)
+                Storage::disk('local')->path((string) $submission->downloadPath())
             ))->workbook();
         } catch (\RuntimeException) {
             return null;
         }
+    }
+
+    /**
+     * Digital signatures from reviewers who have signed this workbook.
+     *
+     * @return array<string, array{url: string, name: string}>
+     */
+    #[Computed]
+    public function reviewSignatures(): array
+    {
+        return $this->reviewSubmission()?->reviewerSignatures() ?? [];
     }
 
     /**
@@ -350,6 +367,7 @@ class OpcrfReview extends Component
         // current holder themself (their compliance mark ends the chain).
         $routeTo = $this->resolveNextReviewer($submission);
 
+        $signatureStamped = $submission->stampReviewerSignature(Auth::user(), 'RATER');
         $submission->markCompliant(Auth::user(), $remarks, $routeTo);
 
         // The staff member's bell now carries the decision, with the
@@ -373,6 +391,9 @@ class OpcrfReview extends Component
         $this->successMessage = $routeTo !== null
             ? 'OPCR marked compliant — routed to '.$routeTo->username.' for the next review step.'
             : 'OPCR marked compliant/approved.';
+        if (! $signatureStamped) {
+            $this->successMessage .= ' Your digital signature could not be added; check your profile signature and the workbook signer fields.';
+        }
 
         // The owning staff member's submissions table shows the new status
         // without a reload; the sidebar badges follow on both sides.
@@ -408,6 +429,8 @@ class OpcrfReview extends Component
 
         $remarks = trim($this->reviewRemarks) !== '' ? trim($this->reviewRemarks) : null;
 
+        $signatureStamped = $submission->stampReviewerSignature(Auth::user(), 'APPROVING AUTHORITY');
+
         // No onward routing: the final sign-off deliberately passes null, so
         // the chain ends with the signed-in reviewer.
         $submission->markCompliant(
@@ -434,6 +457,9 @@ class OpcrfReview extends Component
         unset($this->submissions, $this->reviewSubmission, $this->reviewMovs, $this->reviewSheet, $this->reviewSheetRating, $this->reviewWorkbook, $this->reviewHistory);
 
         $this->successMessage = 'OPCR marked compliant — final sign-off recorded.';
+        if (! $signatureStamped) {
+            $this->successMessage .= ' Your digital signature could not be added; check your profile signature and the workbook signer fields.';
+        }
 
         $this->dispatch('opcrf-submission-approved')->to(OpcrfMovs::class);
         $this->dispatch('opcrf-submission-approved');

@@ -6,7 +6,10 @@
     <meta name="theme-color" content="#f1f5f9">
     <link rel="icon" type="image/svg+xml" href="{{ public_asset('smap.svg') }}?v=2">
     <link rel="shortcut icon" href="{{ public_asset('smap.svg') }}?v=2">
-    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=10">
+    {{-- The version is bumped whenever dashboard.css changes: browsers that
+         cached an older copy keep painting the stale sheet at the same URL,
+         which is why a broken stylesheet can survive a fresh deploy. --}}
+    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=15">
     <title>@yield('title', 'Dashboard — SmartApp')</title>
     <script>
         /* Apply the saved theme before first paint to avoid a flash.
@@ -2098,6 +2101,13 @@
             color: var(--text-muted);
         }
 
+        .opcrf-parts-group-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: auto;
+        }
+
         .opcrf-part-action {
             display: inline-flex;
             align-items: center;
@@ -2117,6 +2127,19 @@
 
         .opcrf-part-action:hover {
             background: var(--primary-strong);
+        }
+
+        .opcrf-parts-group-actions .opcrf-part-action {
+            flex: 1 1 120px;
+            margin-top: 0;
+            padding: 9px 12px;
+        }
+
+        .opcrf-part-progress-label {
+            padding: 2px 6px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.18);
+            font-size: 0.6875rem;
         }
 
         /* The locked state is a label, not a button: it must not be focusable
@@ -2844,6 +2867,24 @@
             line-height: 1.6;
         }
 
+        .opcrf-sheet-purpose {
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-elevated);
+        }
+
+        .opcrf-sheet-purpose strong {
+            display: block;
+            margin-bottom: 6px;
+            color: var(--text-strong);
+        }
+
+        .opcrf-sheet-purpose p {
+            margin: 0;
+            color: var(--text);
+            white-space: pre-line;
+        }
+
         .opcrf-sheet-banner {
             background: #1f3864;
             color: #ffffff;
@@ -3050,6 +3091,25 @@
             color: #1f3864;
         }
 
+        /* The ratee's digital signature, sitting above their printed name —
+           the same picture the stamped workbook carries in that column. */
+        .opcrf-sheet-signer-sig {
+            display: block;
+            padding: 2px 0 8px;
+        }
+
+        .opcrf-sheet-signer-sig img {
+            display: block;
+            max-width: 170px;
+            max-height: 64px;
+            object-fit: contain;
+            object-position: left center;
+        }
+
+        .opcrf-sheet-signer--signed {
+            border-top-color: rgba(31, 56, 100, 0.4);
+        }
+
         .opcrf-sheet-tablewrap {
             overflow-x: auto;
         }
@@ -3100,6 +3160,56 @@
             letter-spacing: 0.03em;
         }
 
+        /* Keep the workbook's summary columns visible at their source-order
+           position on the right while the wide table scrolls. */
+        .modal--opcrf-sheet .opcrf-sheet-average,
+        .modal--opcrf-sheet .opcrf-sheet-weighted-average {
+            position: sticky;
+            z-index: 1;
+            background: color-mix(in srgb, var(--bg-muted) 35%, var(--bg-elevated));
+        }
+
+        .modal--opcrf-sheet .opcrf-sheet-average {
+            right: 120px;
+            width: 96px;
+            box-shadow: -1px 0 var(--border);
+        }
+
+        .modal--opcrf-sheet .opcrf-sheet-weighted-average {
+            right: 0;
+            width: 120px;
+            box-shadow: -1px 0 var(--border);
+        }
+
+        .modal--opcrf-sheet .opcrf-sheet-table thead .opcrf-sheet-average,
+        .modal--opcrf-sheet .opcrf-sheet-table thead .opcrf-sheet-weighted-average {
+            padding: 8px 4px;
+            text-align: center;
+            white-space: normal;
+            overflow-wrap: anywhere;
+            font-size: 0.625rem;
+            line-height: 1.3;
+        }
+
+        .modal--opcrf-sheet .opcrf-sheet-table tbody td.opcrf-sheet-average,
+        .modal--opcrf-sheet .opcrf-sheet-table tbody td.opcrf-sheet-weighted-average {
+            background: color-mix(in srgb, var(--bg-muted) 35%, var(--bg-elevated));
+        }
+
+        .modal--opcrf-sheet .opcrf-sheet-summary-value {
+            position: sticky;
+            right: 0;
+            z-index: 1;
+            background: var(--bg-muted);
+            box-shadow: -1px 0 var(--border);
+        }
+
+        .modal--opcrf-sheet .opcrf-sheet-table thead .opcrf-sheet-average,
+        .modal--opcrf-sheet .opcrf-sheet-table thead .opcrf-sheet-weighted-average {
+            z-index: 4;
+            background: var(--bg-muted);
+        }
+
         .opcrf-sheet-th-sub {
             display: block;
             font-weight: 400;
@@ -3136,22 +3246,48 @@
             color: var(--text-muted) !important;
         }
 
+        .opcrf-sheet-table--objectives {
+            min-width: 2380px;
+        }
+
+        .opcrf-sheet-table--objectives .opcrf-sheet-kra {
+            width: 165px;
+        }
+
+        .opcrf-sheet-table--objectives .opcrf-sheet-attribution {
+            width: 250px;
+            white-space: pre-line;
+        }
+
         .opcrf-sheet-obj {
-            width: 22%;
+            width: 260px;
             font-weight: 500;
             color: var(--text-strong);
         }
 
         .opcrf-sheet-time {
-            width: 12%;
+            width: 100px;
         }
 
         .opcrf-sheet-crit {
-            width: 15%;
+            width: 140px;
         }
 
         .opcrf-sheet-acc {
-            width: 33%;
+            width: 280px;
+        }
+
+        .opcrf-sheet-movs {
+            width: 210px;
+        }
+
+        .opcrf-sheet-target {
+            width: 145px;
+        }
+
+        .opcrf-sheet-weight {
+            width: 78px;
+            text-align: center !important;
         }
 
         /* Slim numeric columns (weight, per-block average/weighted). */
@@ -3163,9 +3299,28 @@
 
         /* The 5-level Rating Scale column: each level its own line. */
         .opcrf-sheet-scale {
-            width: 22%;
+            width: 270px;
             font-size: 0.8125rem;
             line-height: 1.55;
+        }
+
+        .opcrf-sheet-review-summary {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-elevated);
+        }
+
+        .opcrf-sheet-review-summary > div {
+            display: grid;
+            gap: 3px;
+            min-width: 150px;
+        }
+
+        .opcrf-sheet-review-summary strong {
+            color: var(--text-strong);
         }
 
         .opcrf-sheet-scalelevel {
@@ -3622,6 +3777,20 @@
             border-radius: 10px;
             background: var(--bg-elevated);
             padding: 14px 16px 16px;
+        }
+
+        /* The reviewer's own copy of the submitted workbook, offered right
+           after the note that describes what they are looking at. */
+        .opcrf-download-row {
+            margin: 0 0 14px;
+        }
+
+        .opcrf-download-row .btn-ghost {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 14px;
+            font-size: 0.8125rem;
         }
 
         .opcrf-review-card-head {
@@ -6767,6 +6936,11 @@
                          beside the theme toggle and the account menu. --}}
                     @auth
                         <livewire:notifications-menu />
+                        {{-- The account menu opens these: mounted once in the layout
+                             so every page can show "Update My Profile" and the
+                             signature dialog without each page carrying them. --}}
+                        <livewire:profile.update-profile />
+                        <livewire:profile.digital-signature-modal />
                     @endauth
 
                     <button type="button" class="theme-toggle" id="themeToggle" title="Toggle light/dark mode" aria-label="Toggle light/dark mode">
@@ -6774,21 +6948,28 @@
                         <x-icon name="moon" :size="20" class="icon-moon" />
                     </button>
                     <button type="button" class="user-menu-trigger" id="userMenuTrigger" aria-haspopup="true" aria-expanded="false" title="Account menu">
-                        <div class="avatar">{{ strtoupper(substr(Auth::user()->username, 0, 2)) }}</div>
-                        <span class="name"><strong>{{ Auth::user()->username }}</strong></span>
+                        <div class="avatar" id="userMenuAvatar">{{ strtoupper(substr(Auth::user()->username, 0, 2)) }}</div>
+                        <span class="name"><strong id="userMenuUsername">{{ Auth::user()->username }}</strong></span>
                         <span class="chevron" aria-hidden="true"><x-icon name="chevron-down" :size="14" /></span>
                     </button>
 
                     <div class="user-dropdown" id="userDropdown" role="menu">
                         <div class="user-dropdown-header">
-                            <strong>{{ Auth::user()->username }}</strong>
+                            <strong id="userDropdownUsername">{{ Auth::user()->username }}</strong>
                             @if(Auth::user()->email)
-                                <span>{{ Auth::user()->email }}</span>
+                                <span id="userDropdownEmail">{{ Auth::user()->email }}</span>
                             @endif
                         </div>
-                        <a href="{{ route('profile.index') }}" class="user-dropdown-link" role="menuitem" wire:navigate>
-                            <x-icon name="user-round" :size="16" /> Profile
-                        </a>
+                        {{-- Both items open a dialog instead of navigating:
+                             each carries the event its component listens for.
+                             The profile page still exists as a deep link, but
+                             this menu is the way in. --}}
+                        <button type="button" class="user-dropdown-link" role="menuitem" data-modal-event="open-profile-modal">
+                            <x-icon name="user-round" :size="16" /> Update My Profile
+                        </button>
+                        <button type="button" class="user-dropdown-link" role="menuitem" data-modal-event="open-signature-modal">
+                            <x-icon name="pen-line" :size="16" /> Digital Signature
+                        </button>
                         <form method="POST" action="{{ route('logout') }}">
                             @csrf
                             <button type="submit" class="user-dropdown-item" role="menuitem">
@@ -6889,6 +7070,30 @@
                 }
 
                 applyState();
+
+                /* Saving the profile modal can rename the account, so the menu's
+                   name, initials and email are refreshed in place instead of
+                   staying stale until the next page load. Bound once on window:
+                   this initializer runs again on every SPA navigation. */
+                if (!window.__smartappProfileMenuBound) {
+                    window.__smartappProfileMenuBound = true;
+                    window.addEventListener('smartapp-profile-updated', function (event) {
+                        var detail = event.detail || {};
+                        if (!detail.username) return;
+
+                        var name = document.getElementById('userMenuUsername');
+                        if (name) name.textContent = detail.username;
+
+                        var initials = document.getElementById('userMenuAvatar');
+                        if (initials) initials.textContent = detail.username.slice(0, 2).toUpperCase();
+
+                        var menuName = document.getElementById('userDropdownUsername');
+                        if (menuName) menuName.textContent = detail.username;
+
+                        var menuEmail = document.getElementById('userDropdownEmail');
+                        if (menuEmail && detail.email) menuEmail.textContent = detail.email;
+                    });
+                }
             }
 
             function initUserMenu() {
@@ -6922,6 +7127,23 @@
                     if (e.key === 'Escape') {
                         close();
                     }
+                });
+
+                /* The menu's dialog items (Update My Profile, Digital
+                   Signature) open a component-mounted dialog rather than
+                   navigating, each naming the event it fires. The menu has
+                   done its job once the dialog is up, so it closes first. */
+                Array.prototype.slice.call(dropdown.querySelectorAll('[data-modal-event]')).forEach(function(item) {
+                    if (item.dataset.modalBound) return;
+                    item.dataset.modalBound = '1';
+
+                    item.addEventListener('click', function() {
+                        close();
+
+                        if (window.Livewire && window.Livewire.dispatch) {
+                            window.Livewire.dispatch(item.getAttribute('data-modal-event'));
+                        }
+                    });
                 });
             }
 

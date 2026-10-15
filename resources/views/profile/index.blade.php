@@ -5,7 +5,7 @@
 @section('content')
     <div class="page-header">
         <h1>Profile</h1>
-        <p>Your account details and your digital signature. One profile serves every role — the signature you keep here is the one stamped onto the documents SmartApp generates for you.</p>
+        <p>Your account details. One profile serves every role — the signature SmartApp stamps onto the documents it generates for you is managed from <strong>Digital Signature</strong> in the account menu.</p>
     </div>
 
     @php($account = Auth::user())
@@ -20,29 +20,35 @@
             </div>
         </div>
 
-        <dl class="profile-meta">
-            <dt>Username</dt>
-            <dd>{{ $account->username }}</dd>
-
-            <dt>Email</dt>
-            <dd>{{ $account->email ?: '—' }}</dd>
-
+        <div class="profile-meta-grid">
+            <div class="profile-meta-item">
+                <span class="profile-meta-label">Username</span>
+                <span class="profile-meta-value">{{ $account->username }}</span>
+            </div>
+            <div class="profile-meta-item">
+                <span class="profile-meta-label">Email</span>
+                <span class="profile-meta-value">{{ $account->email ?: '—' }}</span>
+            </div>
             @if ($account->position)
-                <dt>Position</dt>
-                <dd>{{ $account->position }}</dd>
+                <div class="profile-meta-item">
+                    <span class="profile-meta-label">Position</span>
+                    <span class="profile-meta-value">{{ $account->position }}</span>
+                </div>
             @endif
-
             @if ($account->school)
-                <dt>School</dt>
-                <dd>{{ $account->school->name }}</dd>
+                <div class="profile-meta-item">
+                    <span class="profile-meta-label">School</span>
+                    <span class="profile-meta-value">{{ $account->school->name }}</span>
+                </div>
             @endif
-
-            <dt>Role</dt>
-            <dd>{{ $account->roleLabel() }}</dd>
-        </dl>
+            <div class="profile-meta-item">
+                <span class="profile-meta-label">Role</span>
+                <span class="profile-meta-value">{{ $account->roleLabel() }}</span>
+            </div>
+        </div>
     </div>
 
-    {{-- DIGITAL SIGNATURE: the same component is used for a user and for a
-         superadmin — the signature belongs to the account, not the role. --}}
-    <livewire:profile.digital-signature />
+    {{-- The digital signature is not repeated here: the account menu's
+         "Digital Signature" dialog hosts that component on every page (see
+         layouts.dashboard), so this page keeps the account summary alone. --}}
 @endsection

@@ -327,9 +327,10 @@ class OpcrfSpreadsheetTest extends TestCase
 
         $this->assertCount(3, $signers);
 
-        // RATEE's name cell holds a stray computed number → no name.
+        // RATEE's name cell holds a stray computed number, so use the
+        // employee name from the workbook header instead.
         $this->assertSame('RATEE', $signers[0]['role']);
-        $this->assertSame('', $signers[0]['name']);
+        $this->assertSame('Jane D. Doe', $signers[0]['name']);
 
         $this->assertSame('RATER', $signers[1]['role']);
         $this->assertSame('EVA M. DOLLOSA RN', $signers[1]['name']);
@@ -349,7 +350,7 @@ class OpcrfSpreadsheetTest extends TestCase
 
         $signers = (new OpcrfSpreadsheet($path))->signers();
 
-        $this->assertSame('', $signers[0]['name']); // signature line, not a name
+        $this->assertSame('Jane D. Doe', $signers[0]['name']); // falls back to the employee header
         $this->assertSame('', $signers[1]['name']); // blank
         $this->assertSame('FERDINAND S. SY PhD, CESO VI', $signers[2]['name']);
     }

@@ -128,7 +128,7 @@ class OpcrfReviewTest extends TestCase
         $staff = $this->staffUser();
         $submission = $this->createSubmission($staff);
 
-        Livewire::actingAs($admin)
+        $component = Livewire::actingAs($admin)
             ->test(OpcrfReview::class)
             ->call('openReview', $submission->id)
             ->assertSet('showReview', true)
@@ -158,7 +158,7 @@ class OpcrfReviewTest extends TestCase
             ->assertDontSee('>Download</span>', false);
     }
 
-    public function test_the_review_modal_keeps_the_workbook_off_the_page(): void
+    public function test_the_review_renders_the_complete_part_one_form_in_template_order(): void
     {
         Storage::fake('local');
 
@@ -166,8 +166,8 @@ class OpcrfReviewTest extends TestCase
         $staff = $this->staffUser();
         $submission = $this->createSubmission($staff);
 
-        // Archive a real template-shaped workbook so we can prove the modal
-        // does NOT render its contents — the review happens on the file.
+        // Archive a complete template-shaped workbook and verify that the
+        // in-app review presents its contents in the template's column order.
         $workbookPath = $this->buildThreePartOpcrf();
         Storage::disk('local')->put(
             'opcrf-submissions/'.$staff->id.'/filled.xlsx',
@@ -178,14 +178,12 @@ class OpcrfReviewTest extends TestCase
             'file_original_name' => 'OPCRF-TEMPLATE.xlsx',
         ]);
 
-        Livewire::actingAs($admin)
+        $component = Livewire::actingAs($admin)
             ->test(OpcrfReview::class)
             ->call('openReview', $submission->id)
             ->assertSet('showReview', true)
-            // No Download action in the modal — everything is reviewed
-            // in-app, and the workbook's FULL contents are rendered as the
-            // Excel-style sheet: every part, objective, accomplishment,
-            // rating, total and signer.
+            // No Download action in the modal — the workbook's contents
+            // are reviewed in-app in their template column order.
             ->assertDontSee('>Download</span>', false)
             ->assertSee('Submitted form')
             ->assertSee('PART I-A')
@@ -195,10 +193,53 @@ class OpcrfReviewTest extends TestCase
             ->assertSee('Raised MPS by 5 points')
             ->assertSee('Objective: Utilized budget allocation')
             ->assertSee('Liquidation reports submitted')
+            ->assertSee('Key Result Areas (KRA)')
+            ->assertSee('Organizational Outcome Attribution')
+            ->assertSee('Performance Targets')
+            ->assertSee('Means of Verification (MOVs)')
+            ->assertSee('Approved WFP and Annual Implementation Plan')
+            ->assertSee('Average (QET)')
+            ->assertSee('Weighted Average')
             ->assertSee('Signed after the review')
             ->assertSee('RATEE')
-            // MOVs are gone from the review modal entirely.
-            ->assertDontSee('MOVs');
+            ->assertSee('Jane D. Doe')
+            ->assertSee('opcrf-sheet-table--objectives', false);
+
+        $html = $component->html();
+        $tableStart = strpos($html, 'class="opcrf-sheet-table opcrf-sheet-table--objectives"');
+        $this->assertNotFalse($tableStart);
+
+        if ($tableStart === false) {
+            return;
+        }
+
+        $lastPosition = $tableStart;
+
+        foreach ([
+            'opcrf-sheet-kra',
+            'opcrf-sheet-attribution',
+            'opcrf-sheet-obj',
+            'opcrf-sheet-time',
+            'opcrf-sheet-weight',
+            'opcrf-sheet-target',
+            'opcrf-sheet-crit',
+            'opcrf-sheet-scale',
+            'opcrf-sheet-movs',
+            'opcrf-sheet-acc',
+            'opcrf-sheet-rate',
+            'opcrf-sheet-average',
+            'opcrf-sheet-weighted-average',
+        ] as $columnClass) {
+            $position = strpos($html, 'class="'.$columnClass.'"', $tableStart);
+            $this->assertNotFalse($position, 'Missing OPCRF review column: '.$columnClass);
+
+            if ($position === false) {
+                continue;
+            }
+
+            $this->assertGreaterThan($lastPosition, $position, 'OPCRF review columns are out of template order.');
+            $lastPosition = $position;
+        }
     }
 
     public function test_the_review_shows_an_empty_field_as_empty_instead_of_inventing_one(): void
@@ -240,7 +281,8 @@ class OpcrfReviewTest extends TestCase
             // blank cell reads as the sheet's em-dash placeholder, styled
             // .is-empty, exactly as it did on the submitter's screen.
             ->assertSee('class="opcrf-sheet-headvalue is-empty"', false)
-            ->assertSee('<td class="opcrf-sheet-rate">—</td>', false)
+            ->assertSee('class="opcrf-sheet-rate"', false)
+            ->assertSee('—')
             // And nothing is filled in that the upload does not carry.
             ->assertDontSee('January to December 2024');
     }
@@ -334,17 +376,57 @@ class OpcrfReviewTest extends TestCase
             ->assertSee('LEADERSHIP COMPETENCIES (2.5%)')
             ->assertSee('Leading People')
             ->assertSee('1. Uses basic persuasion techniques in a discussion.')
+            ->assertSee('Persuaded the division during the budget hearing.')
+            ->assertSee('DepEd Competencies Scale')
+            ->assertSee('Role Model')
             ->assertSee('Part II-A Total Score: Weighted Average (Average x 0.025)')
             // …PART III (rating summary + agreement)…
             ->assertSee('PART III: SUMMARY OF RATINGS')
             ->assertSee('A.  Commitment to Organizational Outcomes')
             ->assertSee('JUAN DELA CRUZ')
+            ->assertSee('Overall Score')
+            ->assertSee('Very Satisfactory')
+            ->assertSee('4.500-5.000')
+            ->assertSee('Signature: EVA M. DOLLOSA RN')
+            ->assertSee('Date: 2026-03-31')
             // …and PART IV (improvement + development plans).
             ->assertSee('PART IV: IMPROVEMENT AND DEVELOPMENT PLANS')
             ->assertSee('Weak ICT infrastructure')
             ->assertSee('Procure tablets and offline content')
             ->assertSee('Strong classroom management')
             ->assertSee('Plans are achievable within the rating period.');
+    }
+
+    public function test_the_review_includes_all_content_from_the_official_opcrf_template(): void
+    {
+        Storage::fake('local');
+
+        $templatePath = base_path('storage/forms/OPCRF-TEMPLATE.xlsx');
+        $this->assertFileExists($templatePath);
+
+        $admin = $this->superadmin();
+        $staff = $this->staffUser();
+        $submission = $this->createSubmission($staff, [
+            'file_path' => 'opcrf-submissions/'.$staff->id.'/official-template.xlsx',
+            'file_original_name' => 'OPCRF-TEMPLATE.xlsx',
+        ]);
+        Storage::disk('local')->put($submission->file_path, file_get_contents($templatePath));
+
+        Livewire::actingAs($admin)
+            ->test(OpcrfReview::class)
+            ->call('openReview', $submission->id)
+            ->assertSee('Statement of Purpose')
+            ->assertSee('Anchored on the Vision, Mission')
+            ->assertSee('Key Result Areas (KRA)')
+            ->assertSee('Organizational Outcome Attribution')
+            ->assertSee('Performance Targets')
+            ->assertSee('Means of Verification (MOVs)')
+            ->assertSee('Approved Work and Financial Plan (WFP)')
+            ->assertSee('DepEd Competencies Scale')
+            ->assertSee('RPMS Rating Table')
+            ->assertSee('Ratee–Rater agreement')
+            ->assertSee('Office Improvement Plan')
+            ->assertSee('Individual Development Plan');
     }
 
     /**

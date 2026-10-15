@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Livewire\DashboardSummary;
 use App\Livewire\DistrictList;
 use App\Models\District;
+use App\Models\OpcrfSchedule;
 use App\Models\OpcrfSubmission;
 use App\Models\School;
 use App\Models\User;
@@ -77,7 +78,7 @@ class DashboardLiveTest extends TestCase
             ->assertSee('Performance plan')
             ->assertSee('Financial plan')
             ->assertSee('Download OPCRF Template')
-            ->assertSee('Upload Completed OPCRF')
+            ->assertSee('Upload Commitment')
             ->assertSee('Generate and Download WFP')
             ->assertSee(route('wfp.index'), false);
     }
@@ -85,6 +86,14 @@ class DashboardLiveTest extends TestCase
     public function test_the_staff_opcrf_card_unlocks_when_the_submission_is_returned_without_a_reload(): void
     {
         $user = $this->staffUser();
+        OpcrfSchedule::create([
+            'opcrf_year' => (int) now()->format('Y'),
+            'part_number' => OpcrfSchedule::PART_ONE,
+            'start_datetime' => now()->subDays(2),
+            'end_datetime' => now()->subDay(),
+            'is_enabled' => true,
+            'created_by' => $this->superadmin()->id,
+        ]);
         $submission = OpcrfSubmission::create([
             'user_id' => $user->id,
             'employee_name' => 'Staff Member',
@@ -109,6 +118,35 @@ class DashboardLiveTest extends TestCase
 
         $component->assertDontSee('OPCRF submitted — locked')
             ->assertSee('Download');
+    }
+
+    public function test_a_submitted_opcrf_is_unlocked_while_its_part_one_deadline_is_open(): void
+    {
+        $user = $this->staffUser();
+        OpcrfSchedule::create([
+            'opcrf_year' => (int) now()->format('Y'),
+            'part_number' => OpcrfSchedule::PART_ONE,
+            'start_datetime' => now()->subDay(),
+            'end_datetime' => now()->addDay(),
+            'is_enabled' => true,
+            'created_by' => $this->superadmin()->id,
+        ]);
+        OpcrfSubmission::create([
+            'user_id' => $user->id,
+            'employee_name' => 'Staff Member',
+            'position' => 'Teacher I',
+            'review_period' => 'January to December 2026',
+            'division_office' => 'Schools Division Office',
+            'objectives' => 'Objective 1',
+            'accomplishments' => 'Accomplished objective 1',
+            'self_rating' => 4.5,
+            'submitted_at' => now()->subHour(),
+            'status' => OpcrfSubmission::STATUS_PENDING,
+        ]);
+
+        Livewire::actingAs($user)
+            ->test(DashboardSummary::class)
+            ->assertDontSee('OPCRF submitted — locked');
     }
 
     public function test_the_superadmin_district_list_refreshes_its_counts(): void

@@ -5,9 +5,12 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Carbon\CarbonInterface;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpFoundation\ResponseHeaderBag;
 
 class User extends Authenticatable
 {
@@ -126,6 +129,45 @@ class User extends Authenticatable
     public function signatureUrl(): ?string
     {
         return $this->hasSignature() ? route('profile.signature') : null;
+    }
+
+    /**
+     * Serve this account's stored signature inline to an authorised caller.
+     *
+     * There are exactly two callers: the account itself (the profile page's
+     * preview) and whoever may read a submission whose stamped workbook
+     * encodes the same signature. The file is always resolved from this
+     * account's own columns — no path ever comes from the client — and a
+     * signature is personal data, so the response must never be cached by a
+     * shared cache or kept in the browser's history as a downloadable file.
+     */
+    public function signatureImageResponse(): Response
+    {
+        /** @var FilesystemAdapter $disk */
+        $disk = Storage::disk('local');
+
+        abort_unless(
+            $this->hasSignature() && $disk->exists((string) $this->signature_path),
+            404
+        );
+
+        $extension = strtolower(pathinfo((string) $this->signature_original_name, PATHINFO_EXTENSION));
+        $name = 'signature-'.$this->id.($extension !== '' ? '.'.$extension : '');
+
+        $response = $disk->response((string) $this->signature_path, $name);
+
+        $response->headers->set(
+            'Content-Disposition',
+            $response->headers->makeDisposition(ResponseHeaderBag::DISPOSITION_INLINE, $name),
+        );
+
+        if ($this->signature_mime_type) {
+            $response->headers->set('Content-Type', $this->signature_mime_type);
+        }
+
+        $response->headers->set('Cache-Control', 'private, no-store, max-age=0');
+
+        return $response;
     }
 
     /**

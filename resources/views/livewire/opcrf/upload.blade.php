@@ -17,17 +17,18 @@
         ></div>
     @endif
 
-    {{-- UPLOAD BUTTON: rendered beside the card's Download button. --}}
-    <button
-        type="button"
-        class="opcrf-upload-btn {{ $errors->has('file') ? 'has-error' : '' }}"
-        wire:click="openUpload"
-        aria-haspopup="dialog"
-        title="Upload your completed OPCRF template"
-    >
-        <x-icon name="upload" :size="16" />
-        <span>Upload Completed OPCRF</span>
-    </button>
+    @if ($this->canUploadNow())
+        <button
+            type="button"
+            class="opcrf-upload-btn {{ $errors->has('file') ? 'has-error' : '' }}"
+            wire:click="openUpload"
+            aria-haspopup="dialog"
+            title="{{ $this->isUpdatingSubmission() ? 'Update your OPCRF' : 'Upload your commitment' }}"
+        >
+            <x-icon name="upload" :size="16" />
+            <span>{{ $this->isUpdatingSubmission() ? 'Update OPCRF' : 'Upload Commitment' }}</span>
+        </button>
+    @endif
 
     {{-- UPLOAD WINDOW: "Upload your OPCR in here". Picking a file analyzes it
          and hands over to the review modal below. --}}
@@ -41,13 +42,14 @@
         >
             <div class="modal modal--opcr-upload" role="dialog" aria-modal="true" aria-labelledby="opcrUploadTitle" @click.stop>
                 <div class="modal-head">
-                    <h2 id="opcrUploadTitle">Upload Completed OPCRF</h2>
+                    <h2 id="opcrUploadTitle">{{ $this->isUpdatingSubmission() ? 'Update OPCRF' : 'Upload Commitment' }}</h2>
                     <button type="button" class="modal-close" wire:click="closeUpload" aria-label="Close" title="Close">×</button>
                 </div>
 
                 <p class="opcrf-review-note">
-                    Complete the OPCRF template you downloaded from this
-                    dashboard, then upload the completed file here.
+                    {{ $this->isUpdatingSubmission()
+                        ? 'Upload a revised OPCRF workbook. Your current submission will be preserved in the version history.'
+                        : 'Complete the OPCRF template you downloaded from this dashboard, then upload the completed file here.' }}
                 </p>
 
                 <ul class="opcrf-upload-requirements">
@@ -189,7 +191,7 @@
                     <div class="modal-actions">
                         <button type="button" class="btn-ghost" wire:click="cancelReview">Cancel</button>
                         <button type="button" class="btn-primary" wire:click="confirmSubmit" wire:loading.attr="disabled" wire:target="confirmSubmit">
-                            <span wire:loading.remove wire:target="confirmSubmit">Submit OPCRF</span>
+                            <span wire:loading.remove wire:target="confirmSubmit">{{ $this->isUpdatingSubmission() ? 'Submit OPCRF Update' : 'Submit OPCRF' }}</span>
                             <span wire:loading wire:target="confirmSubmit">Submitting…</span>
                         </button>
                     </div>

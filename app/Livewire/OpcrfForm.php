@@ -3,8 +3,10 @@
 namespace App\Livewire;
 
 use App\Models\OpcrfSubmission;
+use App\Support\OpcrfAccess;
 use App\Support\OpcrfTemplatePersonalizer;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
@@ -26,6 +28,8 @@ class OpcrfForm extends Component
      * the user confirms inside it.
      */
     public bool $showReview = false;
+
+    public ?int $submissionId = null;
 
     /**
      * Set after a successful submit so the view can pop a SweetAlert
@@ -109,14 +113,18 @@ class OpcrfForm extends Component
         // is. One user-information source, not two.
         $identity = OpcrfTemplatePersonalizer::identityFor(Auth::user());
 
-        $this->employee_name = $identity['name'];
-        $this->position = $identity['position'];
-        $this->review_period = $identity['review_period'];
-        $this->division_office = $identity['division_office'];
-        $this->objectives = '';
-        $this->accomplishments = '';
-        $this->self_rating = '';
-        $this->remarks = '';
+        $submission = $this->latestPartOneSubmission();
+        $this->submissionId = $submission?->id;
+        $this->employee_name = $submission?->employee_name ?: $identity['name'];
+        $this->position = $submission?->position ?: $identity['position'];
+        $this->review_period = $submission?->review_period ?: $identity['review_period'];
+        $this->division_office = $submission?->division_office ?: $identity['division_office'];
+        $this->objectives = $submission?->objectives ?? '';
+        $this->accomplishments = $submission?->accomplishments ?? '';
+        $this->self_rating = $submission !== null && $submission->self_rating > 0
+            ? (string) $submission->self_rating
+            : '';
+        $this->remarks = $submission?->remarks ?? '';
     }
 
     /**
@@ -126,7 +134,9 @@ class OpcrfForm extends Component
      */
     public function submitForReview(): void
     {
+        abort_unless(Auth::check(), 404);
         abort_if(Auth::user()?->hasAdminAccess(), 404);
+        abort_unless($this->partOneIsOpen(), 403);
 
         $this->validate();
 
@@ -139,14 +149,15 @@ class OpcrfForm extends Component
      */
     public function confirmSubmit(): void
     {
+        abort_unless(Auth::check(), 404);
         abort_if(Auth::user()?->hasAdminAccess(), 404);
+        abort_unless($this->partOneIsOpen(), 403);
 
         // Re-validate: the client could have changed fields between the
         // review gate opening and confirming (or crafted the call).
         $validated = $this->validate();
 
-        $submission = OpcrfSubmission::create([
-            'user_id' => Auth::id(),
+        $attributes = [
             'employee_name' => $validated['employee_name'],
             'position' => $validated['position'],
             'review_period' => $validated['review_period'],
@@ -155,12 +166,68 @@ class OpcrfForm extends Component
             'accomplishments' => $validated['accomplishments'],
             'self_rating' => (float) $validated['self_rating'],
             'remarks' => $validated['remarks'] ?: null,
-            'submitted_at' => now(),
-        ]);
+        ];
+
+        $submission = DB::transaction(function () use ($attributes): OpcrfSubmission {
+            $query = OpcrfSubmission::query()
+                ->where('user_id', Auth::id())
+                ->where('opcrf_part', OpcrfSubmission::PART_ONE)
+                ->latest('id')
+                ->lockForUpdate();
+
+            $submission = $query->first();
+
+            if ($submission !== null) {
+                abort_unless($submission->user_id === Auth::id(), 404);
+                abort_unless(
+                    $this->submissionId === null || $submission->id === $this->submissionId,
+                    409
+                );
+                $submission->updateFormDuringDeadline($attributes);
+
+                return $submission;
+            }
+
+            abort_if($this->submissionId !== null, 404);
+
+            return OpcrfSubmission::create([
+                ...$attributes,
+                'user_id' => Auth::id(),
+                'opcrf_part' => OpcrfSubmission::PART_ONE,
+                'submitted_at' => now(),
+            ]);
+        });
 
         $this->showReview = false;
-        $this->successMessage = 'OPCRF submitted — your form was recorded on '
+        $this->submissionId = $submission->id;
+        $this->successMessage = 'OPCRF '
+            .($submission->wasRecentlyCreated ? 'submitted' : 'updated')
+            .' — your form was recorded on '
             .$submission->submitted_at->format('M j, Y g:i A').'.';
+    }
+
+    private function latestPartOneSubmission(): ?OpcrfSubmission
+    {
+        return OpcrfSubmission::query()
+            ->where('user_id', Auth::id())
+            ->where('opcrf_part', OpcrfSubmission::PART_ONE)
+            ->latest('id')
+            ->first();
+    }
+
+    private function partOneIsOpen(): bool
+    {
+        return OpcrfAccess::partState(
+            Auth::user(),
+            OpcrfSubmission::PART_ONE
+        )['open'];
+    }
+
+    public function canEdit(): bool
+    {
+        return Auth::check()
+            && ! Auth::user()->hasAdminAccess()
+            && $this->partOneIsOpen();
     }
 
     /**
@@ -174,7 +241,8 @@ class OpcrfForm extends Component
     }
 
     /**
-     * Start a brand-new blank form after a successful submission.
+     * Clear the fields for another edit without detaching this form from its
+     * existing submission row.
      */
     public function startNew(): void
     {

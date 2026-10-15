@@ -184,6 +184,14 @@ class OpcrfMovs extends Component
 
         $submission->resubmit($archivedPath, $originalName);
 
+        // The revision is the form the reviewer will read now, so the account's
+        // digital signature is encoded into it again — the same stamp the
+        // original filing got. A revision with no new workbook attached keeps
+        // the stamped copy it already had.
+        if ($archivedPath !== null) {
+            $submission->stampSignature();
+        }
+
         $this->closeRevise();
 
         $this->successMessage = 'Revised OPCRF submitted — it is back with '

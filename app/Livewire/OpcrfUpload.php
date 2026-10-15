@@ -6,6 +6,7 @@ use App\Models\OpcrfSubmission;
 use App\Models\OpcrfTemplate;
 use App\Models\User;
 use App\Notifications\OpcrfSubmitted;
+use App\Support\OpcrfAccess;
 use App\Support\OpcrfSpreadsheet;
 use App\Support\OpcrfTemplatePersonalizer;
 use Illuminate\Support\Facades\Auth;
@@ -25,9 +26,9 @@ use RuntimeException;
  * over to a "Review before submitting" modal showing every extracted
  * detail — nothing is stored until the user confirms inside that modal.
  *
- * Confirming stores the submission and closes the flow: the dashboard's
- * OPCRF Template card locks (the cycle is complete) and the submission
- * appears in the staff member's Opcrf page and the reviewer's list.
+ * Confirming stores a first submission or replaces the owner's current
+ * submission during its update window, preserving prior workbook versions
+ * and returning the latest copy to the reviewer's list.
  */
 #[Title('Dashboard — SmartApp')]
 class OpcrfUpload extends Component
@@ -38,6 +39,12 @@ class OpcrfUpload extends Component
      * The uploaded .xlsx (temporary, until analyzed).
      */
     public $file;
+
+    /**
+     * The owner's current submission being replaced, or null for a first
+     * submission. Every action reloads and verifies this ID server-side.
+     */
+    public ?int $submissionId = null;
 
     /**
      * "Upload your OPCR in here" window, opened from the OPCRF Template
@@ -185,8 +192,71 @@ class OpcrfUpload extends Component
         abort_unless(Auth::check(), 404);
         abort_if(Auth::user()->hasAdminAccess(), 404);
 
+        $submission = $this->latestSubmission();
+        abort_unless($this->canUploadSubmission($submission), 403);
+
+        $this->submissionId = $submission?->id;
         $this->resetValidation();
         $this->showUpload = true;
+    }
+
+    public function canUploadNow(): bool
+    {
+        if (! Auth::check() || Auth::user()->hasAdminAccess()) {
+            return false;
+        }
+
+        return $this->canUploadSubmission($this->latestSubmission());
+    }
+
+    public function isUpdatingSubmission(): bool
+    {
+        return $this->submissionId !== null
+            || $this->latestSubmission() !== null;
+    }
+
+    private function latestSubmission(): ?OpcrfSubmission
+    {
+        return OpcrfSubmission::query()
+            ->where('user_id', Auth::id())
+            ->where('opcrf_part', OpcrfSubmission::PART_ONE)
+            ->latest('id')
+            ->first();
+    }
+
+    private function canUploadSubmission(?OpcrfSubmission $submission): bool
+    {
+        if ($submission?->status === OpcrfSubmission::STATUS_RETURNED) {
+            return true;
+        }
+
+        return Auth::check()
+            && OpcrfAccess::partState(Auth::user(), OpcrfSubmission::PART_ONE)['open'];
+    }
+
+    /**
+     * Recheck the schedule and submission ownership on every upload action.
+     * A stale first-submission modal cannot create a duplicate if another
+     * submission was filed in another tab.
+     */
+    private function authorizedSubmissionForUpload(): ?OpcrfSubmission
+    {
+        abort_unless(Auth::check(), 404);
+        abort_if(Auth::user()->hasAdminAccess(), 404);
+
+        if ($this->submissionId !== null) {
+            $submission = OpcrfSubmission::query()
+                ->where('user_id', Auth::id())
+                ->findOrFail($this->submissionId);
+            abort_unless($this->latestSubmission()?->is($submission), 404);
+        } else {
+            $submission = $this->latestSubmission();
+            abort_if($submission !== null, 409);
+        }
+
+        abort_unless($this->canUploadSubmission($submission), 403);
+
+        return $submission;
     }
 
     /**
@@ -228,6 +298,7 @@ class OpcrfUpload extends Component
     {
         $this->showUpload = false;
         $this->file = null;
+        $this->submissionId = null;
         $this->verifiedName = '';
         $this->nameNote = null;
         $this->templateVersion = null;
@@ -240,8 +311,7 @@ class OpcrfUpload extends Component
      */
     public function updatedFile(): void
     {
-        abort_unless(Auth::check(), 404);
-        abort_if(Auth::user()->hasAdminAccess(), 404);
+        $this->authorizedSubmissionForUpload();
 
         $this->validate([
             'file' => ['required', 'file', 'max:'.(int) config('opcrf.template.max_kb', 10240), 'extensions:xlsx'],
@@ -355,13 +425,61 @@ class OpcrfUpload extends Component
      */
     public function confirmSubmit(): void
     {
-        abort_unless(Auth::check(), 404);
-        abort_if(Auth::user()->hasAdminAccess(), 404);
+        $existingSubmission = $this->authorizedSubmissionForUpload();
+
+        $this->validate([
+            'file' => ['required', 'file', 'max:'.(int) config('opcrf.template.max_kb', 10240), 'extensions:xlsx'],
+        ], [
+            'file.required' => 'Please upload your completed OPCRF template before submitting.',
+            'file.extensions' => 'The OPCRF must be the .xlsx template file.',
+            'file.max' => 'The file is too large (10 MB maximum).',
+        ]);
 
         // Re-validate server-side: the review modal's data must still be
         // well-formed (the client could have crafted the call). Blanks are
         // approved — they simply record as empty.
         $validated = $this->validate();
+
+        $uploadCheck = null;
+        $accountName = null;
+        if ($this->file instanceof TemporaryUploadedFile) {
+            $check = OpcrfTemplatePersonalizer::verify($this->file->getRealPath(), Auth::user());
+            $uploadCheck = $check['status'];
+            $accountName = $check['expected'];
+        }
+
+        if ($existingSubmission !== null) {
+            $archivedPath = $this->file->storeAs(
+                'opcrf-submissions/'.Auth::id(),
+                uniqid().'-'.$this->file->getClientOriginalName(),
+                'local'
+            );
+
+            $existingSubmission->replaceDuringDeadline(
+                $archivedPath,
+                $this->file->getClientOriginalName(),
+                [
+                    'opcrf_template_id' => OpcrfTemplate::latestFor(Auth::user())?->id,
+                    'employee_name' => (string) $validated['employee_name'],
+                    'upload_check' => $uploadCheck,
+                    'account_name' => $accountName,
+                    'position' => (string) $validated['position'],
+                    'review_period' => (string) $validated['review_period'],
+                    'division_office' => (string) $validated['division_office'],
+                    'objectives' => (string) $validated['objectives'],
+                    'accomplishments' => (string) $validated['accomplishments'],
+                    'self_rating' => (float) ($validated['self_rating'] ?? 0),
+                ]
+            );
+            $existingSubmission->stampSignature();
+
+            $reviewer = $existingSubmission->assignedTo ?? $existingSubmission->reviewer;
+            $reviewer?->notify(new OpcrfSubmitted($existingSubmission));
+
+            $this->finishUpload('OPCR updated — the revised form was recorded and sent for review.');
+
+            return;
+        }
 
         // The recipient is chosen by the system, not the staff member:
         // the configured superadmin (Eve by default), first superadmin as
@@ -374,35 +492,21 @@ class OpcrfUpload extends Component
             return;
         }
 
+        $archivedPath = $this->file->storeAs(
+            'opcrf-submissions/'.Auth::id(),
+            uniqid().'-'.$this->file->getClientOriginalName(),
+            'local'
+        );
+
         // Re-read server-side before anything is written: the contents were
         // read when the file was picked, but the client could have crafted
         // this call. Same rule as the upload window — this records what the
         // workbook says, and nothing more.
-        $uploadCheck = null;
-        $accountName = null;
-
-        if ($this->file instanceof TemporaryUploadedFile) {
-            $check = OpcrfTemplatePersonalizer::verify($this->file->getRealPath(), Auth::user());
-
-            $uploadCheck = $check['status'];
-            $accountName = $check['expected'];
-        }
-
         // Archive the staff member's actual uploaded .xlsx alongside the
         // submission, so the superadmin reviews (and can replace) the
         // literal submitted file — not just the extracted values. The bytes
         // are stored exactly as received: nothing overwrites or rewrites
         // them, so the archived workbook is the staff member's own file.
-        $archivedPath = null;
-
-        if ($this->file instanceof TemporaryUploadedFile) {
-            $archivedPath = $this->file->storeAs(
-                'opcrf-submissions/'.Auth::id(),
-                uniqid().'-'.$this->file->getClientOriginalName(),
-                'local'
-            );
-        }
-
         // The template the account last generated, recorded when there is
         // one: a submission is judged on its contents, so an account that
         // never downloaded a template is not blocked — the link is simply
@@ -438,24 +542,34 @@ class OpcrfUpload extends Component
             'submitted_at' => now(),
         ]);
 
+        // The account's digital signature is encoded into the workbook right
+        // here, at the moment of filing: the staff member signs the OPCR by
+        // having a signature on their profile, so the reviewer's copy of the
+        // file carries it at the bottom of every part with a signer block. It
+        // carries no authority to refuse anything — a submission with no
+        // signature on file (or a workbook that cannot be stamped) is archived
+        // exactly as uploaded.
+        $submission->stampSignature();
+
         // The reviewer now has work waiting: their notification bell in the
         // topbar says so without them having to open Review Opcrf.
         $reviewer->notify(new OpcrfSubmitted($submission));
 
+        $this->finishUpload('OPCR uploaded — your form was analyzed and recorded.');
+    }
+
+    private function finishUpload(string $successMessage): void
+    {
         $this->showReview = false;
         $this->showUpload = false;
         $this->analyzed = false;
         $this->file = null;
+        $this->submissionId = null;
         $this->reviewer_id = '';
         $this->nameNote = null;
         $this->verifiedName = '';
+        $this->successMessage = $successMessage;
 
-        $this->successMessage = 'OPCR uploaded — your form was analyzed and recorded.';
-
-        // The submissions table on the /opcrf page sits in its own component
-        // — tell it the dataset changed so the confirmed upload shows up
-        // without a reload. The event also broadcasts browser-wide so the
-        // superadmin's Review Opcrf page and sidebar badge update live.
         $this->dispatch('opcrf-submission-created');
     }
 
@@ -469,6 +583,7 @@ class OpcrfUpload extends Component
         $this->showUpload = false;
         $this->analyzed = false;
         $this->file = null;
+        $this->submissionId = null;
         $this->verifiedName = '';
         $this->nameNote = null;
         $this->templateVersion = null;

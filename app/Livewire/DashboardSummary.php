@@ -5,6 +5,7 @@ namespace App\Livewire;
 use App\Models\OpcrfSubmission;
 use App\Models\OpcrfTemplate;
 use App\Models\User;
+use App\Support\OpcrfAccess;
 use App\Support\OpcrfPartOne;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Component;
@@ -14,7 +15,8 @@ use Livewire\Component;
  *
  * The OPCRF Template card is the only thing on the dashboard that can change
  * while a staff member is looking at it, and it refreshes itself (wire:poll) —
- * it unlocks the moment a reviewer returns their submission, without a reload.
+ * it unlocks while Part 1's deadline is open and when a reviewer returns the
+ * submission, without a reload.
  *
  * Superadmins have nothing here: their dashboard is the greeting, and the
  * District List they used to see now has its own page (Districts & Schools).
@@ -39,11 +41,11 @@ class DashboardSummary extends Component
 
         return view('livewire.dashboard.summary', [
             'isSuperAdmin' => $isSuperAdmin,
-            // The OPCRF Template card locks once the staff member has a
-            // confirmed submission; a return-for-revision unlocks it again.
+            // A submitted OPCRF stays editable through its Part 1 deadline;
+            // returned submissions retain their existing revision flow.
             'opcrfLocked' => $isSuperAdmin ? false : $this->opcrfLocked($user),
-            // Part availability by school-year term: outside the final term
-            // the card's download is Part I only (superadmins have no card).
+            // Part availability by school-year term: the full workbook is
+            // available during Part 1 or the shared Parts 2–4 term.
             'opcrfPartOne' => $isSuperAdmin ? null : OpcrfPartOne::summary(),
             // The personalized template this account last generated, and the
             // name it was generated with — the status panel's "✓ Template
@@ -56,12 +58,9 @@ class DashboardSummary extends Component
     }
 
     /**
-     * Has the signed-in staff member completed the OPCRF cycle — a
-     * confirmed submission? While that is true, the dashboard's OPCRF
-     * Template card is locked: no download, no upload. A submission that
-     * was returned for revision unlocks the card again — the staff member
-     * may need the template to prepare their revised upload (the Revise &
-     * Resubmit flow on the Opcrf page is the primary path).
+     * Keep the dashboard card available while any full-template download
+     * window is open. Upload authorization remains separately enforced by
+     * OpcrfUpload against the Part 1 schedule.
      */
     protected function opcrfLocked(?User $user): bool
     {
@@ -69,9 +68,11 @@ class DashboardSummary extends Component
             return false;
         }
 
-        return OpcrfSubmission::where('user_id', $user->id)
-            ->where('status', '!=', OpcrfSubmission::STATUS_RETURNED)
-            ->exists();
+        $submission = $this->currentSubmission($user);
+
+        return $submission !== null
+            && $submission->status !== OpcrfSubmission::STATUS_RETURNED
+            && ! OpcrfPartOne::fullTemplateAvailable();
     }
 
     /**

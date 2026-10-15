@@ -12,12 +12,13 @@ use Illuminate\Support\Carbon;
  *
  * Every access decision in the app funnels through here — the parts grid on
  * the staff page, the guarded Part routes, and the personalized template
- * download. One service means the badge a user sees and the check that
+ * download. Part 1 has its own schedule; Parts 2–4 share Part 2's end-of-year
+ * schedule. One service means the badge a user sees and the check that
  * actually blocks them can never disagree.
  *
  * Three rules, in the order they are applied to a Part:
  *
- *   1. SCHEDULE — is there an enabled window for this (year, Part) that
+ *   1. SCHEDULE — is there an enabled window for this (year, Part/group) that
  *      contains the current moment? No window, or a window that has not
  *      opened yet / has closed / was switched off, and the Part is locked.
  *      Each of those says something different to the user, because each needs
@@ -27,11 +28,8 @@ use Illuminate\Support\Carbon;
  *      Part reads as "Completed" and stays readable: a closed deadline must
  *      never invalidate work the user already handed in.
  *
- *   3. Nothing else. There is deliberately NO rule making Part 2 depend on
- *      Part 1 — this application's workflow does not require it, and the
- *      requirement is explicit that availability and completion are separate
- *      concepts and that sequencing must not be imposed where the app does
- *      not already ask for it.
+ *   3. Parts 2–4 open together under one end-of-year schedule, independently
+ *      of Part 1 completion.
  *
  * All comparisons are made against the application's configured timezone
  * (config('app.timezone')) via now(), never a timestamp supplied by the
@@ -93,6 +91,10 @@ class OpcrfAccess
      */
     public static function scheduleFor(int $year, int $part): ?OpcrfSchedule
     {
+        if (in_array($part, [OpcrfSchedule::PART_THREE, OpcrfSchedule::PART_FOUR], true)) {
+            $part = OpcrfSchedule::PART_TWO;
+        }
+
         return OpcrfSchedule::query()
             ->where('opcrf_year', $year)
             ->where('part_number', $part)
@@ -231,10 +233,15 @@ class OpcrfAccess
         $year ??= self::currentYear();
         $at ??= now();
 
-        return array_map(
-            fn (int $part): array => self::partState($user, $part, $year, $at),
-            OpcrfSchedule::parts()
-        );
+        return array_map(function (int $part) use ($user, $year, $at): array {
+            $state = self::partState($user, $part, $year, $at);
+
+            if (in_array($part, [OpcrfSchedule::PART_TWO, OpcrfSchedule::PART_THREE, OpcrfSchedule::PART_FOUR], true)) {
+                $state['detail'] = trim('Parts 2–4 share the end-of-year term. '.$state['detail']);
+            }
+
+            return $state;
+        }, OpcrfSchedule::parts());
     }
 
     /**

@@ -4,8 +4,10 @@
      own tab bar. It opens on PART I; there is no combined "All" view —
      one tab at a time. Expects $sheet (the main layout array), $rating
      (string), $full (bool, kept for the shared partial's contract),
-     $workbook (the workbook() array) and $uid (a per-instance key
-     prefix).
+     $workbook (the workbook() array), $uid (a per-instance key prefix) and
+     $rateeSignature (the ratee's digital signature as array{url, name}, or
+     null when the submission carries no stamped workbook to show), and
+     $reviewSignatures (reviewer signatures keyed by normalized signer role).
 
      Alpine holds the active tab; [data-sheet] sections show/hide without
      any Livewire round-trip. --}}
@@ -24,12 +26,16 @@
                 'sheet' => $sheet,
                 'rating' => $rating,
                 'full' => $full,
+                'rateeSignature' => $rateeSignature ?? null,
+                'reviewSignatures' => $reviewSignatures ?? [],
             ])
         </div>
 
         @include('livewire.opcrf.partials.opcrf-workbook', [
             'workbook' => $workbook,
             'uid' => $uid,
+            'rateeSignature' => $rateeSignature ?? null,
+            'reviewSignatures' => $reviewSignatures ?? [],
         ])
     </div>
 

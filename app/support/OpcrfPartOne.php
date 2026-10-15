@@ -27,7 +27,7 @@ use Illuminate\Support\Carbon;
 class OpcrfPartOne
 {
     /**
-     * Is the full template open?
+     * Is the Part 1-controlled full template window open?
      *
      * A configured Part 1 schedule wins outright — that is the control the
      * superadmin actually operates. With no schedule at all, the legacy
@@ -44,6 +44,20 @@ class OpcrfPartOne
         }
 
         return self::legacyWindowOpen();
+    }
+
+    /**
+     * The full workbook is available during either Part 1 or the shared
+     * Parts 2–4 term. The Part 1 submission itself remains a separate record.
+     */
+    public static function fullTemplateAvailable(): bool
+    {
+        $partsTwoToFour = OpcrfAccess::scheduleFor(
+            OpcrfAccess::currentYear(),
+            OpcrfSchedule::PART_TWO
+        );
+
+        return self::windowOpen() || ($partsTwoToFour?->isOpenAt() ?? false);
     }
 
     /**
@@ -80,8 +94,8 @@ class OpcrfPartOne
 
         return [
             // How many parts the staff member's download carries right now.
-            'part' => self::windowOpen() ? 4 : 1,
-            'full_open' => self::windowOpen(),
+            'part' => self::fullTemplateAvailable() ? 4 : 1,
+            'full_open' => self::fullTemplateAvailable(),
             'full_open_date' => $opens !== null
                 ? ($opens->isCurrentYear()
                     ? $opens->translatedFormat('F j')
@@ -98,13 +112,13 @@ class OpcrfPartOne
     }
 
     /**
-     * The workbook bytes a staff download should serve: the full template
-     * inside the final-term window, otherwise the template rebuilt with only
-     * the PART I sheet.
+     * The workbook bytes a staff download should serve. Explicit access
+     * during the shared Parts 2–4 term includes every sheet; otherwise the
+     * legacy Part 1 window determines whether to trim the workbook.
      */
-    public static function templateBytes(): string
+    public static function templateBytes(bool $includeAllParts = false): string
     {
-        if (self::windowOpen()) {
+        if ($includeAllParts || self::windowOpen()) {
             return (string) file_get_contents(self::templatePath());
         }
 
@@ -129,7 +143,7 @@ class OpcrfPartOne
      */
     public static function templateDownloadName(): string
     {
-        return self::windowOpen()
+        return self::fullTemplateAvailable()
             ? 'OPCRF-TEMPLATE.xlsx'
             : 'OPCRF-PART-I.xlsx';
     }

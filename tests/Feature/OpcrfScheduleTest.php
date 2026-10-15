@@ -191,10 +191,13 @@ class OpcrfScheduleTest extends TestCase
 
         $this->actingAs($staff)
             ->get(route('opcrf.part', ['part' => 1]))
+            ->assertRedirect(route('home'));
+
+        $this->actingAs($staff)
+            ->get(route('home'))
             ->assertOk()
-            ->assertSee('Part 1')
-            // Part 1 carries the form, pre-filled from the account.
-            ->assertSeeLivewire('opcrf-form');
+            ->assertSee('Download OPCRF Template')
+            ->assertSee(route('opcrf.template'));
     }
 
     /**
@@ -278,43 +281,63 @@ class OpcrfScheduleTest extends TestCase
         $this->assertSame(OpcrfSchedule::STATUS_CLOSED, $state['status'], 'The schedule is closed.');
         $this->assertTrue($state['completed'], 'The Part they already submitted still counts as done.');
 
-        // …but the completed Part stays reachable, and the record is intact.
+        // …but the completed Part still leads to the dashboard, and the
+        // record remains intact.
         $this->actingAs($staff)
             ->get(route('opcrf.part', ['part' => 1]))
-            ->assertOk();
+            ->assertRedirect(route('home'));
 
         $this->assertSame('pending', $submission->fresh()->status);
         $this->assertSame(1, OpcrfSubmission::where('user_id', $staff->id)->count());
     }
 
     /* ==================================================================
-     * 5, 6, 7, 11 — each Part checks its OWN schedule
+     * 5, 6, 7, 11 — Parts 2–4 share the end-of-year schedule
      * ================================================================== */
 
-    public function test_each_part_is_scheduled_independently(): void
+    public function test_parts_two_three_and_four_share_one_schedule_and_open_together(): void
     {
         $staff = $this->staff();
 
         $this->schedule(OpcrfSchedule::PART_ONE, '2026-06-01 08:00:00', '2026-06-30 17:00:00');
-        // Part 2 is already over; Parts 3 and 4 have not opened.
-        $this->schedule(OpcrfSchedule::PART_TWO, '2026-05-01 08:00:00', '2026-05-31 17:00:00');
-        $this->schedule(OpcrfSchedule::PART_THREE, '2026-07-01 08:00:00', '2026-07-31 17:00:00');
-        $this->schedule(OpcrfSchedule::PART_FOUR, '2026-08-01 08:00:00', '2026-08-31 17:00:00');
+        // Part 2's window is the shared end-of-year term. Older separate
+        // Part 3/4 rows must not split the shared access window.
+        $this->schedule(OpcrfSchedule::PART_TWO, '2026-06-01 08:00:00', '2026-06-30 17:00:00');
+        $this->schedule(OpcrfSchedule::PART_THREE, '2026-05-01 08:00:00', '2026-05-31 17:00:00');
+        $this->schedule(OpcrfSchedule::PART_FOUR, '2026-08-01 08:00:00', '2026-08-31 17:00:00', enabled: false);
 
         $states = collect(OpcrfAccess::allParts($staff, 2026))->keyBy('part');
 
         $this->assertSame(OpcrfSchedule::STATUS_OPEN, $states[1]['status']);
-        $this->assertSame(OpcrfSchedule::STATUS_CLOSED, $states[2]['status']);
-        $this->assertSame(OpcrfSchedule::STATUS_SCHEDULED, $states[3]['status']);
-        $this->assertSame(OpcrfSchedule::STATUS_SCHEDULED, $states[4]['status']);
+        foreach ([2, 3, 4] as $part) {
+            $this->assertSame(OpcrfSchedule::STATUS_OPEN, $states[$part]['status']);
+            $this->assertTrue(OpcrfAccess::canAccess($staff, $part));
+        }
 
-        // An open Part 1 does NOT open Part 3.
-        $this->assertTrue(OpcrfAccess::canAccess($staff, 1));
-        $this->assertFalse(OpcrfAccess::canAccess($staff, 3));
-        $this->assertFalse(OpcrfAccess::canAccess($staff, 4));
+        foreach ([2, 3, 4] as $part) {
+            $this->actingAs($staff)
+                ->get(route('opcrf.part', ['part' => $part]))
+                ->assertOk();
+        }
     }
 
-    public function test_the_grid_names_the_state_each_part_is_in(): void
+    public function test_schedule_manager_offers_one_window_for_parts_two_to_four(): void
+    {
+        $admin = $this->superadmin();
+        $legacyPartThree = $this->schedule(OpcrfSchedule::PART_THREE);
+        $legacyPartFour = $this->schedule(OpcrfSchedule::PART_FOUR);
+
+        Livewire::actingAs($admin)
+            ->test(\App\Livewire\OpcrfScheduleManager::class)
+            ->assertSee('Parts 2–4 (End-of-year term)')
+            ->assertDontSee('Part 3</strong>')
+            ->assertDontSee('Part 4</strong>');
+
+        $this->assertDatabaseHas('opcrf_schedules', ['id' => $legacyPartThree->id]);
+        $this->assertDatabaseHas('opcrf_schedules', ['id' => $legacyPartFour->id]);
+    }
+
+    public function test_the_grid_shows_one_shared_state_for_parts_two_three_and_four(): void
     {
         $staff = $this->staff();
 
@@ -326,9 +349,41 @@ class OpcrfScheduleTest extends TestCase
         $html = $this->actingAs($staff)->get(route('opcrf.index'))->assertOk()->getContent();
 
         $this->assertStringContainsString('Part 1 is now open.', $html);
-        $this->assertStringContainsString('Part 2 access period has ended.', $html);
-        $this->assertStringContainsString('Part 3 is not yet available.', $html);
-        $this->assertStringContainsString('Part 4 is currently unavailable.', $html);
+        foreach ([2, 3, 4] as $part) {
+            $this->assertStringContainsString('Part '.$part.' locked', $html);
+        }
+        $this->assertStringContainsString('Parts 2–4 share the end-of-year term.', $html);
+        $this->assertSame(2, substr_count($html, 'class="opcrf-part-card opcrf-part-card--'));
+    }
+
+    public function test_the_grouped_card_keeps_individual_links_for_parts_two_three_and_four(): void
+    {
+        $staff = $this->staff();
+        $this->schedule(OpcrfSchedule::PART_TWO, '2026-05-01 08:00:00', '2026-05-31 17:00:00');
+        Carbon::setTestNow('2026-05-15 10:00:00');
+
+        $html = $this->actingAs($staff)->get(route('opcrf.index'))->assertOk()->getContent();
+
+        foreach ([2, 3, 4] as $part) {
+            $this->assertStringContainsString(route('opcrf.part', ['part' => $part]), $html);
+        }
+        $this->assertSame(2, substr_count($html, 'class="opcrf-part-card opcrf-part-card--'));
+    }
+
+    public function test_completed_work_in_parts_two_to_four_remains_accessible_after_the_shared_deadline(): void
+    {
+        $staff = $this->staff();
+        $this->schedule(OpcrfSchedule::PART_TWO, '2026-05-01 08:00:00', '2026-06-15 17:00:00');
+        $submission = $this->submission($staff, ['opcrf_part' => OpcrfSubmission::PART_THREE]);
+
+        Carbon::setTestNow('2026-06-15 18:00:00');
+
+        $this->actingAs($staff)
+            ->get(route('opcrf.part', ['part' => 3]))
+            ->assertOk();
+
+        $this->assertTrue(OpcrfAccess::partState($staff, 3)['completed']);
+        $this->assertSame(OpcrfSubmission::STATUS_PENDING, $submission->fresh()->status);
     }
 
     /* ==================================================================
@@ -360,7 +415,9 @@ class OpcrfScheduleTest extends TestCase
         $staff = $this->staff();
 
         $this->assertTrue(OpcrfAccess::canAccess($staff, 1));
-        $this->actingAs($staff)->get(route('opcrf.part', ['part' => 1]))->assertOk();
+        $this->actingAs($staff)
+            ->get(route('opcrf.part', ['part' => 1]))
+            ->assertRedirect(route('home'));
     }
 
     /* ==================================================================
@@ -634,10 +691,10 @@ class OpcrfScheduleTest extends TestCase
     }
 
     /* ==================================================================
-     * 8, 9, 14, 15 — Part 1 carries the account's own information
+     * 8, 9, 14, 15 — Part 1 leads to the dashboard template
      * ================================================================== */
 
-    public function test_part_one_prefills_the_form_from_the_registered_account(): void
+    public function test_part_one_access_redirects_to_the_dashboard(): void
     {
         $district = District::create(['name' => 'District I']);
         $school = School::create(['name' => 'Sample Elementary School', 'district_id' => $district->id]);
@@ -655,11 +712,7 @@ class OpcrfScheduleTest extends TestCase
 
         $this->actingAs($staff)
             ->get(route('opcrf.part', ['part' => 1]))
-            ->assertOk()
-            // The form is filled from the account, not asked for.
-            ->assertSee('Juan Dela Cruz')
-            ->assertSee('Teacher III')
-            ->assertSee('Sample Elementary School');
+            ->assertRedirect(route('home'));
     }
 
     public function test_part_one_downloads_the_personalized_template_still(): void
@@ -673,6 +726,57 @@ class OpcrfScheduleTest extends TestCase
             ->assertDownload('OPCRF_Juan_Dela_Cruz.xlsx');
 
         $this->assertSame(1, OpcrfTemplate::count());
+    }
+
+    public function test_parts_two_to_four_term_downloads_full_template_without_changing_part_one_submission(): void
+    {
+        $staff = $this->staff('jdelacruz', 'Juan Dela Cruz');
+        $this->schedule(OpcrfSchedule::PART_ONE, '2026-05-01 08:00:00', '2026-05-31 17:00:00');
+        $this->schedule(OpcrfSchedule::PART_TWO, '2026-06-01 08:00:00', '2026-06-30 17:00:00');
+        $partOne = $this->submission($staff, [
+            'opcrf_part' => OpcrfSubmission::PART_ONE,
+            'employee_name' => 'Juan Dela Cruz',
+            'objectives' => 'Saved Part 1 objective',
+            'accomplishments' => 'Saved Part 1 accomplishment',
+            'self_rating' => 4.5,
+        ]);
+
+        $response = $this->actingAs($staff)
+            ->get(route('opcrf.template'))
+            ->assertOk()
+            ->assertDownload('OPCRF_Juan_Dela_Cruz.xlsx');
+
+        $this->actingAs($staff)
+            ->get(route('opcrf.part', ['part' => 2]))
+            ->assertOk()
+            ->assertSee(route('opcrf.template'), false)
+            ->assertSee('Download complete OPCRF template (Parts 1–4)');
+
+        $workbookPath = $this->stage($response->getContent());
+        try {
+            $sheetNames = array_column(
+                (new \App\Support\OpcrfSpreadsheet($workbookPath))->sheetNames(),
+                'name'
+            );
+        } finally {
+            unlink($workbookPath);
+        }
+
+        foreach (['PART I', 'PART II', 'PART III', 'PART IV'] as $sheetName) {
+            $this->assertTrue(
+                collect($sheetNames)->contains(fn (string $name): bool => str_starts_with($name, $sheetName)),
+                "The downloaded workbook should contain the {$sheetName} sheet."
+            );
+        }
+
+        $partOne->refresh();
+        $this->assertSame(OpcrfSubmission::PART_ONE, $partOne->opcrf_part);
+        $this->assertSame('Saved Part 1 objective', $partOne->objectives);
+        $this->assertSame('Saved Part 1 accomplishment', $partOne->accomplishments);
+        $this->assertSame(1, OpcrfSubmission::where('user_id', $staff->id)->where('opcrf_part', OpcrfSubmission::PART_ONE)->count());
+
+        $dashboard = $this->get(route('home'))->assertOk();
+        $dashboard->assertSee('Your saved Part 1 submission remains stored separately');
     }
 
     /**

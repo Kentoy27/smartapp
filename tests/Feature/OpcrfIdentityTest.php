@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Livewire\OpcrfMovs;
 use App\Livewire\OpcrfUpload;
 use App\Models\District;
+use App\Models\OpcrfSchedule;
 use App\Models\OpcrfSubmission;
 use App\Models\OpcrfTemplate;
 use App\Models\School;
@@ -562,7 +563,7 @@ class OpcrfIdentityTest extends TestCase
     public function test_the_dashboard_shows_the_generated_template_and_the_submission(): void
     {
         Storage::fake('local');
-        $this->reviewer();
+        $reviewer = $this->reviewer();
         $user = $this->staff();
 
         $this->actingAs($user)->get(route('home'))
@@ -582,6 +583,14 @@ class OpcrfIdentityTest extends TestCase
             ->call('confirmSubmit');
 
         $submission = OpcrfSubmission::firstOrFail();
+        OpcrfSchedule::create([
+            'opcrf_year' => (int) now()->format('Y'),
+            'part_number' => OpcrfSchedule::PART_ONE,
+            'start_datetime' => now()->subDays(2),
+            'end_datetime' => now()->subDay(),
+            'is_enabled' => true,
+            'created_by' => $reviewer->id,
+        ]);
 
         // The card locks, but the reference stays on it — it is what the
         // staff member quotes when they ask about the form.

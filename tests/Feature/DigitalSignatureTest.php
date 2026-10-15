@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Livewire\Profile\DigitalSignature;
+use App\Livewire\Profile\DigitalSignatureModal;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -11,13 +12,15 @@ use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
- * The digital signature on the shared profile page.
+ * The digital signature, on the account it belongs to.
  *
- * A signature belongs to an ACCOUNT, not to a role: the same page and the same
- * component serve a user and a superadmin, so the access tests below always
- * walk both. The upload is deliberately two-step — picking a file previews it
- * and writes nothing until Save — and the stored signature is only replaced
- * once the new file is safely on disk, which is what the failure tests pin.
+ * A signature belongs to an ACCOUNT, not to a role: the same component —
+ * hosted by the account menu's "Digital Signature" dialog on every page —
+ * serves a user and a superadmin, so the access tests below always walk both.
+ * The upload is deliberately two-step —
+ * picking a file previews it and writes nothing until Save — and the stored
+ * signature is only replaced once the new file is safely on disk, which is what
+ * the failure tests pin.
  */
 class DigitalSignatureTest extends TestCase
 {
@@ -64,17 +67,24 @@ class DigitalSignatureTest extends TestCase
         foreach ([$this->staff(), $this->superadmin()] as $account) {
             $response = $this->actingAs($account)->get(route('profile.index'));
 
+            // The page is the account summary, for every role alike.
             $response->assertOk()
-                ->assertSeeLivewire('profile.digital-signature')
+                ->assertSee('Profile')
+                ->assertSee($account->username)
+                ->assertSee($account->roleLabel());
+
+            // The signature is not repeated on the page: the account menu's
+            // dialog is where it is managed from, on this page and every
+            // other, so the menu carries the event the dialog listens for and
+            // the page renders no signature block of its own.
+            $response->assertSeeLivewire('profile.digital-signature-modal')
+                ->assertSee('data-modal-event="open-signature-modal"', false)
                 ->assertSee('Digital Signature')
-                ->assertSee('Not uploaded')
-                ->assertSee('Upload Digital Signature')
-                ->assertSee('transparent PNG');
+                ->assertDontSeeLivewire('profile.digital-signature')
+                ->assertDontSee('Upload Digital Signature')
+                ->assertDontSee('transparent PNG');
 
-            // The account menu is the way in for every role.
-            $response->assertSee(route('profile.index'), false);
-
-            // Nothing to change or remove yet.
+            // Nothing to change or remove on the page either.
             $response->assertDontSee('Change Signature');
             $response->assertDontSee('Remove Signature');
         }
@@ -179,10 +189,10 @@ class DigitalSignatureTest extends TestCase
         $this->assertTrue($superadmin->hasSignature());
         Storage::disk('local')->assertExists($superadmin->signature_path);
 
-        // And the profile page previews it through the authorised route.
-        $this->actingAs($superadmin)
-            ->get(route('profile.index'))
-            ->assertOk()
+        // And the block the account menu's dialog hosts previews it through
+        // the authorised route, reading the saved signature fresh on open.
+        Livewire::actingAs($superadmin)->test(DigitalSignatureModal::class)
+            ->call('openModal')
             ->assertSee(route('profile.signature'), false)
             ->assertSee('Signature uploaded');
 

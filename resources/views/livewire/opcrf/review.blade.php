@@ -140,6 +140,28 @@
                     replaced.
                 </p>
 
+                {{-- THE WORKBOOK ITSELF, as the reviewer's to open: what
+                     downloads here is the submitted file with the staff
+                     member's digital signature already encoded at the bottom
+                     of every part that carries a signer block — and that
+                     same signature is shown in the signer blocks below, so
+                     the form the reviewer reads in the app and the file they
+                     keep agree. Submissions filed before a signature was on
+                     the account download exactly as uploaded, with no
+                     signature to show. --}}
+                @if ($this->reviewSubmission()->hasFile())
+                    <div class="opcrf-download-row">
+                        <a
+                            class="btn-ghost"
+                            href="{{ route('opcrf.submission.download', $this->reviewSubmission()) }}"
+                            title="Open the submitted OPCR in Excel{{ $this->reviewSubmission()->hasSignedFile() ? ' — it carries the staff member\u2019s digital signature' : '' }}"
+                        >
+                            <x-icon name="download" :size="14" />
+                            <span>Download workbook{{ $this->reviewSubmission()->hasSignedFile() ? ' (digitally signed)' : '' }}</span>
+                        </a>
+                    </div>
+                @endif
+
                 {{-- UPLOAD CHECK: an upload is never held up over what the
                      file says about itself, so this is context, not a
                      verdict. It appears only when the file said something
@@ -183,6 +205,11 @@
                                     'sheet' => $this->reviewSheet,
                                     'rating' => $this->reviewSheetRating,
                                     'full' => false,
+                                    // The ratee's own signature, for the
+                                    // signer blocks — served only while the
+                                    // stamped workbook carries it.
+                                    'rateeSignature' => $this->reviewSubmission()->rateeSignature(),
+                                    'reviewSignatures' => $this->reviewSignatures,
                                     'workbook' => $this->reviewWorkbook ?? ['tabs' => [], 'part_two' => ['sections' => [], 'total_rows' => [], 'signers' => [], 'scale' => ['title' => '', 'levels' => []]], 'part_three' => ['components' => [], 'agreement' => [], 'overall' => null, 'rating' => '', 'rating_table' => [], 'signatures' => []], 'part_four' => ['office_plan' => [], 'office_feedback' => '', 'development_plan' => [], 'development_feedback' => '', 'signers' => [], 'sections' => []], 'extra_sheets' => []],
                                     'uid' => 'rv',
                                 ])

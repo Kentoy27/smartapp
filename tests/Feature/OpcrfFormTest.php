@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Livewire\OpcrfForm;
+use App\Models\OpcrfSchedule;
 use App\Models\OpcrfSubmission;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -130,6 +131,66 @@ class OpcrfFormTest extends TestCase
         $this->assertNotNull($submission->submitted_at);
     }
 
+    public function test_updating_part_one_changes_the_existing_submission_instead_of_adding_a_row(): void
+    {
+        $user = $this->staffUser();
+        $this->partOneSchedule();
+        $component = Livewire::actingAs($user)
+            ->test(OpcrfForm::class)
+            ->fill($this->validInput())
+            ->call('submitForReview')
+            ->call('confirmSubmit');
+
+        $submission = OpcrfSubmission::firstOrFail();
+        $this->assertSame(1, OpcrfSubmission::where('user_id', $user->id)->count());
+
+        $updatedInput = $this->validInput();
+        $updatedInput['objectives'] = 'Updated objective';
+        $updatedInput['accomplishments'] = 'Updated accomplishment';
+        $component
+            ->fill($updatedInput)
+            ->call('submitForReview')
+            ->call('confirmSubmit')
+            ->assertSee('OPCRF updated');
+
+        $submission->refresh();
+        $this->assertSame(1, OpcrfSubmission::where('user_id', $user->id)->count());
+        $this->assertSame('Updated objective', $submission->objectives);
+        $this->assertSame('Updated accomplishment', $submission->accomplishments);
+        $this->assertSame(OpcrfSubmission::STATUS_RESUBMITTED, $submission->status);
+        $this->assertSame(1, $submission->reviews()->count());
+        $this->assertSame($submission->id, $component->get('submissionId'));
+    }
+
+    public function test_a_part_one_submission_is_read_only_after_the_deadline(): void
+    {
+        $user = $this->staffUser();
+        OpcrfSchedule::create([
+            'opcrf_year' => (int) now()->format('Y'),
+            'part_number' => OpcrfSchedule::PART_ONE,
+            'start_datetime' => now()->subDays(2),
+            'end_datetime' => now()->subDay(),
+            'is_enabled' => true,
+            'created_by' => $this->superadmin()->id,
+        ]);
+        OpcrfSubmission::create(array_merge($this->validInput(), [
+            'user_id' => $user->id,
+            'self_rating' => 4.5,
+            'submitted_at' => now()->subDays(3),
+            'status' => OpcrfSubmission::STATUS_PENDING,
+        ]));
+
+        Livewire::actingAs($user)
+            ->test(OpcrfForm::class)
+            ->assertSee('read-only')
+            ->assertSet('showReview', false)
+            ->assertSet('submissionId', OpcrfSubmission::firstOrFail()->id)
+            ->assertSet('objectives', $this->validInput()['objectives'])
+            ->assertSet('accomplishments', $this->validInput()['accomplishments'])
+            ->call('submitForReview')
+            ->assertForbidden();
+    }
+
     public function test_cancelling_the_review_returns_to_the_filled_form_without_saving(): void
     {
         $user = $this->staffUser();
@@ -165,6 +226,18 @@ class OpcrfFormTest extends TestCase
 
         $this->assertNotNull($thrown, 'Expected the staff-only guard to reject a superadmin.');
         $this->assertDatabaseCount('opcrf_submissions', 0);
+    }
+
+    private function partOneSchedule(): void
+    {
+        OpcrfSchedule::create([
+            'opcrf_year' => (int) now()->format('Y'),
+            'part_number' => OpcrfSchedule::PART_ONE,
+            'start_datetime' => now()->subDay(),
+            'end_datetime' => now()->addDay(),
+            'is_enabled' => true,
+            'created_by' => $this->superadmin()->id,
+        ]);
     }
 
     public function test_superadmins_get_404_on_the_opcrf_page(): void

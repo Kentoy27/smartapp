@@ -311,7 +311,9 @@ class OpcrfSpreadsheet
      * (RATEE, RATER, APPROVING AUTHORITY) with each signer's name a
      * couple of rows above in the same column — the lines signed after
      * the review. Signature-line placeholders and stray numeric cells
-     * (a computed score landing in a name column) never read as names.
+     * (a computed score landing in a name column) never read as names. If
+     * the RATEE name cell is a formula or otherwise unreadable, use the
+     * employee name from the workbook's header.
      * Empty when the template has no such block.
      *
      * @return array<int, array{ref: string, role: string, name: string}>
@@ -332,6 +334,7 @@ class OpcrfSpreadsheet
             return [];
         }
 
+        $rateeName = $this->headerValue('Name of Employee');
         $signers = [];
 
         foreach ($this->cells as $ref => $value) {
@@ -341,10 +344,17 @@ class OpcrfSpreadsheet
 
             $column = preg_replace('/\d+/', '', $ref);
 
+            $role = rtrim(str_replace("\n", ' ', $value));
+            $name = $this->nameAbove($column, $rolesRow);
+
+            if ($name === '' && $this->normalizeLabel($role) === 'ratee') {
+                $name = $rateeName;
+            }
+
             $signers[] = [
                 'ref' => $ref,
-                'role' => rtrim(str_replace("\n", ' ', $value)),
-                'name' => $this->nameAbove($column, $rolesRow),
+                'role' => $role,
+                'name' => $name,
             ];
         }
 
@@ -2334,7 +2344,8 @@ class OpcrfSpreadsheet
     /**
      * The signer block of any sheet: one row of role labels (RATEE,
      * RATER, APPROVING AUTHORITY, …) with each signer's name a few rows
-     * above in the same column.
+     * above in the same column. The ratee falls back to the first sheet's
+     * employee-name header if that tab has a formula in the name cell.
      *
      * @param  array<string, string>  $cells
      * @return array<int, array{ref: string, role: string, name: string}>
@@ -2355,6 +2366,7 @@ class OpcrfSpreadsheet
             return [];
         }
 
+        $rateeName = $this->headerValue('Name of Employee');
         $signers = [];
 
         foreach ($cells as $ref => $value) {
@@ -2364,10 +2376,17 @@ class OpcrfSpreadsheet
 
             $column = preg_replace('/\d+/', '', $ref);
 
+            $role = rtrim(str_replace("\n", ' ', $value));
+            $name = $this->nameAboveIn($cells, $column, $rolesRow);
+
+            if ($name === '' && $this->normalizeLabel($role) === 'ratee') {
+                $name = $rateeName;
+            }
+
             $signers[] = [
                 'ref' => $ref,
-                'role' => rtrim(str_replace("\n", ' ', $value)),
-                'name' => $this->nameAboveIn($cells, $column, $rolesRow),
+                'role' => $role,
+                'name' => $name,
             ];
         }
 
