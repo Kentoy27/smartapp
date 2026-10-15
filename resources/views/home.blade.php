@@ -25,6 +25,7 @@
     </section>
 
     @if ($user->hasAdminAccess())
+        <livewire:admin-dashboard-stats />
         <livewire:opcrf-analytics />
 
         {{-- Every school's uploaded Work and Financial Plan — the other

@@ -9,7 +9,7 @@
     {{-- The version is bumped whenever dashboard.css changes: browsers that
          cached an older copy keep painting the stale sheet at the same URL,
          which is why a broken stylesheet can survive a fresh deploy. --}}
-    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=15">
+    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=17">
     <title>@yield('title', 'Dashboard — SmartApp')</title>
     <script>
         /* Apply the saved theme before first paint to avoid a flash.
@@ -2841,17 +2841,12 @@
             outline-offset: -2px;
         }
 
-        /* Sticky in-grid headers: the column captions stay visible while
-           a long part scrolls (the Excel freeze-panes feel). */
+        /* Let the complete workbook flow with the review modal's vertical
+           scroll; only wide tables scroll independently on the x-axis. */
         .opcrf-sheet-tablewrap {
-            max-height: min(72vh, 820px);
-            overflow: auto;
-        }
-
-        .opcrf-sheet-table thead th {
-            position: sticky;
-            top: 0;
-            z-index: 2;
+            max-height: none;
+            overflow-x: auto;
+            overflow-y: visible;
         }
 
         .opcrf-review-summary--sheet {
@@ -3158,27 +3153,22 @@
             line-height: 1.4;
             text-transform: uppercase;
             letter-spacing: 0.03em;
+            overflow-wrap: anywhere;
         }
 
-        /* Keep the workbook's summary columns visible at their source-order
-           position on the right while the wide table scrolls. */
+        /* Summary columns keep their workbook position and scroll with the
+           rest of the wide table. */
         .modal--opcrf-sheet .opcrf-sheet-average,
         .modal--opcrf-sheet .opcrf-sheet-weighted-average {
-            position: sticky;
-            z-index: 1;
             background: color-mix(in srgb, var(--bg-muted) 35%, var(--bg-elevated));
         }
 
         .modal--opcrf-sheet .opcrf-sheet-average {
-            right: 120px;
-            width: 96px;
-            box-shadow: -1px 0 var(--border);
+            width: 112px;
         }
 
         .modal--opcrf-sheet .opcrf-sheet-weighted-average {
-            right: 0;
-            width: 120px;
-            box-shadow: -1px 0 var(--border);
+            width: 150px;
         }
 
         .modal--opcrf-sheet .opcrf-sheet-table thead .opcrf-sheet-average,
@@ -3186,9 +3176,17 @@
             padding: 8px 4px;
             text-align: center;
             white-space: normal;
-            overflow-wrap: anywhere;
             font-size: 0.625rem;
             line-height: 1.3;
+        }
+
+        .modal--opcrf-sheet .opcrf-sheet-table thead .opcrf-sheet-rate {
+            width: 112px;
+            white-space: normal;
+            overflow-wrap: anywhere;
+            font-size: 0.75rem;
+            line-height: 1.3;
+            padding: 8px 6px;
         }
 
         .modal--opcrf-sheet .opcrf-sheet-table tbody td.opcrf-sheet-average,
@@ -3197,16 +3195,11 @@
         }
 
         .modal--opcrf-sheet .opcrf-sheet-summary-value {
-            position: sticky;
-            right: 0;
-            z-index: 1;
             background: var(--bg-muted);
-            box-shadow: -1px 0 var(--border);
         }
 
         .modal--opcrf-sheet .opcrf-sheet-table thead .opcrf-sheet-average,
         .modal--opcrf-sheet .opcrf-sheet-table thead .opcrf-sheet-weighted-average {
-            z-index: 4;
             background: var(--bg-muted);
         }
 
@@ -3248,6 +3241,10 @@
 
         .opcrf-sheet-table--objectives {
             min-width: 2380px;
+        }
+
+        .opcrf-sheet-table--objectives thead th {
+            vertical-align: top;
         }
 
         .opcrf-sheet-table--objectives .opcrf-sheet-kra {
@@ -6992,9 +6989,25 @@
 
             <!-- FOOTER -->
             <footer class="footer">
-                &copy; {{ date('Y') }} SmartApp &mdash; All rights reserved
+                <span>&copy; {{ date('Y') }} SmartApp &mdash; All rights reserved</span>
+                <button type="button" class="footer-credits" id="creditsTrigger" aria-haspopup="dialog" aria-controls="creditsModal">
+                    Credits
+                </button>
             </footer>
         </div>
+    </div>
+
+    <div class="modal-backdrop" id="creditsModal" role="presentation" aria-hidden="true">
+        <section class="modal credits-modal" role="dialog" aria-modal="true" aria-labelledby="creditsModalTitle" aria-describedby="creditsModalDescription">
+            <div class="modal-head">
+                <h2 id="creditsModalTitle">System Credits</h2>
+                <button type="button" class="modal-close" id="creditsClose" aria-label="Close credits">&times;</button>
+            </div>
+            <div class="credits-modal-body">
+                <p class="credits-modal-name" id="creditsModalDescription">John Kenneth Ang</p>
+                <p class="credits-modal-role">Full-Stack Developer</p>
+            </div>
+        </section>
     </div>
 
     <script>
@@ -7201,10 +7214,42 @@
                 apply(readStoredTheme(), false);
             }
 
+            function initCreditsModal() {
+                var trigger = document.getElementById('creditsTrigger');
+                var backdrop = document.getElementById('creditsModal');
+                var closeButton = document.getElementById('creditsClose');
+                if (!trigger || !backdrop || !closeButton || trigger.dataset.creditsBound) return;
+                trigger.dataset.creditsBound = '1';
+
+                function close() {
+                    backdrop.classList.remove('is-open');
+                    backdrop.setAttribute('aria-hidden', 'true');
+                    trigger.focus();
+                }
+
+                trigger.addEventListener('click', function() {
+                    backdrop.classList.add('is-open');
+                    backdrop.setAttribute('aria-hidden', 'false');
+                    closeButton.focus();
+                });
+
+                closeButton.addEventListener('click', close);
+                backdrop.addEventListener('click', function(event) {
+                    if (event.target === backdrop) close();
+                });
+                backdrop.addEventListener('keydown', function(event) {
+                    if (event.key === 'Escape') {
+                        event.preventDefault();
+                        close();
+                    }
+                });
+            }
+
             function initAll() {
                 initLayoutChrome();
                 initUserMenu();
                 initThemeToggle();
+                initCreditsModal();
             }
 
             // First load...

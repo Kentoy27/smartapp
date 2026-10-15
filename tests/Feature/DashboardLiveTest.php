@@ -5,10 +5,11 @@ namespace Tests\Feature;
 use App\Livewire\DashboardSummary;
 use App\Livewire\DistrictList;
 use App\Models\District;
-use App\Models\OpcrfSchedule;
 use App\Models\OpcrfSubmission;
+use App\Models\OpcrfSchedule;
 use App\Models\School;
 use App\Models\User;
+use App\Models\WfpSubmission;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Livewire\Livewire;
@@ -49,6 +50,18 @@ class DashboardLiveTest extends TestCase
         ]);
     }
 
+    private function administrator(): User
+    {
+        return User::create([
+            'name' => 'Administrator User',
+            'username' => 'administrator',
+            'email' => 'administrator@example.com',
+            'password' => Hash::make('password123'),
+            'role' => 'administrator',
+            'is_superadmin' => false,
+        ]);
+    }
+
     public function test_the_dashboard_body_is_live_for_every_account(): void
     {
         // Staff: the whole body is the polling OPCRF Template card, so
@@ -64,6 +77,84 @@ class DashboardLiveTest extends TestCase
             ->get(route('home'))
             ->assertOk()
             ->assertDontSee('District List');
+    }
+
+    public function test_the_shared_footer_shows_developer_credits_for_both_roles(): void
+    {
+        $staff = $this->staffUser();
+        $staff->forceFill(['role' => 'user'])->save();
+
+        foreach ([$staff, $this->superadmin()] as $user) {
+            $this->actingAs($user)
+                ->get(route('home'))
+                ->assertOk()
+                ->assertSee('id="creditsTrigger"', false)
+                ->assertSee('id="creditsModal"', false)
+                ->assertSee('System Credits')
+                ->assertSee('John Kenneth Ang')
+                ->assertSee('Full-Stack Developer');
+        }
+    }
+
+    public function test_system_overview_shows_live_counts_to_administrators_and_superadmins_only(): void
+    {
+        $district = District::create(['name' => 'Statistics District']);
+        $school = School::create([
+            'district_id' => $district->id,
+            'name' => 'Statistics Elementary School',
+            'school_id' => '900001',
+        ]);
+        $staff = $this->staffUser();
+        $staff->forceFill(['role' => 'user', 'school_id' => $school->id])->save();
+
+        OpcrfSubmission::create([
+            'user_id' => $staff->id,
+            'employee_name' => 'Staff Member',
+            'position' => 'Teacher I',
+            'review_period' => 'January to December 2026',
+            'division_office' => 'Schools Division Office',
+            'objectives' => 'Objective 1',
+            'accomplishments' => 'Accomplished objective 1',
+            'self_rating' => 4.5,
+            'submitted_at' => now(),
+        ]);
+        WfpSubmission::create([
+            'user_id' => $staff->id,
+            'original_file_name' => 'school-wfp.xlsx',
+            'file_path' => 'wfp/'.$staff->id.'/school-wfp.xlsx',
+            'school_year' => '2026-2027',
+            'uploaded_at' => now(),
+        ]);
+
+        $administrator = $this->administrator();
+        $superadmin = $this->superadmin();
+
+        foreach ([$administrator, $superadmin] as $account) {
+            Livewire::actingAs($account)
+                ->test(\App\Livewire\AdminDashboardStats::class)
+                ->assertSee('System Overview')
+                ->assertSee('Across all schools')
+                ->assertSeeInOrder([
+                    'Schools', '1',
+                    'School Heads', '1',
+                    'OPCRF Submissions', '1',
+                    'WFP Uploads', '1',
+                    'MOV Uploads', '0',
+                ]);
+
+            $this->actingAs($account)
+                ->get(route('home'))
+                ->assertOk()
+                ->assertSee('admin-dashboard-stats', false)
+                ->assertSee('System Overview');
+        }
+
+        $staffPage = $this->actingAs($staff)->get(route('home'));
+        $staffPage->assertOk()->assertDontSee('System Overview');
+
+        Livewire::actingAs($staff)
+            ->test(\App\Livewire\AdminDashboardStats::class)
+            ->assertNotFound();
     }
 
     public function test_the_staff_dashboard_groups_plan_workflows_in_one_responsive_workspace(): void
