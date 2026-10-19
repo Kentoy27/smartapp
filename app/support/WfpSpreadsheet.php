@@ -44,6 +44,24 @@ class WfpSpreadsheet
      */
     private array $worksheets = [];
 
+    /**
+     * The resolved fill colour of each cell style, by its `cellXfs` index
+     * (e.g. 5 => "FFD9D9D9"), or null when the style paints no fill. Read
+     * from xl/styles.xml so a workbook's gray section rows can be told apart
+     * from its data rows.
+     *
+     * @var array<int, string|null>
+     */
+    private array $styleFills = [];
+
+    /**
+     * The style index behind each cell, keyed by worksheet name then cell
+     * reference. Only cells that actually carry an `s="…"` appear here.
+     *
+     * @var array<string, array<string, int>>
+     */
+    private array $sheetStyles = [];
+
     public function __construct(string $filePath)
     {
         $this->load($filePath);
@@ -273,6 +291,117 @@ class WfpSpreadsheet
     }
 
     /* ------------------------------------------------------------------
+     * Per-sheet access and cell fills
+     * ----------------------------------------------------------------- */
+
+    /**
+     * Every worksheet's name, in workbook order. The first is the one the
+     * single-sheet helpers (`grid()`, `cells`) read.
+     *
+     * @return array<int, string>
+     */
+    public function sheetNames(): array
+    {
+        return array_keys($this->worksheets);
+    }
+
+    /**
+     * One worksheet's cells by reference ("B4"), or an empty array when the
+     * workbook has no such sheet. Matching is exact; a workbook whose tabs
+     * are named "JAN".."DEC" is reached by those names.
+     *
+     * @return array<string, string>
+     */
+    public function cellsFor(string $sheet): array
+    {
+        return $this->worksheets[$sheet] ?? [];
+    }
+
+    /**
+     * The fill colour painted behind a cell, as an ARGB/RGB hex string (e.g.
+     * "FFD9D9D9"), or null when the cell has no fill. A gray section row is
+     * detected from this.
+     */
+    public function cellFill(string $sheet, string $ref): ?string
+    {
+        $styleId = $this->sheetStyles[$sheet][$ref] ?? null;
+
+        if ($styleId === null) {
+            return null;
+        }
+
+        return $this->styleFills[$styleId] ?? null;
+    }
+
+    /**
+     * Is a worksheet row a filled (section/banner) row rather than a data
+     * row? True when any cell in the row paints a mid-gray fill — or, when
+     * `$expectedRgb` is given, exactly that colour. The MEM workbook marks
+     * its section banners with a gray fill; its lines are unfilled.
+     */
+    public function isSectionRow(string $sheet, int $row, ?string $expectedRgb = null): bool
+    {
+        foreach ($this->sheetStyles[$sheet] ?? [] as $ref => $styleId) {
+            $parts = $this->refParts($ref);
+
+            if ($parts === null || $parts['row'] !== $row) {
+                continue;
+            }
+
+            if (self::isGrayFill($this->styleFills[$styleId] ?? null, $expectedRgb)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Is a fill a gray one? With no expected colour this accepts any
+     * mid-gray (r == g == b, neither near-black nor near-white); with one it
+     * compares the six hex digits, ignoring any alpha channel.
+     */
+    public static function isGrayFill(?string $rgb, ?string $expectedRgb = null): bool
+    {
+        $hex = self::hex6($rgb);
+
+        if ($hex === null) {
+            return false;
+        }
+
+        if ($expectedRgb !== null && $expectedRgb !== '') {
+            return $hex === self::hex6($expectedRgb);
+        }
+
+        $r = hexdec(substr($hex, 0, 2));
+        $g = hexdec(substr($hex, 2, 2));
+        $b = hexdec(substr($hex, 4, 2));
+
+        // r == g == b, and neither near-black nor near-white.
+        return $r === $g && $g === $b && $r >= 0x40 && $r <= 0xE8;
+    }
+
+    /**
+     * The six uppercase hex digits of a colour string, dropping an ARGB
+     * alpha channel. Null when it is not a resolvable RGB colour (a themed
+     * or indexed colour the reader could not map).
+     */
+    private static function hex6(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $hex = strtoupper(preg_replace('/[^0-9A-Fa-f]/', '', $value) ?? '');
+
+        if (strlen($hex) === 8) {
+            $hex = substr($hex, 2); // drop the ARGB alpha byte
+        }
+
+        return strlen($hex) === 6 ? $hex : null;
+    }
+
+    /* ------------------------------------------------------------------
      * Preview
      * ----------------------------------------------------------------- */
 
@@ -366,6 +495,7 @@ class WfpSpreadsheet
         $this->sharedStrings = $this->readSharedStrings($entries['xl/sharedStrings.xml'] ?? false);
         $this->worksheets = $this->readWorksheets($entries);
         $this->cells = reset($this->worksheets) ?: [];
+        $this->styleFills = $this->readStyles($entries['xl/styles.xml'] ?? false);
     }
 
     /**
@@ -473,10 +603,98 @@ class WfpSpreadsheet
         $sheets = [];
 
         foreach ($sheetFiles as $name => $xml) {
-            $sheets[$name] = $this->readWorksheet($xml);
+            $parsed = $this->readWorksheet($xml);
+            $sheets[$name] = $parsed['values'];
+            $this->sheetStyles[$name] = $parsed['styles'];
         }
 
         return $sheets;
+    }
+
+    /**
+     * The fill colour of each cell style: parse xl/styles.xml's `<fills>` and
+     * `<cellXfs>` into `cellXfs index => fill RGB (or null)`.
+     *
+     * Only a SOLID pattern fill counts, and only an RGB colour is resolved
+     * for certain; a themed or indexed colour is mapped where it is a known
+     * gray and left null otherwise (best-effort — the reader's job is to spot
+     * the gray section bands, not to render the palette).
+     *
+     * @return array<int, string|null>
+     */
+    private function readStyles(string|false $xml): array
+    {
+        if ($xml === false || $xml === '') {
+            return [];
+        }
+
+        $document = @simplexml_load_string($xml);
+
+        if ($document === false) {
+            return [];
+        }
+
+        $fills = [];
+
+        foreach ($document->fills->fill ?? [] as $fill) {
+            $fills[] = self::solidFillRgb($fill);
+        }
+
+        $xfs = [];
+        $index = 0;
+
+        foreach ($document->cellXfs->xf ?? [] as $xf) {
+            $fillId = (int) ($xf['fillId'] ?? 0);
+            $xfs[$index++] = $fills[$fillId] ?? null;
+        }
+
+        return $xfs;
+    }
+
+    /**
+     * The RGB behind a `<fill>`: its `<patternFill>`'s foreground colour when
+     * the pattern is solid, otherwise null.
+     */
+    private static function solidFillRgb(\SimpleXMLElement $fill): ?string
+    {
+        $pattern = $fill->patternFill ?? null;
+
+        if ($pattern === null || (string) ($pattern['patternType'] ?? '') !== 'solid') {
+            return null;
+        }
+
+        $foreground = $pattern->fgColor ?? null;
+
+        if ($foreground === null) {
+            return null;
+        }
+
+        $rgb = (string) ($foreground['rgb'] ?? '');
+
+        if ($rgb !== '') {
+            return strtoupper($rgb);
+        }
+
+        return self::indexedGray((string) ($foreground['indexed'] ?? ''));
+    }
+
+    /**
+     * A best-effort map from Excel's legacy indexed palette to the gray hues
+     * a section band is painted with. Index 64 ("system foreground") paints
+     * no colour, so it resolves to null.
+     */
+    private static function indexedGray(string $indexed): ?string
+    {
+        if ($indexed === '') {
+            return null;
+        }
+
+        return match ((int) $indexed) {
+            22 => 'FFC0C0C0', // 25% gray
+            23 => 'FF808080', // 50% gray
+            17 => 'FF808080',
+            default => null,
+        };
     }
 
     private function normalizeZipPath(string $path): string
@@ -535,7 +753,10 @@ class WfpSpreadsheet
     }
 
     /**
-     * @return array<string, string>
+     * A worksheet's cell values and, alongside them, the style index of each
+     * cell that carries one (so a fill can be looked up per cell).
+     *
+     * @return array{values: array<string, string>, styles: array<string, int>}
      */
     private function readWorksheet(string|false $xml): array
     {
@@ -550,6 +771,7 @@ class WfpSpreadsheet
         }
 
         $cells = [];
+        $styles = [];
 
         foreach ($document->sheetData->row as $row) {
             foreach ($row->c as $cell) {
@@ -577,10 +799,16 @@ class WfpSpreadsheet
                 }
 
                 $cells[$ref] = trim($value);
+
+                $style = (string) ($cell['s'] ?? '');
+
+                if ($style !== '') {
+                    $styles[$ref] = (int) $style;
+                }
             }
         }
 
-        return $cells;
+        return ['values' => $cells, 'styles' => $styles];
     }
 
     /**

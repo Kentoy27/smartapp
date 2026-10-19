@@ -6,6 +6,7 @@ use App\Models\WfpItem;
 use App\Models\WfpPlan;
 use App\Support\WfpGenerator;
 use App\Support\WfpTemplate;
+use App\Support\WfpValidator;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
@@ -184,6 +185,19 @@ class WfpPlanEditor extends Component
     public function flaggedCount(): int
     {
         return $this->plan->flaggedCount();
+    }
+
+    /**
+     * The validation report — month/grand totals against the MEM, unknown
+     * account codes, rows still missing their enrichment, near-duplicates —
+     * so the SH sees it without the CLI. See {@see WfpValidator}.
+     *
+     * @return array<string, mixed>
+     */
+    #[Computed]
+    public function validation(): array
+    {
+        return WfpValidator::report($this->plan);
     }
 
     /**

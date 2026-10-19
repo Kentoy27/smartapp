@@ -86,6 +86,67 @@ class WfpAccountCodeGeneratorTest extends TestCase
         }
     }
 
+    public function test_bytes_stamp_the_accounts_school_name_into_the_title_block(): void
+    {
+        $this->classification('Office Supplies Expenses', '5020301000');
+
+        $district = District::create(['name' => 'D']);
+        $school = School::create(['district_id' => $district->id, 'name' => 'Balisong Elementary School']);
+        $user = User::factory()->create(['role' => 'user', 'is_superadmin' => false, 'school_id' => $school->id]);
+
+        $name = 'test-wfp-'.uniqid().'.xlsx';
+        file_put_contents(storage_path('forms/'.$name), $this->wfpTemplateBytes(3));
+        config(['wfp.template_file' => $name, 'wfp.template.school_name_cell' => 'B5']);
+
+        try {
+            $bytes = WfpAccountCodeGenerator::bytes($user);
+        } finally {
+            @unlink(storage_path('forms/'.$name));
+        }
+
+        $this->assertSame('Balisong Elementary School', $this->wfpCellText($this->wfpSheetXml($bytes), 'B5'));
+    }
+
+    public function test_the_shipped_template_names_each_account_in_its_first_column(): void
+    {
+        if (! is_file(storage_path('forms/WFP-Template.xlsx'))) {
+            $this->markTestSkipped('The shipped WFP template is not present.');
+        }
+
+        $this->classification('Travelling Expenses-Local', '5020101000');
+
+        $bytes = WfpAccountCodeGenerator::bytes();
+        $sheet = $this->wfpSheetXml($bytes);
+
+        // The FY-2026 form has no Account Title column, so the account is
+        // named in the first column — the form's own convention — and its code
+        // lands in the January Object Code column.
+        $this->assertSame('Travelling Expenses-Local', $this->wfpCellText($sheet, 'A14'));
+        $this->assertSame('5020101000', $this->wfpCellText($sheet, 'S14'));
+        $this->assertSame('5020101000', $this->wfpCellText($sheet, 'AO14'));
+    }
+
+    public function test_bytes_leave_the_title_block_blank_without_a_school(): void
+    {
+        $this->classification('Office Supplies Expenses', '5020301000');
+
+        $name = 'test-wfp-'.uniqid().'.xlsx';
+        file_put_contents(storage_path('forms/'.$name), $this->wfpTemplateBytes(3));
+        config(['wfp.template_file' => $name, 'wfp.template.school_name_cell' => 'B5']);
+
+        try {
+            $withoutUser = WfpAccountCodeGenerator::bytes();
+            $withoutSchool = WfpAccountCodeGenerator::bytes(
+                User::factory()->create(['role' => 'user', 'is_superadmin' => false, 'school_id' => null])
+            );
+        } finally {
+            @unlink(storage_path('forms/'.$name));
+        }
+
+        $this->assertSame('', (string) $this->wfpCellText($this->wfpSheetXml($withoutUser), 'B5'));
+        $this->assertSame('', (string) $this->wfpCellText($this->wfpSheetXml($withoutSchool), 'B5'));
+    }
+
     public function test_no_active_classifications_throws(): void
     {
         $this->expectException(RuntimeException::class);

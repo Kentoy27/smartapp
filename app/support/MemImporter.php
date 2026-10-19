@@ -30,15 +30,15 @@ class MemImporter
      *
      * @var array<string, array<int, string>>
      */
-    private const HEADER_ALIASES = [
+    public const HEADER_ALIASES = [
         'section' => ['section', 'category'],
         'objective' => ['objective', 'objectives'],
-        'activity_description' => ['activitydescription', 'activity', 'activities', 'programactivity', 'programprojectactivity', 'programsprojectsactivities', 'description'],
-        'resource_kind' => ['resourcekind', 'resource'],
+        'activity_description' => ['activitydescription', 'activity', 'activities', 'programactivity', 'programprojectactivity', 'programsprojectsactivities', 'projectactivityexpenditure', 'projectactivity', 'description'],
+        'resource_kind' => ['resourcekind', 'resource', 'kind'],
         'quantity' => ['quantity', 'qty'],
         'unit' => ['unit', 'units', 'uom'],
         'unit_cost' => ['unitcost', 'unitprice', 'price', 'costperunit'],
-        'calculated_total' => ['calculatedtotal', 'total', 'amount', 'totalcost'],
+        'calculated_total' => ['calculatedtotal', 'total', 'amount', 'totalcost', 'totalestimatedcost'],
         'account_title' => ['accounttitle', 'title'],
         'account_code' => ['accountcode', 'objectcode', 'code', 'uacscode'],
         'funding_source' => ['fundingsource', 'sourceoffund', 'sourceoffunds', 'fund'],
@@ -68,7 +68,7 @@ class MemImporter
     ];
 
     /** The columns carried onto a stored line (month/year are the matrix's). */
-    private const DATA_FIELDS = [
+    public const DATA_FIELDS = [
         'section',
         'objective',
         'activity_description',
@@ -315,24 +315,49 @@ class MemImporter
     }
 
     /**
-     * @param  array<int, mixed>  $cells
+     * Map a header row's cells to fields, or null when the row does not look
+     * like a header (fewer than two strong headings). Public so the workbook
+     * importer detects its monthly sheets' headers the same way a CSV is.
+     *
+     * @param  array<int, mixed>  $cells  a row's cells, keyed by column index
      * @return array<int, string|null>|null
      */
-    private static function detectHeader(array $cells): ?array
+    public static function detectHeader(array $cells): ?array
     {
-        $fields = [];
+        $fields = self::headerFields($cells);
         $matches = 0;
 
-        foreach ($cells as $index => $cell) {
-            $field = self::fieldFor(self::normalizeHeader((string) $cell));
-            $fields[$index] = $field;
-
+        foreach ($fields as $field) {
             if (in_array($field, self::STRONG_HEADERS, true)) {
                 $matches++;
             }
         }
 
         return $matches >= 2 ? $fields : null;
+    }
+
+    /**
+     * The field every cell maps to, keyed by the cell's own index — the raw
+     * mapping behind {@see detectHeader()}, without its "is this a header at
+     * all" gate. A cell that names no known field maps to null.
+     *
+     * Exposed because a real workbook may spread its header over MORE THAN ONE
+     * row (the parent labels on one row, their sub-labels — "Kind",
+     * "Quantity" — on the next), so the caller has to merge the whole header
+     * block instead of accepting a single row that happens to look right.
+     *
+     * @param  array<int, string>  $cells
+     * @return array<int, string|null>
+     */
+    public static function headerFields(array $cells): array
+    {
+        $fields = [];
+
+        foreach ($cells as $index => $cell) {
+            $fields[$index] = self::fieldFor(self::normalizeHeader((string) $cell));
+        }
+
+        return $fields;
     }
 
     /**
@@ -354,7 +379,7 @@ class MemImporter
         return $data;
     }
 
-    private static function fieldFor(string $normalized): ?string
+    public static function fieldFor(string $normalized): ?string
     {
         foreach (self::HEADER_ALIASES as $field => $aliases) {
             if (in_array($normalized, $aliases, true)) {
@@ -365,17 +390,17 @@ class MemImporter
         return null;
     }
 
-    private static function normalizeHeader(string $value): string
+    public static function normalizeHeader(string $value): string
     {
         return preg_replace('/[^a-z0-9]/', '', strtolower($value)) ?? '';
     }
 
-    private static function normalizeSection(string $value): string
+    public static function normalizeSection(string $value): string
     {
         return preg_replace('/[^a-z]/', '', strtolower(trim($value))) ?? '';
     }
 
-    private static function parseMonth(string $value): ?int
+    public static function parseMonth(string $value): ?int
     {
         if (is_numeric($value)) {
             $number = (int) $value;

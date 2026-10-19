@@ -399,6 +399,14 @@ body.no-scroll { overflow: hidden; }
     margin-top: 4px;
 }
 
+/* The /wfp workspace: the generate card, then the School Head's own uploads
+   list beneath it — spaced as a column. */
+.wfp-manager {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
 /* Visually hidden but read aloud — used on empty table headers. */
 .sr-only {
     position: absolute;
@@ -445,6 +453,10 @@ body.no-scroll { overflow: hidden; }
 .data-table td { padding: 12px; border-bottom: 1px solid var(--border); }
 .data-table tbody tr:last-child td { border-bottom: none; }
 .data-table tbody tr:hover { background: var(--bg-hover); }
+/* Rows that open on click (e.g. the MEM matrix list): show the affordance,
+   but keep the actions cell from inheriting the pointer. */
+.data-table tbody tr.mem-row-clickable { cursor: pointer; }
+.data-table tbody tr.mem-row-clickable td.users-actions-col { cursor: default; }
 .data-table .cell-strong { color: var(--text-strong); font-weight: 600; }
 .data-table .cell-sub { display: block; margin-top: 2px; font-size: 0.75rem; color: var(--text-muted); }
 .table-empty { padding: 16px 12px; text-align: center; color: var(--text-muted); }
@@ -683,6 +695,7 @@ body.no-scroll { overflow: hidden; }
 .mem-status--finalized { background: #d1fae5; color: var(--ok); }
 
 .mem-banner { display: flex; align-items: center; gap: 8px; margin: 0 0 16px; }
+.mem-init-status { display: flex; align-items: center; gap: 8px; padding: 10px 16px; font-size: 0.8125rem; color: var(--text-muted); }
 .mem-banner--notice { margin: 16px; }
 .mem-banner--warn { display: block; margin: 0 0 16px; padding: 12px 14px; background: var(--warn-soft); color: var(--warn); border-radius: 8px; font-size: 0.8125rem; line-height: 1.5; }
 .mem-stale-list { margin: 6px 0 0; padding-left: 18px; }
@@ -694,6 +707,17 @@ body.no-scroll { overflow: hidden; }
 .mem-toolbar { margin-left: auto; }
 /* One line of context above the grid, kept quiet so the buttons lead. */
 .mem-toolbar-copy { max-width: 46ch; font-size: 0.75rem; line-height: 1.45; color: var(--text-muted); }
+
+/* WFP validation panel (plan editor) — a collapsible report card. */
+.mem-validation { padding: 0; margin-bottom: 16px; }
+.mem-validation__summary {
+    display: flex; align-items: center; gap: 10px; cursor: pointer;
+    list-style: none; padding: 12px 16px; font-size: 0.8125rem; color: var(--text-muted);
+}
+.mem-validation__summary::-webkit-details-marker { display: none; }
+.mem-validation__hint { margin-left: auto; font-size: 0.75rem; color: var(--text-faint); }
+.mem-validation__body { padding: 0 16px 14px; font-size: 0.8125rem; line-height: 1.6; }
+.mem-validation__body p { margin: 4px 0; }
 
 /* THE SECTION BLOCKS: the matrix is two lists (Operations, Project), each
    with its own header, subtotal and add button, rather than one 15-wide
@@ -798,10 +822,27 @@ control to a real radio size and keep it from growing as a flex item. */
 .mem-total-label { text-align: right; font-weight: 600; color: var(--text-muted); }
 .mem-total-label--grand { color: var(--text-strong); }
 
-.mem-account { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
-.mem-account input { flex: 1; }
-.mem-account-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex: 0 0 auto; border: 1px solid var(--border); border-radius: 8px; background: none; color: var(--text); cursor: pointer; }
-.mem-account-btn:hover { border-color: var(--primary); color: var(--primary); }
+/* The account combobox: a searchable dropdown inside the Add-a-line dialog.
+   Its menu mirrors the notifications panel — hidden by default, shown with
+   .open — so Alpine owns open/close and a Livewire re-render never resurrects
+   the menu mid-typing. The padding overrides are scoped under .modal-form to
+   outrank the layout's own `.modal-form input` rule (equal specificity, but
+   the layout style comes later in the document). */
+.mem-combo { position: relative; margin-bottom: 6px; }
+.mem-combo__search { position: absolute; top: 50%; left: 10px; transform: translateY(-50%); display: inline-flex; color: var(--text-faint); pointer-events: none; }
+.modal-form .mem-combo input { padding-left: 32px; padding-right: 34px; }
+.mem-combo__clear { position: absolute; top: 50%; right: 6px; transform: translateY(-50%); display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: none; border-radius: 6px; background: none; color: var(--text-faint); cursor: pointer; }
+.mem-combo__clear:hover { color: var(--text-strong); background: var(--bg-hover); }
+
+.mem-combo__menu { display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20; max-height: 240px; overflow-y: auto; padding: 4px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-dropdown); }
+.mem-combo__menu.open { display: block; animation: dropdown-in 0.12s ease; }
+.mem-combo__option { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 8px 10px; border: none; border-radius: 7px; background: none; color: var(--text); text-align: left; cursor: pointer; }
+.mem-combo__option:hover,
+.mem-combo__option:focus-visible { background: var(--bg-hover); outline: none; }
+.mem-combo__option-title { font-size: 0.8125rem; font-weight: 600; color: var(--text-strong); }
+.mem-combo__option-meta { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.mem-combo__rca { font-size: 0.6875rem; color: var(--text-faint); }
+.mem-combo__empty { padding: 10px; font-size: 0.8125rem; color: var(--text-faint); text-align: center; }
 .mem-row-remove { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 8px; background: none; color: var(--danger); cursor: pointer; }
 .mem-row-remove:hover { background: var(--danger-soft); border-color: var(--danger); }
 
@@ -820,7 +861,24 @@ control to a real radio size and keep it from growing as a flex item. */
 .mem-plan-table input, .mem-plan-table textarea { width: 100%; font: inherit; font-size: 0.8125rem; }
 .mem-plan-table textarea { resize: vertical; min-height: 40px; }
 
-<<<<<<< HEAD
+/*
+ * The WFP generate button and the caption naming which workbook it produces:
+ * the school's generated plan once its matrix has lines, and the blank
+ * account-code form until then.
+ */
+.wfp-generate {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+}
+
+.wfp-generate__source {
+    font-size: 12px;
+    line-height: 1.35;
+    color: var(--text-muted);
+}
+
 /* ---------- AIP (Annual Implementation Plan) module ---------- */
 .aip-sub { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; }
 .aip-muted { color: var(--text-faint); }
@@ -1039,90 +1097,10 @@ control to a real radio size and keep it from growing as a flex item. */
     padding: 10px 12px;
     background: var(--bg-muted);
     border-bottom: 1px solid var(--border);
-=======
-/* ---------- MEM editor: the read-only LIST of lines ----------
-   The section grid stopped being a wall of inputs: a line now reads as a
-   compact list row (what it is, what it costs, what it is charged to), and
-   the row's pencil opens the one focused line form to change it. A month's
-   lines stay scannable instead of a tall stack of mostly-empty fields. */
-.mem-list { min-width: 760px; }
-.mem-list td { vertical-align: top; }
-.mem-list__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 4px; font-size: 0.75rem; color: var(--text-muted); }
-.mem-list__meta .mem-chip { font-size: 0.68rem; }
-.mem-list__meta-item { color: var(--text-muted); }
-.mem-list__movs { margin-top: 4px; font-size: 0.75rem; color: var(--text-muted); }
-.mem-list__muted { color: var(--text-faint); }
-
-/* ---------- PER LINE ITEM EXPENDITURE (annual allotment report) ----------
-   The report is the printed form: a letterhead, the MONTH / BUDGET column
-   beside the year's lines rolled up per account code, and the signature
-   block. It is drawn as a document rather than as an app table — squared
-   borders and plain type, so what is on screen is what comes off the
-   printer — and @media print strips the application chrome around it. */
-.wfp-allotment {
-    padding: 24px 20px 20px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--bg-panel);
-}
-
-.wfp-allotment-letterhead {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-    margin-bottom: 18px;
-    text-align: center;
-    line-height: 1.35;
-}
-
-.wfp-allotment-letterhead span {
-    font-size: 0.8125rem;
-    color: var(--text);
-}
-
-.wfp-allotment-letterhead strong {
-    font-size: 0.9375rem;
-    font-weight: 700;
-    color: var(--text-strong);
-    text-transform: uppercase;
-}
-
-.wfp-allotment-letterhead h2 {
-    margin-top: 12px;
-    font-size: 0.875rem;
-    font-weight: 700;
-    color: var(--text-strong);
-    text-transform: uppercase;
-    letter-spacing: 0.01em;
-}
-
-.wfp-allotment-grid {
-    display: flex;
-    align-items: flex-start;
-    gap: 22px;
-}
-
-.wfp-allotment-table {
-    border-collapse: collapse;
-    font-size: 0.8125rem;
-    color: var(--text);
-}
-
-.wfp-allotment-table th,
-.wfp-allotment-table td {
-    padding: 4px 8px;
-    border: 1px solid var(--border);
-    vertical-align: top;
-}
-
-.wfp-allotment-table thead th {
->>>>>>> feature/wfp
     font-size: 0.6875rem;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-<<<<<<< HEAD
     color: var(--text-muted);
     white-space: nowrap;
 }
@@ -1266,7 +1244,88 @@ control to a real radio size and keep it from growing as a flex item. */
 .sig-file-label:focus-within { outline: 2px solid var(--primary-strong); outline-offset: 2px; }
 
 .sig-help { margin-top: 14px; color: var(--text-faint); font-size: 0.75rem; line-height: 1.5; }
-=======
+
+/* ---------- MEM editor: the read-only LIST of lines ----------
+   The section grid stopped being a wall of inputs: a line now reads as a
+   compact list row (what it is, what it costs, what it is charged to), and
+   the row's pencil opens the one focused line form to change it. A month's
+   lines stay scannable instead of a tall stack of mostly-empty fields. */
+.mem-list { min-width: 760px; }
+.mem-list td { vertical-align: top; }
+.mem-list__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 4px; font-size: 0.75rem; color: var(--text-muted); }
+.mem-list__meta .mem-chip { font-size: 0.68rem; }
+.mem-list__meta-item { color: var(--text-muted); }
+.mem-list__movs { margin-top: 4px; font-size: 0.75rem; color: var(--text-muted); }
+.mem-list__muted { color: var(--text-faint); }
+
+/* ---------- PER LINE ITEM EXPENDITURE (annual allotment report) ----------
+   The report is the printed form: a letterhead, the MONTH / BUDGET column
+   beside the year's lines rolled up per account code, and the signature
+   block. It is drawn as a document rather than as an app table — squared
+   borders and plain type, so what is on screen is what comes off the
+   printer — and @media print strips the application chrome around it. */
+.wfp-allotment {
+    padding: 24px 20px 20px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-panel);
+}
+
+.wfp-allotment-letterhead {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    margin-bottom: 18px;
+    text-align: center;
+    line-height: 1.35;
+}
+
+.wfp-allotment-letterhead span {
+    font-size: 0.8125rem;
+    color: var(--text);
+}
+
+.wfp-allotment-letterhead strong {
+    font-size: 0.9375rem;
+    font-weight: 700;
+    color: var(--text-strong);
+    text-transform: uppercase;
+}
+
+.wfp-allotment-letterhead h2 {
+    margin-top: 12px;
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: var(--text-strong);
+    text-transform: uppercase;
+    letter-spacing: 0.01em;
+}
+
+.wfp-allotment-grid {
+    display: flex;
+    align-items: flex-start;
+    gap: 22px;
+}
+
+.wfp-allotment-table {
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+    color: var(--text);
+}
+
+.wfp-allotment-table th,
+.wfp-allotment-table td {
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    vertical-align: top;
+}
+
+.wfp-allotment-table thead th {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
     background: var(--bg-muted);
     color: var(--text-strong);
     text-align: center;
@@ -1442,4 +1501,58 @@ control to a real radio size and keep it from growing as a flex item. */
         break-inside: avoid;
     }
 }
->>>>>>> feature/wfp
+
+/* ---------- MEM editor: the month navigation strip ----------
+   The editor is one month, but a year is planned a month at a time, so the
+   twelve months sit as a strip across the top of the editor. The month being
+   edited is marked; the rest link straight to their own matrix, so moving
+   through the year never means going back to the list. A month that is
+   validated or finalized carries a small status dot, so the year's progress
+   is readable without opening each month; a month whose matrix was deleted
+   is dimmed and not clickable. */
+.mem-month-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px;
+    margin: 0 0 16px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-muted);
+}
+
+.mem-month-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border-radius: 7px;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    color: var(--text-muted);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: background 0.15s, color 0.15s;
+}
+
+a.mem-month-tab:hover { background: var(--bg-hover); color: var(--text-strong); }
+
+.mem-month-tab.is-current {
+    background: var(--bg-elevated);
+    color: var(--primary);
+    box-shadow: var(--shadow-card);
+}
+
+.mem-month-tab.is-empty { color: var(--text-faint); opacity: 0.55; cursor: not-allowed; }
+
+.mem-month-tab__dot {
+    width: 6px;
+    height: 6px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: var(--text-faint);
+}
+
+.mem-month-tab__dot--validated { background: var(--primary); }
+.mem-month-tab__dot--finalized { background: var(--ok); }

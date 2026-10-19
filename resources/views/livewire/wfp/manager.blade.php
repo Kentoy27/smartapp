@@ -14,7 +14,9 @@
                 <span class="opcr-file-name">{{ $fileName }}</span>
                 <span class="opcr-file-sub">
                     {{ $templateDescription }}
-                    @if ($accountCount > 0)
+                    @if ($planYear !== null)
+                        · the plan generated from your Monthly Expenditure Matrix (CY {{ $planYear }})
+                    @elseif ($accountCount > 0)
                         · {{ $accountCount }} account code{{ $accountCount === 1 ? '' : 's' }} will be written
                     @endif
                 </span>
@@ -28,4 +30,8 @@
             <livewire:wfp-upload :key="'wfp-upload-page'" />
         </div>
     </div>
+
+    {{-- MY UPLOADS: the School Head's own list of the workbooks they have
+         handed back, each with a download. Refreshes on `wfp-uploaded`. --}}
+    <livewire:wfp-my-uploads-list :key="'wfp-my-uploads-page'" />
 </div>

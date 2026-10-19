@@ -77,11 +77,16 @@ class WfpTemplateFiller
      * Locate the template's table: which sheet it is on, its header row, the
      * resolved column letters, its blank data band and its TOTAL row.
      *
+     * The official template spreads its header across a merged BLOCK of rows
+     * (parent headings such as "Financial Target (2025)", then per-month and
+     * Object Code labels, then the physical month labels), so columns and
+     * month bands are resolved from the whole block, not one row.
+     *
      * Best-effort: a column that cannot be resolved is simply left out (and can
      * be pinned in config); only a workbook with no readable worksheet throws.
      *
      * @param  array<string, string>  $parts
-     * @return array{sheet_path: string, sheet_name: string, header_row: ?int, columns: array<string, string>, months: array<int, string>, data_start_row: ?int, data_rows: array<int, int>, total_row: ?int}
+     * @return array{sheet_path: string, sheet_name: string, header_row: ?int, columns: array<string, string>, months: array<int, string>, physical_months: array<int, string>, code_columns_by_month: array<int, string>, code_columns: array<string>, data_start_row: ?int, data_rows: array<int, int>, total_row: ?int}
      */
     public static function locate(array $parts): array
     {
@@ -96,13 +101,30 @@ class WfpTemplateFiller
         [$byRow] = self::gridByRow($sheetXml, $shared);
 
         $headerRow = self::findHeaderRow($byRow);
-        $columns = $headerRow === null ? [] : self::resolveColumns($byRow[$headerRow] ?? []);
-        $months = $headerRow === null ? [] : self::resolveMonths($byRow[$headerRow] ?? []);
 
-        $dataStart = $headerRow === null ? null : $headerRow + 1;
-        [$dataRows, $totalRow] = $dataStart === null
-            ? [[], null]
-            : self::findDataBand($byRow, $dataStart);
+        if ($headerRow === null) {
+            return [
+                'sheet_path' => $sheetPath,
+                'sheet_name' => $sheetName,
+                'header_row' => null,
+                'columns' => [],
+                'months' => [],
+                'physical_months' => [],
+                'code_columns_by_month' => [],
+                'code_columns' => [],
+                'data_start_row' => null,
+                'data_rows' => [],
+                'total_row' => null,
+            ];
+        }
+
+        $band = self::headerBandRows($byRow, $headerRow);
+        $columns = self::resolveColumns(self::bandMap($band));
+        [$months, $physicalMonths] = self::resolveMonths($band, $columns);
+        [$codeByMonth, $codeColumns] = self::resolveCodeColumns($band, $columns, $months);
+
+        $dataStart = self::dataStartRow($byRow, $sheetXml, $headerRow, $band);
+        [$dataRows, $totalRow] = self::findDataBand($byRow, $dataStart);
 
         return [
             'sheet_path' => $sheetPath,
@@ -110,6 +132,9 @@ class WfpTemplateFiller
             'header_row' => $headerRow,
             'columns' => $columns,
             'months' => $months,
+            'physical_months' => $physicalMonths,
+            'code_columns_by_month' => $codeByMonth,
+            'code_columns' => $codeColumns,
             'data_start_row' => $dataStart,
             'data_rows' => $dataRows,
             'total_row' => $totalRow,
@@ -147,6 +172,46 @@ class WfpTemplateFiller
         return PurePhpZipWriter::create($parts);
     }
 
+    /**
+     * Stamp single cells into the template (a title-block field such as the
+     * school's name), keeping each cell's own style. A cell the sheet does not
+     * already have is created in its row, in column order.
+     *
+     * @param  array<string, string>  $cells  cell reference => text
+     */
+    public static function writeCells(string $templateBytes, array $cells): string
+    {
+        if ($cells === []) {
+            return $templateBytes;
+        }
+
+        $parts = self::readParts($templateBytes);
+        [$sheetPath] = self::resolveSheet($parts, (string) config('wfp.template.sheet', 'WFP'));
+
+        if ($sheetPath === null) {
+            throw new RuntimeException('The WFP template has no readable worksheet.');
+        }
+
+        $sheetXml = $parts[$sheetPath];
+
+        foreach ($cells as $ref => $text) {
+            if (preg_match('/^([A-Z]+)(\d+)$/i', (string) $ref, $m) !== 1) {
+                continue;
+            }
+
+            $sheetXml = self::rebuildRow(
+                $sheetXml,
+                (int) $m[2],
+                [strtoupper($m[1]) => ['value' => self::stringify($text), 'numeric' => false]],
+                [],
+            );
+        }
+
+        $parts[$sheetPath] = $sheetXml;
+
+        return PurePhpZipWriter::create($parts);
+    }
+
     /* ------------------------------------------------------------------
      * Writing
      * ----------------------------------------------------------------- */
@@ -156,8 +221,6 @@ class WfpTemplateFiller
      */
     private static function writeRows(string $sheetXml, array $layout, array $rows): string
     {
-        $columns = (array) $layout['columns'];
-        $months = (array) $layout['months'];
         $dataRows = array_values(array_map('intval', (array) $layout['data_rows']));
 
         $capacity = count($dataRows);
@@ -190,7 +253,7 @@ class WfpTemplateFiller
                 continue;
             }
 
-            $writes = self::writesForRow((array) $row, $columns, $months);
+            $writes = self::writesForRow((array) $row, $layout);
             $sheetXml = self::rebuildRow($sheetXml, $targetRow, $writes, $styles);
         }
 
@@ -198,11 +261,7 @@ class WfpTemplateFiller
         for ($index = $desired; $index < count($dataRows); $index++) {
             $writes = [];
 
-            foreach (array_values($columns) as $col) {
-                $writes[$col] = ['value' => null, 'numeric' => false];
-            }
-
-            foreach (array_values($months) as $col) {
+            foreach (self::blankColumns($layout) as $col) {
                 $writes[$col] = ['value' => null, 'numeric' => false];
             }
 
@@ -214,12 +273,19 @@ class WfpTemplateFiller
 
     /**
      * @param  array<string, mixed>  $row
-     * @param  array<string, string>  $columns
-     * @param  array<int, string>  $months
+     * @param  array<string, mixed>  $layout  as returned by locate()
      * @return array<string, array{value: ?string, numeric: bool}>
      */
-    private static function writesForRow(array $row, array $columns, array $months): array
+    private static function writesForRow(array $row, array $layout): array
     {
+        $columns = (array) $layout['columns'];
+        $months = (array) $layout['months'];
+        $physicalMonths = (array) ($layout['physical_months'] ?? []);
+        $codeByMonth = (array) ($layout['code_columns_by_month'] ?? []);
+        $codeColumns = (array) ($layout['code_columns'] ?? []);
+        $hasMonth = array_key_exists('month', $row);
+        $month = $hasMonth ? (int) $row['month'] : null;
+
         $writes = [];
 
         foreach ($row as $field => $value) {
@@ -229,12 +295,43 @@ class WfpTemplateFiller
 
             $numeric = in_array($field, self::NUMERIC_FIELDS, true);
 
-            // Month-shaped: a financial target belongs in its own month column.
+            // Month-shaped targets belong in their own month's column, under
+            // the band that field's parent heading spans.
             if ($field === 'financial_target' && $months !== []) {
-                $month = (int) ($row['month'] ?? 0);
-
-                if (isset($months[$month])) {
+                if ($hasMonth && isset($months[$month])) {
                     $writes[$months[$month]] = ['value' => self::stringify($value), 'numeric' => true];
+                } elseif (isset($columns[$field])) {
+                    $writes[$columns[$field]] = ['value' => self::stringify($value), 'numeric' => true];
+                }
+
+                continue;
+            }
+
+            if ($field === 'physical_target' && $physicalMonths !== []) {
+                if ($hasMonth && isset($physicalMonths[$month])) {
+                    $writes[$physicalMonths[$month]] = ['value' => self::stringify($value), 'numeric' => true];
+                } elseif (isset($columns[$field])) {
+                    $writes[$columns[$field]] = ['value' => self::stringify($value), 'numeric' => true];
+                }
+
+                continue;
+            }
+
+            /*
+             * Object codes: a monthly template carries one Object Code column
+             * per month. A month-grained line writes into its own month's
+             * column; a month-less row (the account-code generator's pre-filled
+             * form) writes the code into every monthly column at once.
+             */
+            if ($field === 'account_code' && ($codeByMonth !== [] || $codeColumns !== [])) {
+                if ($hasMonth && isset($codeByMonth[$month])) {
+                    $writes[$codeByMonth[$month]] = ['value' => self::stringify($value), 'numeric' => false];
+                } elseif (! $hasMonth) {
+                    foreach ($codeColumns as $col) {
+                        $writes[$col] = ['value' => self::stringify($value), 'numeric' => false];
+                    }
+                } elseif (isset($columns[$field])) {
+                    $writes[$columns[$field]] = ['value' => self::stringify($value), 'numeric' => false];
                 }
 
                 continue;
@@ -246,6 +343,26 @@ class WfpTemplateFiller
         }
 
         return $writes;
+    }
+
+    /**
+     * Every column the blank-out pass clears: the resolved columns plus all
+     * month- and per-month-code columns.
+     *
+     * @param  array<string, mixed>  $layout
+     * @return array<int, string>
+     */
+    private static function blankColumns(array $layout): array
+    {
+        $cols = [];
+
+        foreach (['columns', 'months', 'physical_months', 'code_columns'] as $key) {
+            foreach (array_values((array) ($layout[$key] ?? [])) as $col) {
+                $cols[(string) $col] = (string) $col;
+            }
+        }
+
+        return array_values($cols);
     }
 
     private static function stringify(mixed $value): ?string
@@ -282,6 +399,7 @@ class WfpTemplateFiller
 
         $cells = [];
         $order = [];
+        $existing = [];
 
         if (preg_match_all('/<c\b[^>]*\/>|<c\b[^>]*>.*?<\/c>/s', $row, $found) !== false) {
             foreach ($found[0] as $element) {
@@ -290,6 +408,7 @@ class WfpTemplateFiller
                 }
 
                 $col = $ref[1];
+                $existing[$col] = $element;
 
                 if (isset($writes[$col])) {
                     continue; // this column is being rewritten below
@@ -301,10 +420,23 @@ class WfpTemplateFiller
         }
 
         foreach ($writes as $col => $spec) {
+            /*
+             * A cell the template COMPUTES is not ours to overwrite: the
+             * template's own totals (a grand-total row, the per-row sums in
+             * the first data rows) must survive a fill, both when a value is
+             * written and when a blank row is being cleared — rewriting one
+             * would hard-code a number where the template had a formula.
+             */
+            if (isset($existing[$col]) && str_contains($existing[$col], '<f')) {
+                $cells[$col] = $existing[$col];
+                $order[$col] = self::columnIndex($col);
+
+                continue;
+            }
+
             $style = null;
 
-            if (preg_match('/<c\b(?=[^>]*\br="'.preg_quote($col.$rowNumber, '/').'")[^>]*>/', $row, $existing) === 1
-                && preg_match('/\bs="(\d+)"/', $existing[0], $s) === 1) {
+            if (isset($existing[$col]) && preg_match('/\bs="(\d+)"/', $existing[$col], $s) === 1) {
                 $style = $s[1];
             } elseif (isset($styles[$col])) {
                 $style = $styles[$col];
@@ -465,6 +597,19 @@ class WfpTemplateFiller
                 static fn (array $c): string => 'r="'.$c[1].$new.'"',
                 $clone
             );
+
+            // A per-row formula the template carries (Q = SUM(E177:P177)) must
+            // total the CLONE's own months, not the row it was copied from.
+            $clone = (string) preg_replace_callback(
+                '/<f\b[^>]*>.*?<\/f>/s',
+                static fn (array $f): string => (string) preg_replace(
+                    '/(\$?[A-Z]+\$?)'.$lastDataRow.'(?!\d)/',
+                    '${1}'.$new,
+                    $f[0]
+                ),
+                $clone
+            );
+
             $clones .= $clone;
         }
 
@@ -569,20 +714,26 @@ class WfpTemplateFiller
     }
 
     /**
-     * @param  array<string, string>  $headerCells
-     * @return array<string, string>  field => column letter
+     * @param  array<string, string>  $headerCells  column letter => text
+     * @return array<string, string> field => column letter
      */
     private static function matchLabels(array $headerCells): array
     {
         $matched = [];
+        $spellings = [];
 
         foreach ((array) config('wfp.template.columns', []) as $field => $spec) {
             foreach ((array) ($spec['labels'] ?? []) as $label) {
-                $needle = self::normalize((string) $label);
-
-                if ($needle === '') {
-                    continue;
+                if (self::normalize((string) $label) !== '') {
+                    $spellings[$field][] = (string) $label;
                 }
+            }
+        }
+
+        // An exact spelling wins…
+        foreach ($spellings as $field => $labels) {
+            foreach ($labels as $label) {
+                $needle = self::normalize($label);
 
                 foreach ($headerCells as $col => $text) {
                     if (self::normalize($text) === $needle) {
@@ -594,37 +745,314 @@ class WfpTemplateFiller
             }
         }
 
-        return $matched;
-    }
+        // …then a heading that starts with a known label and continues with a
+        // qualifier ("Financial Target (2025)", "Physical Target (2024)"). The
+        // continuation must begin at a word boundary so a longer word ("unit"
+        // in "united") never matches.
+        foreach ($spellings as $field => $labels) {
+            if (isset($matched[$field])) {
+                continue;
+            }
 
-    /**
-     * @param  array<string, string>  $headerCells
-     * @return array<int, string>  month number => column letter
-     */
-    private static function resolveMonths(array $headerCells): array
-    {
-        if (! (bool) config('wfp.template.months.enabled', false)) {
-            return [];
-        }
+            foreach ($labels as $label) {
+                foreach ($headerCells as $col => $text) {
+                    if (self::startsWithLabel($text, $label)) {
+                        $matched[$field] ??= $col;
 
-        $labels = (array) config('wfp.template.months.labels', []);
-        $months = [];
-
-        foreach ($headerCells as $col => $text) {
-            $normalized = self::normalize($text);
-
-            foreach ($labels as $number => $spellings) {
-                foreach ((array) $spellings as $spelling) {
-                    if ($normalized !== '' && $normalized === self::normalize((string) $spelling)) {
-                        $months[(int) $number] = $col;
-
-                        break 3;
+                        break 2;
                     }
                 }
             }
         }
 
-        return $months;
+        return $matched;
+    }
+
+    /** Whether a cell's text starts with the given label at a word boundary. */
+    private static function startsWithLabel(string $text, string $label): bool
+    {
+        $normalize = static fn (string $value): string => trim(strtolower(preg_replace('/\s+/', ' ', $value) ?? ''));
+
+        $cell = $normalize($text);
+        $needle = $normalize($label);
+
+        if ($needle === '' || $cell === $needle || ! str_starts_with($cell, $needle)) {
+            return false;
+        }
+
+        $rest = substr($cell, strlen($needle));
+
+        return $rest !== '' && ! ctype_alnum($rest[0]);
+    }
+
+    /** Whether a cell's text exactly (normalized) matches one of a field's labels. */
+    private static function matchesField(string $text, string $field): bool
+    {
+        $normalized = self::normalize($text);
+
+        if ($normalized === '') {
+            return false;
+        }
+
+        foreach ((array) config('wfp.template.columns.'.$field.'.labels', []) as $label) {
+            if ($normalized === self::normalize((string) $label)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The header block: the header row plus the sub-header rows under it (the
+     * official template spreads month labels and per-month Object Code columns
+     * across a merged block).
+     *
+     * @param  array<int, array<string, string>>  $byRow
+     * @return array<int, array<string, string>> row => [col => text]
+     */
+    private static function headerBandRows(array $byRow, int $headerRow): array
+    {
+        $extra = max(0, (int) config('wfp.template.header_band_rows', 2));
+        $band = [];
+
+        for ($row = $headerRow; $row <= $headerRow + $extra; $row++) {
+            if (isset($byRow[$row])) {
+                $band[$row] = $byRow[$row];
+            }
+        }
+
+        return $band;
+    }
+
+    /**
+     * The header block as one column => text map: the topmost non-empty cell
+     * per column, so a parent heading ("Financial Target (2025)") wins over
+     * the month label beneath it, ordered left to right.
+     *
+     * @param  array<int, array<string, string>>  $bandRows
+     * @return array<string, string>
+     */
+    private static function bandMap(array $bandRows): array
+    {
+        $map = [];
+
+        foreach ($bandRows as $cells) {
+            foreach ($cells as $col => $text) {
+                if (trim($text) !== '' && ! isset($map[$col])) {
+                    $map[$col] = $text;
+                }
+            }
+        }
+
+        uksort($map, static fn (string $a, string $b): int => self::columnIndex($a) <=> self::columnIndex($b));
+
+        return $map;
+    }
+
+    /**
+     * Month columns from the header block, split by the band they sit under:
+     * the financial months at/right of the Financial Target parent, the
+     * physical months under the Physical Target parent (left of the financial
+     * band). Both maps are month number => column letter.
+     *
+     * @param  array<int, array<string, string>>  $bandRows
+     * @param  array<string, string>  $columns
+     * @return array{0: array<int, string>, 1: array<int, string>}
+     */
+    private static function resolveMonths(array $bandRows, array $columns): array
+    {
+        if (! (bool) config('wfp.template.months.enabled', false)) {
+            return [[], []];
+        }
+
+        $labels = (array) config('wfp.template.months.labels', []);
+        $candidates = []; // month number => [column letter => column index]
+
+        foreach ($bandRows as $cells) {
+            foreach ($cells as $col => $text) {
+                $normalized = self::normalize($text);
+
+                if ($normalized === '') {
+                    continue;
+                }
+
+                foreach ($labels as $number => $spellings) {
+                    foreach ((array) $spellings as $spelling) {
+                        if ($normalized === self::normalize((string) $spelling)) {
+                            $candidates[(int) $number][$col] = self::columnIndex($col);
+
+                            // Two levels out: this cell is done, the next
+                            // cell of the same row still gets its turn.
+                            break 2;
+                        }
+                    }
+                }
+            }
+        }
+
+        $financialFrom = isset($columns['financial_target']) ? self::columnIndex($columns['financial_target']) : null;
+        $physicalFrom = isset($columns['physical_target']) ? self::columnIndex($columns['physical_target']) : null;
+
+        $months = [];
+        $physical = [];
+
+        foreach ($candidates as $number => $byColumn) {
+            asort($byColumn);
+
+            foreach ($byColumn as $col => $index) {
+                // The financial band: at/right of its parent heading — or the
+                // leftmost candidate when no parent resolved.
+                if (! isset($months[$number]) && ($financialFrom === null || $index >= $financialFrom)) {
+                    $months[$number] = $col;
+                }
+
+                // The physical band: under its parent, before the financial one.
+                if (! isset($physical[$number])
+                    && $physicalFrom !== null
+                    && $index >= $physicalFrom
+                    && ($financialFrom === null || $index < $financialFrom)) {
+                    $physical[$number] = $col;
+                }
+
+                if (isset($months[$number]) && (isset($physical[$number]) || $physicalFrom === null)) {
+                    break;
+                }
+            }
+        }
+
+        ksort($months);
+        ksort($physical);
+
+        return [$months, $physical];
+    }
+
+    /**
+     * The per-month Object Code columns — each sitting immediately right of its
+     * month column — plus every Object Code column in the header block.
+     *
+     * @param  array<int, array<string, string>>  $bandRows
+     * @param  array<string, string>  $columns
+     * @param  array<int, string>  $months  financial month => column letter
+     * @return array{0: array<int, string>, 1: array<string>}
+     */
+    private static function resolveCodeColumns(array $bandRows, array $columns, array $months): array
+    {
+        $all = [];
+
+        foreach ($bandRows as $cells) {
+            foreach ($cells as $col => $text) {
+                if (self::matchesField($text, 'account_code') && ! isset($all[$col])) {
+                    $all[$col] = $col;
+                }
+            }
+        }
+
+        $byMonth = [];
+
+        foreach ($months as $number => $monthCol) {
+            $next = self::columnLetter(self::columnIndex($monthCol) + 1);
+
+            if (isset($all[$next])) {
+                $byMonth[(int) $number] = $next;
+            }
+        }
+
+        // A template that resolves a single Object Code column but has none in
+        // the month band still writes it.
+        if ($all === [] && isset($columns['account_code'])) {
+            $all[$columns['account_code']] = $columns['account_code'];
+        }
+
+        return [$byMonth, array_values($all)];
+    }
+
+    /**
+     * The first data row: the header block is where sub-header rows (month
+     * labels, per-month Object Code columns) and parent headings merged across
+     * rows live — the blank band begins after all of them.
+     *
+     * @param  array<int, array<string, string>>  $byRow
+     * @param  array<int, array<string, string>>  $bandRows
+     */
+    private static function dataStartRow(array $byRow, string $sheetXml, int $headerRow, array $bandRows): int
+    {
+        $bandEnd = $bandRows === [] ? $headerRow : max(array_keys($bandRows));
+        $row = $headerRow + 1;
+
+        // Sub-header rows are skipped where they may live: inside the band.
+        while ($row <= $bandEnd && self::isSubHeaderRow($byRow[$row] ?? [])) {
+            $row++;
+        }
+
+        // A parent heading merged across rows covers the rows beneath it, so
+        // the band starts after the merge — not inside the heading.
+        $blockBottom = max($headerRow, self::headerBlockBottom($sheetXml, $headerRow, $bandEnd));
+
+        return $row <= $blockBottom ? $blockBottom + 1 : $row;
+    }
+
+    /**
+     * The last row of the header block: the band's bottom, extended by a
+     * merged range that starts inside the block and spans rows — the official
+     * template merges its parent headings across the header rows (A11:A13),
+     * so writing data at row 13 would write into the header itself.
+     *
+     * A range reaching far below the block is a data-area merge (a cell
+     * spanning many lines), not the header, and is left out.
+     */
+    private static function headerBlockBottom(string $sheetXml, int $headerRow, int $bandEnd): int
+    {
+        $limit = $bandEnd + 1;
+        $bottom = $headerRow;
+
+        if (preg_match_all('/<mergeCell ref="([A-Z]+)(\d+):[A-Z]+(\d+)"/', $sheetXml, $merges, PREG_SET_ORDER) === false) {
+            return $bottom;
+        }
+
+        foreach ($merges as $merge) {
+            $start = (int) $merge[2];
+            $end = (int) $merge[3];
+
+            if ($start < $headerRow || $start > $bandEnd || $end <= $headerRow || $end > $limit) {
+                continue;
+            }
+
+            $bottom = max($bottom, $end);
+        }
+
+        return $bottom;
+    }
+
+    /**
+     * Whether a row belongs to the header block rather than the data band: it
+     * carries month labels or per-month Object Code / Account Title columns.
+     *
+     * @param  array<string, string>  $cells
+     */
+    private static function isSubHeaderRow(array $cells): bool
+    {
+        foreach ($cells as $text) {
+            $normalized = self::normalize($text);
+
+            if ($normalized === '') {
+                continue;
+            }
+
+            foreach ((array) config('wfp.template.months.labels', []) as $spellings) {
+                foreach ((array) $spellings as $spelling) {
+                    if ($normalized === self::normalize((string) $spelling)) {
+                        return true;
+                    }
+                }
+            }
+
+            if (self::matchesField($text, 'account_code') || self::matchesField($text, 'account_title')) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -683,7 +1111,7 @@ class WfpTemplateFiller
 
     /**
      * @param  array<string, string>  $parts
-     * @return array{0: ?string, 1: string}  sheet path and name
+     * @return array{0: ?string, 1: string} sheet path and name
      */
     private static function resolveSheet(array $parts, string $keyword): array
     {
@@ -713,7 +1141,7 @@ class WfpTemplateFiller
 
     /**
      * @param  array<string, string>  $parts
-     * @return array<string, string>  sheet name => package path
+     * @return array<string, string> sheet name => package path
      */
     private static function sheetMap(array $parts): array
     {
@@ -848,12 +1276,20 @@ class WfpTemplateFiller
         return strtolower(preg_replace('/[^a-z0-9]+/i', '', $value) ?? '');
     }
 
+    /*
+     * Every row pattern keeps the self-closing alternative FIRST and gives
+     * each alternative its own `[^>]*`, because a single greedy `[^>]*`
+     * followed by `(?:\/>|>.*?<\/row>)` matches too much: it swallows the
+     * closing slash of an empty row (`<row r="5"/>`), the `\/>` branch then
+     * fails, and the `>.*?<\/row>` branch runs on to the NEXT row's closing
+     * tag — so rewriting row 5 would clobber row 6 as well.
+     */
     private static function rowPattern(int $rowNumber): string
     {
-        return '/<row\b(?=[^>]*\br="'.$rowNumber.'")[^>]*(?:\/>|>.*?<\/row>)/s';
+        return '/<row\b(?=[^>]*\br="'.$rowNumber.'")(?:[^>]*\/>|[^>]*>.*?<\/row>)/s';
     }
 
-    private const ROW_PATTERN = '/<row\b[^>]*\br="(\d+)"[^>]*(?:\/>|>.*?<\/row>)/s';
+    private const ROW_PATTERN = '/<row\b[^>]*\br="(\d+)"(?:[^>]*\/>|[^>]*>.*?<\/row>)/s';
 
     private static function columnIndex(string $column): int
     {

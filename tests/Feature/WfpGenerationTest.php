@@ -163,13 +163,17 @@ class WfpGenerationTest extends TestCase
         // depend on the shipped file's exact layout.
         $name = 'test-wfp-'.uniqid().'.xlsx';
         file_put_contents(storage_path('forms/'.$name), $this->wfpTemplateBytes(3));
-        config(['wfp.template_file' => $name]);
+        config(['wfp.template_file' => $name, 'wfp.template.school_name_cell' => 'B5']);
 
         try {
-            $this->actingAs($sh)
+            $response = $this->actingAs($sh)
                 ->get(route('wfp.plans.export', ['plan' => $plan->id]))
                 ->assertOk()
                 ->assertHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+
+            // The exported plan identifies its school, in the template's own
+            // title-block cell.
+            $this->assertSame('Test School', $this->wfpCellText($this->wfpSheetXml((string) $response->getContent()), 'B5'));
         } finally {
             @unlink(storage_path('forms/'.$name));
         }

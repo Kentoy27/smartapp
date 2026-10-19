@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use App\Models\AccountClassification;
 use App\Models\MonthlyExpenditureItem;
 use App\Models\MonthlyExpenditureMatrix;
 use App\Models\WfpItem;
@@ -33,6 +34,13 @@ class WfpGenerator
      * Generate (or regenerate) a plan from the given matrix, or, when none is
      * given, from every matrix of the plan's school and year.
      *
+     * The desired lines are ordered by their UACS account code (the account
+     * classifications' sort order, with the object code as the fallback), then
+     * by the first month they appear in, then by activity — so the generated
+     * WFP reads in account-code order and nobody rearranges its rows by hand.
+     * A code the master list does not know sorts after the known ones (and is
+     * surfaced by the validator).
+     *
      * @return array{created: int, updated: int, removed: int, flagged: int}
      */
     public static function generate(WfpPlan $plan, ?MonthlyExpenditureMatrix $matrix = null): array
@@ -48,16 +56,22 @@ class WfpGenerator
                 ->all();
 
         $desired = [];
-        $position = 0;
 
         foreach ($matrices as $source) {
             /** @var MonthlyExpenditureMatrix $source */
             foreach ($source->items()->orderBy('position')->orderBy('id')->get() as $item) {
                 /** @var MonthlyExpenditureItem $item */
-                $position++;
-
-                $desired[$item->id] = self::payload($item, $source, $position);
+                $desired[$item->id] = self::payload($item, $source, 0);
             }
+        }
+
+        // Order the rows by account code, then assign the stored positions.
+        $desired = self::orderByAccountCode($desired);
+
+        $position = 0;
+
+        foreach (array_keys($desired) as $itemId) {
+            $desired[$itemId]['position'] = ++$position;
         }
 
         return DB::transaction(function () use ($plan, $desired): array {
@@ -223,7 +237,11 @@ class WfpGenerator
                 'account_code' => $item->account_code,
                 'physical_target' => $item->quantity,
                 'physical_unit' => $item->unit,
-                'financial_target' => $item->calculated_total,
+                // The stored total is the server's own quantity × unit cost, but a
+                // line that reached the table without it (created outside the
+                // editor/importer) still has its money — money must never
+                // silently become an empty WFP cell.
+                'financial_target' => $item->calculated_total ?? $item->recalculateTotal(),
             ],
             'funding_source' => $item->funding_source,
             'organizational_classification' => $item->organizational_classification,
@@ -247,6 +265,116 @@ class WfpGenerator
     private static function prefer(?string $incoming, ?string $existing): ?string
     {
         return ($incoming !== null && trim($incoming) !== '') ? $incoming : $existing;
+    }
+
+    /* ------------------------------------------------------ account ordering */
+
+    /**
+     * Sort the desired payloads into WFP order: by the account code's UACS
+     * sort order (the object code as fallback, unknown codes last), then the
+     * first month the line appears in, then the activity A→Z. Keys are kept
+     * (uasort), so the reconcile still matches a line to its source id.
+     *
+     * @param  array<int, array<string, mixed>>  $desired
+     * @return array<int, array<string, mixed>>
+     */
+    private static function orderByAccountCode(array $desired): array
+    {
+        if ($desired === []) {
+            return $desired;
+        }
+
+        $order = self::accountSortOrder();
+
+        uasort($desired, function (array $a, array $b) use ($order): int {
+            $fa = is_array($a['fields'] ?? null) ? $a['fields'] : [];
+            $fb = is_array($b['fields'] ?? null) ? $b['fields'] : [];
+
+            return self::compareFields($fa, $fb, $order);
+        });
+
+        return $desired;
+    }
+
+    /**
+     * Order two lines: known account codes before unknown ones, then by the
+     * master list's sort order, then by the code itself, then by the first
+     * month the line appears in, then by activity A→Z.
+     *
+     * The code is compared with strcmp rather than PHP's `<`, because two
+     * numeric-looking code strings ("5020301000") would otherwise be compared
+     * as numbers, losing the fixed-width order the UACS codes are built on.
+     *
+     * @param  array<string, mixed>  $fa
+     * @param  array<string, mixed>  $fb
+     * @param  array<string, int|null>  $order
+     */
+    private static function compareFields(array $fa, array $fb, array $order): int
+    {
+        $ka = self::accountSortKey($fa, $order);
+        $kb = self::accountSortKey($fb, $order);
+
+        return ((int) ! $ka['known'] <=> (int) ! $kb['known'])
+            ?: ($ka['order'] <=> $kb['order'])
+            ?: strcmp($ka['code'], $kb['code'])
+            ?: ((int) ($fa['month'] ?? 0) <=> (int) ($fb['month'] ?? 0))
+            ?: strcasecmp((string) ($fa['program_activity'] ?? ''), (string) ($fb['program_activity'] ?? ''));
+    }
+
+    /**
+     * A line's account ordering: whether its code is on the master list, the
+     * list's sort order (PHP_INT_MAX when unset) and the raw code.
+     *
+     * @param  array<string, mixed>  $fields
+     * @param  array<string, int|null>  $order
+     * @return array{known: bool, order: int, code: string}
+     */
+    private static function accountSortKey(array $fields, array $order): array
+    {
+        $code = trim((string) ($fields['account_code'] ?? ''));
+        $key = self::codeKey($code);
+        $known = $code !== '' && array_key_exists($key, $order);
+
+        return [
+            'known' => $known,
+            'order' => $known ? (int) ($order[$key] ?? PHP_INT_MAX) : PHP_INT_MAX,
+            'code' => $code,
+        ];
+    }
+
+    /**
+     * The master list's account order, keyed by normalised object code. The
+     * smallest non-null `sort_order` wins when a code appears twice; a code
+     * with no `sort_order` is still "known" and sorts by its code.
+     *
+     * @return array<string, int|null>
+     */
+    private static function accountSortOrder(): array
+    {
+        $order = [];
+
+        foreach (AccountClassification::query()->get(['uacs_object_code', 'sort_order']) as $account) {
+            $key = self::codeKey((string) $account->uacs_object_code);
+
+            if ($key === '') {
+                continue;
+            }
+
+            $current = $order[$key] ?? null;
+            $candidate = $account->sort_order;
+
+            if (! array_key_exists($key, $order) || ($candidate !== null && ($current === null || $candidate < $current))) {
+                $order[$key] = $candidate;
+            }
+        }
+
+        return $order;
+    }
+
+    /** The digits-only form of an account code, so formatting cannot split a match. */
+    private static function codeKey(string $code): string
+    {
+        return preg_replace('/\D/', '', $code) ?? '';
     }
 
     private static function normalize(string $value): string

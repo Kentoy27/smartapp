@@ -21,6 +21,7 @@ use App\Livewire\Sidebar;
 use App\Livewire\UsersTable;
 use App\Livewire\WfpGenerateButton;
 use App\Livewire\WfpLineItemAllotment;
+use App\Livewire\WfpMyUploadsList;
 use App\Livewire\WfpPlanEditor;
 use App\Models\District;
 use App\Models\MonthlyExpenditureMatrix;
@@ -221,6 +222,7 @@ class ApplicationSmokeTest extends TestCase
             MemMatrixList::class,
             WfpGenerateButton::class,
             WfpLineItemAllotment::class,
+            WfpMyUploadsList::class,
         ];
 
         foreach ($staffComponents as $component) {
@@ -392,6 +394,7 @@ class ApplicationSmokeTest extends TestCase
             MemEditor::class,
             WfpPlanEditor::class,
             WfpGenerateButton::class,
+            WfpMyUploadsList::class,
         ];
 
         foreach ($components as $component) {
