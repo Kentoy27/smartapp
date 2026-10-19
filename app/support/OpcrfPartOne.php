@@ -8,18 +8,11 @@ use Illuminate\Support\Carbon;
 /**
  * The OPCRF part-availability policy for staff accounts.
  *
- * The template ships one part per sheet tab (PART I … PART IV). Staff work
- * with Part One from the beginning: their download is the template rebuilt
- * with the PART I tab as its only worksheet (config
- * opcrf.part_one.part_one_only, on by default). With that lock released,
- * the school year's final-term window decides: outside it the download is
- * Part-I-only; inside it the complete workbook opens. Superadmins bypass
- * the gate — their downloads serve workbooks as stored.
- *
- * A superadmin-configured SCHEDULE now outranks all of that: once an
- * opcrf_schedules row exists for Part 1 (OpcrfAccess), it alone decides
- * whether the full workbook opens, and the hard-coded window below is only
- * the fallback for an installation that has not created any schedules yet.
+ * The template ships one part per sheet tab (PART I … PART IV). Staff can
+ * access Part One according to its own schedule. The complete
+ * workbook is offered during the shared Parts 2–4 schedule; without explicit
+ * schedules, the legacy recurring term remains the compatibility fallback.
+ * Superadmins bypass the gate — their downloads serve workbooks as stored.
  *
  * @see OpcrfWorkbookTrim for the sheet surgery
  * @see OpcrfAccess for the schedule the superadmin owns
@@ -27,13 +20,10 @@ use Illuminate\Support\Carbon;
 class OpcrfPartOne
 {
     /**
-     * Is the Part 1-controlled full template window open?
+     * Is Part One accessible according to its configured schedule?
      *
-     * A configured Part 1 schedule wins outright — that is the control the
-     * superadmin actually operates. With no schedule at all, the legacy
-     * behaviour applies: "Part One only, from the beginning" (the default)
-     * keeps it permanently closed; with the lock released it is the recurring
-     * final-term window.
+     * A configured Part 1 schedule wins outright. With no schedule, the
+     * legacy Part 1 availability policy applies.
      */
     public static function windowOpen(): bool
     {
@@ -47,8 +37,9 @@ class OpcrfPartOne
     }
 
     /**
-     * The full workbook is available during either Part 1 or the shared
-     * Parts 2–4 term. The Part 1 submission itself remains a separate record.
+     * The full workbook is available during the shared Parts 2–4 term.
+     * The legacy configured term remains the fallback only when no explicit
+     * Part 1 or Parts 2–4 schedule exists.
      */
     public static function fullTemplateAvailable(): bool
     {
@@ -57,7 +48,15 @@ class OpcrfPartOne
             OpcrfSchedule::PART_TWO
         );
 
-        return self::windowOpen() || ($partsTwoToFour?->isOpenAt() ?? false);
+        if ($partsTwoToFour !== null) {
+            return $partsTwoToFour->isOpenAt();
+        }
+
+        if (OpcrfAccess::scheduleFor(OpcrfAccess::currentYear(), OpcrfSchedule::PART_ONE) !== null) {
+            return false;
+        }
+
+        return self::legacyWindowOpen();
     }
 
     /**
@@ -88,19 +87,29 @@ class OpcrfPartOne
      */
     public static function summary(): array
     {
-        [$opens, $closes] = self::windowBoundaries();
+        [$opens] = self::windowBoundaries();
 
         $scheduled = OpcrfAccess::scheduleFor(OpcrfAccess::currentYear(), OpcrfSchedule::PART_ONE);
+        $partsTwoToFour = OpcrfAccess::scheduleFor(
+            OpcrfAccess::currentYear(),
+            OpcrfSchedule::PART_TWO
+        );
+        $fullTemplateOpens = $partsTwoToFour?->start_datetime;
+        $fullTemplateOpenDate = $fullTemplateOpens?->isFuture()
+            ? ($fullTemplateOpens->isCurrentYear()
+                ? $fullTemplateOpens->translatedFormat('F j')
+                : $fullTemplateOpens->translatedFormat('F j, Y'))
+            : ($partsTwoToFour === null && $scheduled === null && $opens !== null
+                ? ($opens->isCurrentYear()
+                    ? $opens->translatedFormat('F j')
+                    : $opens->translatedFormat('F j, Y'))
+                : null);
 
         return [
             // How many parts the staff member's download carries right now.
             'part' => self::fullTemplateAvailable() ? 4 : 1,
             'full_open' => self::fullTemplateAvailable(),
-            'full_open_date' => $opens !== null
-                ? ($opens->isCurrentYear()
-                    ? $opens->translatedFormat('F j')
-                    : $opens->translatedFormat('F j, Y'))
-                : null,
+            'full_open_date' => $fullTemplateOpenDate,
             'label' => (string) config('opcrf.part_one.term_label', 'the end of the school year term'),
 
             // What the schedule says, when there is one: the card quotes the
@@ -113,12 +122,12 @@ class OpcrfPartOne
 
     /**
      * The workbook bytes a staff download should serve. Explicit access
-     * during the shared Parts 2–4 term includes every sheet; otherwise the
-     * legacy Part 1 window determines whether to trim the workbook.
+     * during the shared Parts 2–4 term includes every sheet. A Part 1-only
+     * download keeps the other tabs out of the workbook.
      */
-    public static function templateBytes(bool $includeAllParts = false): string
+    public static function templateBytes(?bool $includeAllParts = null): string
     {
-        if ($includeAllParts || self::windowOpen()) {
+        if ($includeAllParts ?? self::fullTemplateAvailable()) {
             return (string) file_get_contents(self::templatePath());
         }
 

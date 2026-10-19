@@ -111,7 +111,7 @@ class OpcrfMovsTest extends TestCase
 
         Livewire::actingAs($user)
             ->test(OpcrfMovs::class)
-            ->assertSee('For Compliance')
+            ->assertSee('Approved')
             ->assertSee(route('opcrf.submission.download', $submission), false);
     }
 

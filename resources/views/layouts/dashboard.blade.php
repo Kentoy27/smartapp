@@ -2102,6 +2102,7 @@
         }
 
         .opcrf-parts-group-actions {
+            position: relative;
             display: flex;
             flex-wrap: wrap;
             gap: 8px;
@@ -2127,6 +2128,57 @@
 
         .opcrf-part-action:hover {
             background: var(--primary-strong);
+        }
+
+        .opcrf-parts-menu-trigger {
+            width: 100%;
+            cursor: pointer;
+            font: inherit;
+            font-size: 0.875rem;
+        }
+
+        .opcrf-parts-menu {
+            position: absolute;
+            z-index: 5;
+            right: 0;
+            bottom: calc(100% + 6px);
+            left: 0;
+            display: grid;
+            gap: 2px;
+            padding: 5px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg-panel);
+            box-shadow: 0 8px 20px rgba(15, 23, 42, 0.14);
+        }
+
+        .opcrf-parts-menu-item {
+            display: flex;
+            min-height: 38px;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 10px;
+            border-radius: 6px;
+            color: var(--text-strong);
+            font-size: 0.8125rem;
+            font-weight: 600;
+            text-decoration: none;
+        }
+
+        a.opcrf-parts-menu-item:hover {
+            background: var(--bg-muted);
+            color: var(--primary-strong);
+        }
+
+        .opcrf-parts-menu-item--locked {
+            color: var(--text-faint);
+            cursor: not-allowed;
+        }
+
+        .opcrf-parts-menu-item .opcrf-part-progress-label {
+            margin-left: auto;
+            background: var(--bg-muted);
+            color: var(--text-muted);
         }
 
         .opcrf-parts-group-actions .opcrf-part-action {

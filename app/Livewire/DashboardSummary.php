@@ -58,9 +58,9 @@ class DashboardSummary extends Component
     }
 
     /**
-     * Keep the dashboard card available while any full-template download
-     * window is open. Upload authorization remains separately enforced by
-     * OpcrfUpload against the Part 1 schedule.
+     * Keep the dashboard card available while the submission is editable:
+     * through its template window, unless it reached the final reviewer.
+     * Upload authorization is independently enforced by OpcrfUpload.
      */
     protected function opcrfLocked(?User $user): bool
     {
@@ -72,7 +72,10 @@ class DashboardSummary extends Component
 
         return $submission !== null
             && $submission->status !== OpcrfSubmission::STATUS_RETURNED
-            && ! OpcrfPartOne::fullTemplateAvailable();
+            && (
+                $submission->isLockedForStaffUpdate()
+                || ! OpcrfPartOne::fullTemplateAvailable()
+            );
     }
 
     /**
@@ -92,6 +95,7 @@ class DashboardSummary extends Component
     protected function currentSubmission(User $user): ?OpcrfSubmission
     {
         return OpcrfSubmission::where('user_id', $user->id)
+            ->where('opcrf_part', OpcrfSubmission::PART_ONE)
             ->with(['versions', 'template', 'latestReview'])
             ->latest('id')
             ->first();

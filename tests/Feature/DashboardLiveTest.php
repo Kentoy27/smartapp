@@ -240,6 +240,47 @@ class DashboardLiveTest extends TestCase
             ->assertDontSee('OPCRF submitted — locked');
     }
 
+    public function test_the_dashboard_locks_an_opcrf_assigned_to_the_final_reviewer_before_deadline(): void
+    {
+        $user = $this->staffUser();
+        $finalReviewer = User::create([
+            'name' => 'Final Reviewer',
+            'username' => 'SY',
+            'email' => 'final-reviewer@example.com',
+            'password' => Hash::make('password123'),
+            'is_superadmin' => true,
+        ]);
+        $admin = $this->superadmin();
+        config(['opcrf.next_reviewer' => 'SY']);
+        OpcrfSchedule::create([
+            'opcrf_year' => (int) now()->format('Y'),
+            'part_number' => OpcrfSchedule::PART_ONE,
+            'start_datetime' => now()->subDay(),
+            'end_datetime' => now()->addDay(),
+            'is_enabled' => true,
+            'created_by' => $admin->id,
+        ]);
+        OpcrfSubmission::create([
+            'user_id' => $user->id,
+            'employee_name' => 'Staff Member',
+            'position' => 'Teacher I',
+            'review_period' => 'January to December 2026',
+            'division_office' => 'Schools Division Office',
+            'objectives' => 'Objective 1',
+            'accomplishments' => 'Accomplished objective 1',
+            'self_rating' => 4.5,
+            'submitted_at' => now()->subHour(),
+            'reviewer_id' => $admin->id,
+            'assigned_to' => $finalReviewer->id,
+            'status' => OpcrfSubmission::STATUS_FORWARDED,
+        ]);
+
+        Livewire::actingAs($user)
+            ->test(DashboardSummary::class)
+            ->assertSee('OPCRF submitted — locked')
+            ->assertSee('Forwarded to Superadmin SY');
+    }
+
     public function test_the_superadmin_district_list_refreshes_its_counts(): void
     {
         $component = Livewire::actingAs($this->superadmin())->test(DistrictList::class);

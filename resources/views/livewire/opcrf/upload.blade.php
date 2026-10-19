@@ -23,11 +23,29 @@
             class="opcrf-upload-btn {{ $errors->has('file') ? 'has-error' : '' }}"
             wire:click="openUpload"
             aria-haspopup="dialog"
-            title="{{ $this->isUpdatingSubmission() ? 'Update your OPCRF' : 'Upload your commitment' }}"
+            title="{{ $this->isUpdatingPartOneSubmission() ? 'Update your OPCRF' : 'Upload your commitment' }}"
         >
             <x-icon name="upload" :size="16" />
-            <span>{{ $this->isUpdatingSubmission() ? 'Update OPCRF' : 'Upload Commitment' }}</span>
+            <span>{{ $this->isUpdatingPartOneSubmission() ? 'Update OPCRF' : 'Upload Commitment' }}</span>
         </button>
+    @endif
+
+    @if ($this->canUploadFullNow())
+        <button
+            type="button"
+            class="opcrf-upload-btn"
+            wire:click="openFullUpload"
+            aria-haspopup="dialog"
+            title="{{ $this->isUpdatingFullWorkbook() ? 'Resubmit your full OPCRF' : 'Upload your completed full OPCRF' }}"
+        >
+            <x-icon name="upload" :size="16" />
+            <span>{{ $this->isUpdatingFullWorkbook() ? 'Resubmit Full OPCRF' : 'Upload Full OPCRF (Parts I–IV)' }}</span>
+        </button>
+    @endif
+    @if ($this->fullUploadWaitingForPartOneApproval())
+        <p class="opcr-file-sub">
+            The full workbook can be submitted after your Part I OPCRF is approved.
+        </p>
     @endif
 
     {{-- UPLOAD WINDOW: "Upload your OPCR in here". Picking a file analyzes it
@@ -42,14 +60,27 @@
         >
             <div class="modal modal--opcr-upload" role="dialog" aria-modal="true" aria-labelledby="opcrUploadTitle" @click.stop>
                 <div class="modal-head">
-                    <h2 id="opcrUploadTitle">{{ $this->isUpdatingSubmission() ? 'Update OPCRF' : 'Upload Commitment' }}</h2>
+                    <h2 id="opcrUploadTitle">
+                        @if ($this->isFullWorkbookUpload())
+                            {{ $this->isUpdatingSubmission() ? 'Resubmit Full OPCRF' : 'Upload Full OPCRF (Parts I–IV)' }}
+                        @else
+                            {{ $this->isUpdatingSubmission() ? 'Update OPCRF' : 'Upload Commitment' }}
+                        @endif
+                    </h2>
                     <button type="button" class="modal-close" wire:click="closeUpload" aria-label="Close" title="Close">×</button>
                 </div>
 
                 <p class="opcrf-review-note">
-                    {{ $this->isUpdatingSubmission()
-                        ? 'Upload a revised OPCRF workbook. Your current submission will be preserved in the version history.'
-                        : 'Complete the OPCRF template you downloaded from this dashboard, then upload the completed file here.' }}
+                    @if ($this->isFullWorkbookUpload())
+                        Upload the completed four-part workbook. The approved Part I remains a separate submission and will replace Part I in this copy before it is sent for review.
+                        @if ($this->isUpdatingSubmission())
+                            Your returned full workbook will be preserved in its version history.
+                        @endif
+                    @else
+                        {{ $this->isUpdatingSubmission()
+                            ? 'Upload a revised OPCRF workbook. Your current submission will be preserved in the version history.'
+                            : 'Complete the OPCRF template you downloaded from this dashboard, then upload the completed file here.' }}
+                    @endif
                 </p>
 
                 <ul class="opcrf-upload-requirements">
@@ -75,8 +106,10 @@
                                 <span class="opcrf-dropzone-badge" aria-hidden="true">
                                     <x-icon name="upload" :size="20" />
                                 </span>
-                                <span class="opcrf-dropzone-title">Choose OPCRF File</span>
-                                <span class="opcrf-dropzone-sub">The completed .xlsx template · analyzed automatically · nothing is saved before you review it</span>
+                                <span class="opcrf-dropzone-title">Choose {{ $this->isFullWorkbookUpload() ? 'Full OPCRF' : 'OPCRF' }} File</span>
+                                <span class="opcrf-dropzone-sub">
+                                    {{ $this->isFullWorkbookUpload() ? 'Parts I–IV workbook' : 'Completed template' }} · .xlsx · analyzed automatically · nothing is saved before you review it
+                                </span>
                             </span>
 
                             <span class="opcrf-dropzone-inner" wire:loading wire:target="file">
@@ -191,7 +224,13 @@
                     <div class="modal-actions">
                         <button type="button" class="btn-ghost" wire:click="cancelReview">Cancel</button>
                         <button type="button" class="btn-primary" wire:click="confirmSubmit" wire:loading.attr="disabled" wire:target="confirmSubmit">
-                            <span wire:loading.remove wire:target="confirmSubmit">{{ $this->isUpdatingSubmission() ? 'Submit OPCRF Update' : 'Submit OPCRF' }}</span>
+                            <span wire:loading.remove wire:target="confirmSubmit">
+                                @if ($this->isFullWorkbookUpload())
+                                    {{ $this->isUpdatingSubmission() ? 'Resubmit Full OPCRF' : 'Submit Full OPCRF' }}
+                                @else
+                                    {{ $this->isUpdatingSubmission() ? 'Submit OPCRF Update' : 'Submit OPCRF' }}
+                                @endif
+                            </span>
                             <span wire:loading wire:target="confirmSubmit">Submitting…</span>
                         </button>
                     </div>

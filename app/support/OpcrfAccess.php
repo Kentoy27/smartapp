@@ -5,6 +5,7 @@ namespace App\Support;
 use App\Models\OpcrfSchedule;
 use App\Models\OpcrfSubmission;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 
 /**
@@ -433,7 +434,17 @@ class OpcrfAccess
     {
         return OpcrfSubmission::query()
             ->where('user_id', $user->id)
-            ->where('opcrf_part', $part)
+            ->where(function (Builder $submissions) use ($part): void {
+                $submissions->where('opcrf_part', $part);
+
+                if (in_array($part, [
+                    OpcrfSchedule::PART_TWO,
+                    OpcrfSchedule::PART_THREE,
+                    OpcrfSchedule::PART_FOUR,
+                ], true)) {
+                    $submissions->orWhere('opcrf_part', OpcrfSubmission::FULL_WORKBOOK);
+                }
+            })
             ->where('status', '!=', OpcrfSubmission::STATUS_RETURNED)
             ->exists();
     }

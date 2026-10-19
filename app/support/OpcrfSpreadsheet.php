@@ -119,6 +119,8 @@ class OpcrfSpreadsheet
      */
     private string $firstSheetName = '';
 
+    private string $firstSheetPath = '';
+
     /**
      * Sheet cell values keyed by reference ("B4"), with shared strings and
      * inline strings already resolved to plain text.
@@ -554,6 +556,7 @@ class OpcrfSpreadsheet
             }
 
             $this->sheets[$name] = $this->readSheetCells($document);
+            $this->firstSheetPath = $this->firstSheetPath ?: $target;
         }
 
         if ($this->sheets === []) {
@@ -562,6 +565,24 @@ class OpcrfSpreadsheet
 
         $this->firstSheetName = array_key_first($this->sheets);
         $this->cells = $this->sheets[$this->firstSheetName];
+    }
+
+    /**
+     * The worksheet package path for the first tab.
+     */
+    public function firstSheetPath(): string
+    {
+        return $this->firstSheetPath;
+    }
+
+    /**
+     * Visible cell values on the first tab, keyed by Excel reference.
+     *
+     * @return array<string, string>
+     */
+    public function firstSheetCells(): array
+    {
+        return $this->cells;
     }
 
     /**

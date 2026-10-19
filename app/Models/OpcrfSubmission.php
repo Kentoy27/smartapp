@@ -87,6 +87,12 @@ class OpcrfSubmission extends Model
     public const PART_FOUR = 4;
 
     /**
+     * A single submitted workbook that contains Parts I–IV. Part I is copied
+     * from the separately approved Part I submission before this is stored.
+     */
+    public const FULL_WORKBOOK = 5;
+
+    /**
      * Human label for a workflow status (badges, staff table, review modal).
      */
     public static function statusLabel(string $status): string
@@ -123,6 +129,14 @@ class OpcrfSubmission extends Model
             return $recipient !== null && $recipient !== ''
                 ? 'Forwarded to Superadmin '.$recipient
                 : self::statusLabel(self::STATUS_FORWARDED);
+        }
+
+        if (
+            $this->status === self::STATUS_FOR_COMPLIANCE
+            && $this->approved_at !== null
+            && $this->assigned_to === null
+        ) {
+            return self::statusLabel(self::STATUS_APPROVED);
         }
 
         return self::statusLabel((string) $this->status);
@@ -719,6 +733,37 @@ class OpcrfSubmission extends Model
     }
 
     /**
+     * Whether staff updates must be blocked because the form has reached
+     * the final configured reviewer or has already received its final sign-off.
+     */
+    public function isLockedForStaffUpdate(): bool
+    {
+        if ($this->status === self::STATUS_RETURNED) {
+            return false;
+        }
+
+        if (in_array($this->status, [self::STATUS_APPROVED, self::STATUS_FOR_COMPLIANCE], true)) {
+            return true;
+        }
+
+        $finalReviewerUsername = trim((string) config('opcrf.next_reviewer', ''));
+        $currentReviewerId = $this->assigned_to ?? $this->reviewer_id;
+
+        if ($finalReviewerUsername === '' || $currentReviewerId === null) {
+            return false;
+        }
+
+        return User::query()
+            ->whereKey($currentReviewerId)
+            ->where('username', $finalReviewerUsername)
+            ->where(function (Builder $reviewer): void {
+                $reviewer->where('is_superadmin', true)
+                    ->orWhere('role', 'administrator');
+            })
+            ->exists();
+    }
+
+    /**
      * Is the submission still moving through the review workflow (i.e. not
      * decided either way yet)?
      */
@@ -938,6 +983,8 @@ class OpcrfSubmission extends Model
         string $newOriginalName,
         array $attributes,
     ): void {
+        abort_unless(! $this->isLockedForStaffUpdate(), 403);
+
         $previousStatus = (string) $this->status;
         $reviewerId = $this->returningReviewer()?->id
             ?? ($this->assigned_to ?? $this->reviewer_id);
@@ -973,6 +1020,8 @@ class OpcrfSubmission extends Model
      */
     public function updateFormDuringDeadline(array $attributes): void
     {
+        abort_unless(! $this->isLockedForStaffUpdate(), 403);
+
         $previousStatus = (string) $this->status;
         $reviewerId = $this->returningReviewer()?->id
             ?? ($this->assigned_to ?? $this->reviewer_id);
@@ -1050,7 +1099,9 @@ class OpcrfSubmission extends Model
      */
     public function partLabel(): string
     {
-        return 'Part '.$this->opcrf_part;
+        return $this->opcrf_part === self::FULL_WORKBOOK
+            ? 'Full OPCRF (Parts I–IV)'
+            : 'Part '.$this->opcrf_part;
     }
 
     /**

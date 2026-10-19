@@ -79,8 +79,7 @@ class OpcrfReview extends Model
     public function actionLabel(): string
     {
         return match ($this->action) {
-            self::ACTION_COMPLIANCE => 'Compliance / Approved',
-            self::ACTION_COMPLIANCE_FINAL => 'Compliance — Final Sign-off',
+            self::ACTION_COMPLIANCE, self::ACTION_COMPLIANCE_FINAL => 'Approved',
             self::ACTION_FORWARD => 'Forwarded',
             self::ACTION_RETURN => 'Returned for Revision',
             self::ACTION_RESUBMIT => 'Resubmitted',
@@ -97,6 +96,10 @@ class OpcrfReview extends Model
     {
         if ($this->previous_status === null && $this->new_status === null) {
             return null;
+        }
+
+        if (in_array($this->action, [self::ACTION_COMPLIANCE, self::ACTION_COMPLIANCE_FINAL], true)) {
+            return 'Approved';
         }
 
         return OpcrfSubmission::statusLabel((string) $this->previous_status)

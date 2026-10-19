@@ -7,9 +7,8 @@
          own page behind the sidebar's "Districts & Schools" item. --}}
     @if (! $isSuperAdmin)
         @if ($opcrfLocked)
-            {{-- LOCKED CARD: an OPCRF has already been submitted, so the
-                 cycle is complete — no more downloads or uploads from the
-                 dashboard. --}}
+            {{-- LOCKED CARD: an OPCRF at its final review step or past its
+                 edit window cannot be changed from the dashboard. --}}
             <div class="card opcr-card-locked" wire:key="opcr-card-locked">
                 <div class="card-head">
                     <div class="card-title">OPCRF Template</div>
@@ -33,7 +32,14 @@
                                 @endif
                             </span>
                         @endif
-                        <span class="opcr-file-sub">Your OPCRF is in. Nothing more to download or upload here.</span>
+                        <span class="opcr-file-sub">Your Part I submission is locked against updates.</span>
+                        @if ($opcrfPartOne['full_open'])
+                            <span class="opcr-file-sub">The full form is available; your approved Part I, when available, is included in its download. Otherwise, the latest saved Part I progress is used.</span>
+                            <a href="{{ route('opcrf.template') }}" class="opcr-download-btn" download>
+                                <x-icon name="download" :size="16" />
+                                <span>Download Complete OPCRF (Parts I–IV)</span>
+                            </a>
+                        @endif
                         <span class="opcr-file-sub">Track its status on the <a href="{{ route('opcrf.index') }}">Opcrf page</a>.</span>
                     </div>
                     <span class="opcr-locked-pill">
@@ -75,7 +81,13 @@
                     </div>
                     <a href="{{ route('opcrf.template') }}" class="opcr-download-btn" download>
                         <x-icon name="download" :size="16" />
-                        <span>{{ $opcrfTemplate ? 'Download Again' : 'Download OPCRF Template' }}</span>
+                        <span>
+                            @if ($opcrfPartOne['full_open'])
+                                {{ $opcrfTemplate ? 'Download Complete OPCRF Again' : 'Download Complete OPCRF (Parts I–IV)' }}
+                            @else
+                                {{ $opcrfTemplate ? 'Download Again' : 'Download OPCRF Template' }}
+                            @endif
+                        </span>
                     </a>
 
                     {{-- UPLOAD: the OpcrfUpload component lives on the page
@@ -87,9 +99,9 @@
                          sent the user back to the upload window. --}}
                 </div>
                 @if ($opcrfPartOne['full_open'])
-                         <p class="opcr-file-sub">
-                             The complete form — Parts 1–4 — is available now. Your saved Part 1 submission remains stored separately and is not changed by this download.
-                         </p>
+                    <p class="opcr-file-sub">
+                        The complete form — Parts I–IV — is available now. Your approved Part I, when available, is included; otherwise the latest saved Part I progress is used. The full workbook is submitted separately.
+                    </p>
                 @endif
 
                 {{-- STATUS: where this account's OPCRF actually stands —

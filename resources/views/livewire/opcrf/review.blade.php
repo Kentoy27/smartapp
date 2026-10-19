@@ -33,6 +33,7 @@
                     <thead>
                         <tr>
                             <th scope="col">Submitted</th>
+                            <th scope="col">Form</th>
                             <th scope="col">Employee</th>
                             <th scope="col">Position</th>
                             <th scope="col">Review Period</th>
@@ -47,6 +48,7 @@
                                 <td>
                                     <span class="cell-strong">{{ $submission->submitted_at->format('M j, Y g:i A') }}</span>
                                 </td>
+                                <td>{{ $submission->partLabel() }}</td>
                                 <td>
                                     <span class="cell-strong">{{ $submission->employee_name !== '' ? $submission->employee_name : '—' }}</span>
                                     <span class="opcrf-review-owner">{{ $submission->user?->username ?? '—' }}</span>

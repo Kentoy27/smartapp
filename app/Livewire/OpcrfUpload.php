@@ -7,9 +7,12 @@ use App\Models\OpcrfTemplate;
 use App\Models\User;
 use App\Notifications\OpcrfSubmitted;
 use App\Support\OpcrfAccess;
+use App\Support\OpcrfPartOne;
 use App\Support\OpcrfSpreadsheet;
 use App\Support\OpcrfTemplatePersonalizer;
+use App\Support\OpcrfWorkbookProgress;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
@@ -45,6 +48,11 @@ class OpcrfUpload extends Component
      * submission. Every action reloads and verifies this ID server-side.
      */
     public ?int $submissionId = null;
+
+    /**
+     * The separate Part I upload or the complete Parts I–IV workbook.
+     */
+    public string $uploadMode = 'part_one';
 
     /**
      * "Upload your OPCR in here" window, opened from the OPCRF Template
@@ -192,7 +200,22 @@ class OpcrfUpload extends Component
         abort_unless(Auth::check(), 404);
         abort_if(Auth::user()->hasAdminAccess(), 404);
 
-        $submission = $this->latestSubmission();
+        $this->uploadMode = 'part_one';
+        $submission = $this->latestSubmission(OpcrfSubmission::PART_ONE);
+        abort_unless($this->canUploadSubmission($submission), 403);
+
+        $this->submissionId = $submission?->id;
+        $this->resetValidation();
+        $this->showUpload = true;
+    }
+
+    public function openFullUpload(): void
+    {
+        abort_unless(Auth::check(), 404);
+        abort_if(Auth::user()->hasAdminAccess(), 404);
+
+        $this->uploadMode = 'full_workbook';
+        $submission = $this->latestSubmission(OpcrfSubmission::FULL_WORKBOOK);
         abort_unless($this->canUploadSubmission($submission), 403);
 
         $this->submissionId = $submission?->id;
@@ -206,32 +229,109 @@ class OpcrfUpload extends Component
             return false;
         }
 
-        return $this->canUploadSubmission($this->latestSubmission());
+        return $this->canUploadPartOneSubmission(
+            $this->latestSubmission(OpcrfSubmission::PART_ONE)
+        );
+    }
+
+    public function canUploadFullNow(): bool
+    {
+        if (! Auth::check() || Auth::user()->hasAdminAccess()) {
+            return false;
+        }
+
+        return $this->canUploadFullSubmission(
+            $this->latestSubmission(OpcrfSubmission::FULL_WORKBOOK)
+        );
+    }
+
+    public function fullUploadWaitingForPartOneApproval(): bool
+    {
+        return Auth::check()
+            && ! Auth::user()->hasAdminAccess()
+            && OpcrfPartOne::fullTemplateAvailable()
+            && $this->latestApprovedPartOne() === null;
     }
 
     public function isUpdatingSubmission(): bool
     {
-        return $this->submissionId !== null
-            || $this->latestSubmission() !== null;
+        return $this->submissionId !== null || $this->latestSubmission(
+            $this->isFullWorkbookUpload()
+                ? OpcrfSubmission::FULL_WORKBOOK
+                : OpcrfSubmission::PART_ONE
+        ) !== null;
     }
 
-    private function latestSubmission(): ?OpcrfSubmission
+    public function isFullWorkbookUpload(): bool
+    {
+        return $this->uploadMode === 'full_workbook';
+    }
+
+    public function isUpdatingFullWorkbook(): bool
+    {
+        return ($this->isFullWorkbookUpload() && $this->submissionId !== null)
+            || $this->latestSubmission(OpcrfSubmission::FULL_WORKBOOK) !== null;
+    }
+
+    public function isUpdatingPartOneSubmission(): bool
+    {
+        return (! $this->isFullWorkbookUpload() && $this->submissionId !== null)
+            || $this->latestSubmission(OpcrfSubmission::PART_ONE) !== null;
+    }
+
+    private function latestSubmission(int $part): ?OpcrfSubmission
     {
         return OpcrfSubmission::query()
             ->where('user_id', Auth::id())
-            ->where('opcrf_part', OpcrfSubmission::PART_ONE)
+            ->where('opcrf_part', $part)
             ->latest('id')
             ->first();
     }
 
     private function canUploadSubmission(?OpcrfSubmission $submission): bool
     {
+        if ($this->isFullWorkbookUpload()) {
+            return $this->canUploadFullSubmission($submission);
+        }
+
+        return $this->canUploadPartOneSubmission($submission);
+    }
+
+    private function canUploadPartOneSubmission(?OpcrfSubmission $submission): bool
+    {
+        if ($submission?->isLockedForStaffUpdate()) {
+            return false;
+        }
+
         if ($submission?->status === OpcrfSubmission::STATUS_RETURNED) {
             return true;
         }
 
         return Auth::check()
             && OpcrfAccess::partState(Auth::user(), OpcrfSubmission::PART_ONE)['open'];
+    }
+
+    private function canUploadFullSubmission(?OpcrfSubmission $submission): bool
+    {
+        if (! Auth::check()
+            || Auth::user()->hasAdminAccess()
+            || ! OpcrfPartOne::fullTemplateAvailable()
+            || $this->latestApprovedPartOne() === null) {
+            return false;
+        }
+
+        return $submission === null
+            || $submission->status === OpcrfSubmission::STATUS_RETURNED;
+    }
+
+    private function latestApprovedPartOne(): ?OpcrfSubmission
+    {
+        return OpcrfSubmission::query()
+            ->where('user_id', Auth::id())
+            ->where('opcrf_part', OpcrfSubmission::PART_ONE)
+            ->approved()
+            ->latest('id')
+            ->first();
     }
 
     /**
@@ -244,13 +344,18 @@ class OpcrfUpload extends Component
         abort_unless(Auth::check(), 404);
         abort_if(Auth::user()->hasAdminAccess(), 404);
 
+        $part = $this->isFullWorkbookUpload()
+            ? OpcrfSubmission::FULL_WORKBOOK
+            : OpcrfSubmission::PART_ONE;
+        $latest = $this->latestSubmission($part);
+
         if ($this->submissionId !== null) {
             $submission = OpcrfSubmission::query()
                 ->where('user_id', Auth::id())
                 ->findOrFail($this->submissionId);
-            abort_unless($this->latestSubmission()?->is($submission), 404);
+            abort_unless($latest?->is($submission), 404);
         } else {
-            $submission = $this->latestSubmission();
+            $submission = $latest;
             abort_if($submission !== null, 409);
         }
 
@@ -299,6 +404,7 @@ class OpcrfUpload extends Component
         $this->showUpload = false;
         $this->file = null;
         $this->submissionId = null;
+        $this->uploadMode = 'part_one';
         $this->verifiedName = '';
         $this->nameNote = null;
         $this->templateVersion = null;
@@ -338,13 +444,32 @@ class OpcrfUpload extends Component
             ? null
             : $check['message'];
 
+        $analysisPath = $this->file->getRealPath();
+        $temporaryAnalysisPath = null;
+
         try {
-            $this->analyzeAndFill();
+            if ($this->isFullWorkbookUpload()) {
+                $analysisBytes = $this->synchronizedFullWorkbookBytes($analysisPath);
+                $temporaryAnalysisPath = tempnam(sys_get_temp_dir(), 'opcrf-full-review-');
+
+                if ($temporaryAnalysisPath === false
+                    || file_put_contents($temporaryAnalysisPath, $analysisBytes) === false) {
+                    throw new RuntimeException('The synchronized full OPCRF could not be prepared for review.');
+                }
+
+                $analysisPath = $temporaryAnalysisPath;
+            }
+
+            $this->analyzeAndFill($analysisPath);
         } catch (RuntimeException $e) {
             $this->file = null;
             $this->addError('file', $e->getMessage());
 
             return;
+        } finally {
+            if ($temporaryAnalysisPath !== null && is_file($temporaryAnalysisPath)) {
+                unlink($temporaryAnalysisPath);
+            }
         }
 
         // Fresh render swaps the upload window for the review modal.
@@ -361,9 +486,8 @@ class OpcrfUpload extends Component
      * staff member can see exactly what was read (mostly “—” dashes) and
      * decide whether to submit it anyway.
      */
-    private function analyzeAndFill(): void
+    private function analyzeAndFill(string $path): void
     {
-        $path = $this->file->getRealPath();
         $data = (new OpcrfSpreadsheet($path))->analyze();
 
         $this->employee_name = mb_substr(trim($data['employee_name']), 0, 255);
@@ -402,6 +526,65 @@ class OpcrfUpload extends Component
             ),
             'signers' => $spreadsheet->signers(),
         ];
+    }
+
+    /**
+     * Ensure a Parts I–IV upload really contains all four official worksheets,
+     * then replace its Part I values with the separately approved submission.
+     */
+    private function synchronizedFullWorkbookBytes(string $uploadedPath): string
+    {
+        $workbook = new OpcrfSpreadsheet($uploadedPath);
+        $sheetNames = array_map(
+            static fn (array $sheet): string => mb_strtoupper(trim((string) ($sheet['name'] ?? ''))),
+            $workbook->sheetNames()
+        );
+
+        foreach (['PART I', 'PART II', 'PART III', 'PART IV'] as $requiredSheet) {
+            if (! collect($sheetNames)->contains(
+                static fn (string $name): bool => str_starts_with($name, $requiredSheet)
+            )) {
+                throw new RuntimeException(
+                    'Upload the complete OPCRF workbook with its Part I, II, III, and IV sheets.'
+                );
+            }
+        }
+
+        $approvedPartOne = $this->latestApprovedPartOne();
+
+        if ($approvedPartOne === null) {
+            throw new RuntimeException('Your Part I OPCRF must be approved before you can submit the full workbook.');
+        }
+
+        $bytes = file_get_contents($uploadedPath);
+
+        if ($bytes === false) {
+            throw new RuntimeException('The uploaded full OPCRF workbook could not be read.');
+        }
+
+        $sourcePath = $approvedPartOne->downloadPath();
+
+        if ($sourcePath !== null && Storage::disk('local')->exists($sourcePath)) {
+            return OpcrfWorkbookProgress::mergePartOne(
+                $bytes,
+                Storage::disk('local')->path($sourcePath),
+                replaceEmptyCells: true
+            );
+        }
+
+        return OpcrfWorkbookProgress::mergeSubmissionData(
+            $bytes,
+            [
+                'employee_name' => $approvedPartOne->employee_name,
+                'position' => $approvedPartOne->position,
+                'review_period' => $approvedPartOne->review_period,
+                'division_office' => $approvedPartOne->division_office,
+                'objectives' => $approvedPartOne->objectives,
+                'accomplishments' => $approvedPartOne->accomplishments,
+                'self_rating' => $approvedPartOne->self_rating,
+            ],
+            true
+        );
     }
 
     /**
@@ -446,6 +629,16 @@ class OpcrfUpload extends Component
             $check = OpcrfTemplatePersonalizer::verify($this->file->getRealPath(), Auth::user());
             $uploadCheck = $check['status'];
             $accountName = $check['expected'];
+        }
+
+        if ($this->isFullWorkbookUpload()) {
+            $this->confirmFullWorkbookSubmit(
+                $existingSubmission,
+                $uploadCheck,
+                $accountName
+            );
+
+            return;
         }
 
         if ($existingSubmission !== null) {
@@ -558,6 +751,85 @@ class OpcrfUpload extends Component
         $this->finishUpload('OPCR uploaded — your form was analyzed and recorded.');
     }
 
+    private function confirmFullWorkbookSubmit(
+        ?OpcrfSubmission $existingSubmission,
+        ?string $uploadCheck,
+        ?string $accountName
+    ): void {
+        $approvedPartOne = $this->latestApprovedPartOne();
+
+        if ($approvedPartOne === null) {
+            abort(403);
+        }
+
+        try {
+            $workbookBytes = $this->synchronizedFullWorkbookBytes($this->file->getRealPath());
+        } catch (RuntimeException $e) {
+            $this->addError('file', $e->getMessage());
+
+            return;
+        }
+
+        $originalName = $this->file->getClientOriginalName();
+        $archivedPath = 'opcrf-submissions/'.Auth::id().'/'.uniqid().'-'.$originalName;
+
+        if (! Storage::disk('local')->put($archivedPath, $workbookBytes)) {
+            $this->addError('file', 'The full OPCRF workbook could not be saved. Please try again.');
+
+            return;
+        }
+
+        $template = OpcrfTemplate::latestFor(Auth::user());
+        $partOneData = [
+            'opcrf_template_id' => $template?->id,
+            'employee_name' => (string) $approvedPartOne->employee_name,
+            'upload_check' => $uploadCheck,
+            'account_name' => $accountName,
+            'position' => (string) $approvedPartOne->position,
+            'review_period' => (string) $approvedPartOne->review_period,
+            'division_office' => (string) $approvedPartOne->division_office,
+            'objectives' => (string) $approvedPartOne->objectives,
+            'accomplishments' => (string) $approvedPartOne->accomplishments,
+            'self_rating' => (float) ($approvedPartOne->self_rating ?? 0),
+        ];
+
+        if ($existingSubmission !== null) {
+            $existingSubmission->resubmit($archivedPath, $originalName);
+            $existingSubmission->fill($partOneData)->save();
+            $submission = $existingSubmission;
+            $reviewer = $submission->assignedTo ?? $submission->reviewer;
+        } else {
+            $reviewer = $this->resolveAutoReviewer();
+
+            if ($reviewer === null) {
+                Storage::disk('local')->delete($archivedPath);
+                $this->addError(
+                    'file',
+                    'No superadmin account exists yet — ask an administrator to create one before you can submit your OPCRF.'
+                );
+
+                return;
+            }
+
+            $submission = OpcrfSubmission::create([
+                'user_id' => Auth::id(),
+                'opcrf_part' => OpcrfSubmission::FULL_WORKBOOK,
+                'reviewer_id' => $reviewer->id,
+                ...$partOneData,
+                'remarks' => null,
+                'file_path' => $archivedPath,
+                'file_original_name' => $originalName,
+                'file_updated_at' => now(),
+                'submitted_at' => now(),
+            ]);
+        }
+
+        $submission->stampSignature();
+        $reviewer?->notify(new OpcrfSubmitted($submission));
+
+        $this->finishUpload('Full OPCRF submitted — the approved Part I was kept in sync and the complete workbook was sent for review.');
+    }
+
     private function finishUpload(string $successMessage): void
     {
         $this->showReview = false;
@@ -565,6 +837,7 @@ class OpcrfUpload extends Component
         $this->analyzed = false;
         $this->file = null;
         $this->submissionId = null;
+        $this->uploadMode = 'part_one';
         $this->reviewer_id = '';
         $this->nameNote = null;
         $this->verifiedName = '';
@@ -584,6 +857,7 @@ class OpcrfUpload extends Component
         $this->analyzed = false;
         $this->file = null;
         $this->submissionId = null;
+        $this->uploadMode = 'part_one';
         $this->verifiedName = '';
         $this->nameNote = null;
         $this->templateVersion = null;

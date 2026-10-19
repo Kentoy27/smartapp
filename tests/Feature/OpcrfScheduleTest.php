@@ -11,6 +11,8 @@ use App\Models\OpcrfTemplate;
 use App\Models\School;
 use App\Models\User;
 use App\Support\OpcrfAccess;
+use App\Support\OpcrfPartOne;
+use App\Support\OpcrfWorkbookProgress;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Hash;
@@ -160,13 +162,12 @@ class OpcrfScheduleTest extends TestCase
         $html = $this->actingAs($staff)->get(route('opcrf.index'))->assertOk()->getContent();
 
         // All four Parts are LISTED — a locked Part is never hidden.
-        foreach ([1, 2, 3, 4] as $part) {
-            $this->assertStringContainsString('Part '.$part, $html);
-        }
+        $this->assertStringContainsString('Part 1', $html);
+        $this->assertStringContainsString('Parts 2–4', $html);
 
         $this->assertStringContainsString('Part 1 is now open.', $html);
         // And the others say what is true, not nothing.
-        $this->assertStringContainsString('No access period has been set for this Part yet.', $html);
+        $this->assertStringContainsString('Parts 2–4 locked', $html);
     }
 
     public function test_a_user_cannot_access_a_part_before_its_start_date(): void
@@ -349,9 +350,7 @@ class OpcrfScheduleTest extends TestCase
         $html = $this->actingAs($staff)->get(route('opcrf.index'))->assertOk()->getContent();
 
         $this->assertStringContainsString('Part 1 is now open.', $html);
-        foreach ([2, 3, 4] as $part) {
-            $this->assertStringContainsString('Part '.$part.' locked', $html);
-        }
+        $this->assertStringContainsString('Parts 2–4 locked', $html);
         $this->assertStringContainsString('Parts 2–4 share the end-of-year term.', $html);
         $this->assertSame(2, substr_count($html, 'class="opcrf-part-card opcrf-part-card--'));
     }
@@ -367,6 +366,8 @@ class OpcrfScheduleTest extends TestCase
         foreach ([2, 3, 4] as $part) {
             $this->assertStringContainsString(route('opcrf.part', ['part' => $part]), $html);
         }
+        $this->assertSame(1, substr_count($html, 'class="opcrf-part-action opcrf-parts-menu-trigger"'));
+        $this->assertStringContainsString('Access Parts 2–4', $html);
         $this->assertSame(2, substr_count($html, 'class="opcrf-part-card opcrf-part-card--'));
     }
 
@@ -720,10 +721,20 @@ class OpcrfScheduleTest extends TestCase
         $staff = $this->staff('jdelacruz', 'Juan Dela Cruz');
         $this->schedule(OpcrfSchedule::PART_ONE);
 
-        $this->actingAs($staff)
+        $response = $this->actingAs($staff)
             ->get(route('opcrf.template'))
             ->assertOk()
             ->assertDownload('OPCRF_Juan_Dela_Cruz.xlsx');
+
+        $workbookPath = $this->stage($response->getContent());
+        try {
+            $this->assertSame(
+                ['PART I (CY 2025 & SY2025-2026)'],
+                array_column((new \App\Support\OpcrfSpreadsheet($workbookPath))->sheetNames(), 'name')
+            );
+        } finally {
+            unlink($workbookPath);
+        }
 
         $this->assertSame(1, OpcrfTemplate::count());
     }
@@ -754,10 +765,9 @@ class OpcrfScheduleTest extends TestCase
 
         $workbookPath = $this->stage($response->getContent());
         try {
-            $sheetNames = array_column(
-                (new \App\Support\OpcrfSpreadsheet($workbookPath))->sheetNames(),
-                'name'
-            );
+            $downloadedWorkbook = new \App\Support\OpcrfSpreadsheet($workbookPath);
+            $sheetNames = array_column($downloadedWorkbook->sheetNames(), 'name');
+            $partOneCells = $downloadedWorkbook->firstSheetCells();
         } finally {
             unlink($workbookPath);
         }
@@ -769,6 +779,10 @@ class OpcrfScheduleTest extends TestCase
             );
         }
 
+        $this->assertSame('Saved Part 1 objective', $partOneCells['F19'] ?? null);
+        $this->assertSame('Saved Part 1 accomplishment', $partOneCells['S19'] ?? null);
+        $this->assertSame('4.5', $partOneCells['T19'] ?? null);
+
         $partOne->refresh();
         $this->assertSame(OpcrfSubmission::PART_ONE, $partOne->opcrf_part);
         $this->assertSame('Saved Part 1 objective', $partOne->objectives);
@@ -776,7 +790,62 @@ class OpcrfScheduleTest extends TestCase
         $this->assertSame(1, OpcrfSubmission::where('user_id', $staff->id)->where('opcrf_part', OpcrfSubmission::PART_ONE)->count());
 
         $dashboard = $this->get(route('home'))->assertOk();
-        $dashboard->assertSee('Your saved Part 1 submission remains stored separately');
+        $dashboard->assertSee('Your approved Part I, when available, is included');
+    }
+
+    public function test_parts_two_to_four_download_uses_the_approved_part_one_copy(): void
+    {
+        $staff = $this->staff('jdelacruz', 'Juan Dela Cruz');
+        $this->schedule(OpcrfSchedule::PART_ONE, '2026-05-01 08:00:00', '2026-05-31 17:00:00');
+        $this->schedule(OpcrfSchedule::PART_TWO);
+
+        $basePath = 'opcrf-submissions/'.$staff->id.'/part-one.xlsx';
+        $signedPath = 'opcrf-submissions/'.$staff->id.'/part-one-approved.xlsx';
+        $baseWorkbook = OpcrfWorkbookProgress::mergeSubmissionData(
+            OpcrfPartOne::templateBytes(false),
+            ['objectives' => 'Original submitted objective'],
+            true
+        );
+        $approvedWorkbook = OpcrfWorkbookProgress::mergeSubmissionData(
+            OpcrfPartOne::templateBytes(false),
+            ['objectives' => 'Approved Part I objective'],
+            true
+        );
+        Storage::disk('local')->put($basePath, $baseWorkbook);
+        Storage::disk('local')->put($signedPath, $approvedWorkbook);
+
+        $approved = $this->submission($staff, [
+            'objectives' => 'Approved Part I objective',
+            'status' => OpcrfSubmission::STATUS_FOR_COMPLIANCE,
+            'approved_at' => now()->subHour(),
+            'file_path' => $basePath,
+            'signed_file_path' => $signedPath,
+        ]);
+        $this->submission($staff, [
+            'objectives' => 'Newer unapproved progress',
+            'status' => OpcrfSubmission::STATUS_PENDING,
+            'submitted_at' => now(),
+        ]);
+
+        $response = $this->actingAs($staff)
+            ->get(route('opcrf.template'))
+            ->assertOk()
+            ->assertDownload('OPCRF_Juan_Dela_Cruz.xlsx');
+
+        $workbookPath = $this->stage($response->getContent());
+        try {
+            $workbook = new \App\Support\OpcrfSpreadsheet($workbookPath);
+
+            $this->assertSame('Approved Part I objective', $workbook->firstSheetCells()['F19'] ?? null);
+            $this->assertSame(
+                ['PART I (CY 2025 & SY2025-2026)', 'PART II', 'PART III', 'PART IV'],
+                array_column($workbook->sheetNames(), 'name')
+            );
+        } finally {
+            unlink($workbookPath);
+        }
+
+        $this->assertSame(OpcrfSubmission::STATUS_FOR_COMPLIANCE, $approved->fresh()->status);
     }
 
     /**

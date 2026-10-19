@@ -183,6 +183,7 @@ class OpcrfForm extends Component
                     $this->submissionId === null || $submission->id === $this->submissionId,
                     409
                 );
+                abort_unless(! $submission->isLockedForStaffUpdate(), 403);
                 $submission->updateFormDuringDeadline($attributes);
 
                 return $submission;
@@ -217,6 +218,10 @@ class OpcrfForm extends Component
 
     private function partOneIsOpen(): bool
     {
+        if ($this->latestPartOneSubmission()?->isLockedForStaffUpdate()) {
+            return false;
+        }
+
         return OpcrfAccess::partState(
             Auth::user(),
             OpcrfSubmission::PART_ONE

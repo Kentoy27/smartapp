@@ -190,7 +190,7 @@ class OpcrfTemplatePersonalizer
      * @throws \RuntimeException when the template cannot be read or its
      *                           header block cannot be located
      */
-    public static function personalizeFor(User $user, bool $includeAllParts = false): string
+    public static function personalizeFor(User $user, ?bool $includeAllParts = null): string
     {
         $version = (string) config('opcrf.template.version', '2026.1');
 

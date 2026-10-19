@@ -64,23 +64,54 @@
                 @endif
 
                 @if ($part['is_grouped_term'])
-                    <div class="opcrf-parts-group-actions" role="group" aria-label="Access Parts 2 through 4">
-                        @foreach ($part['group_states'] as $groupState)
-                            @if ($groupState['can_access'])
-                                <a href="{{ route('opcrf.part', ['part' => $groupState['part']]) }}" class="opcrf-part-action">
-                                    <x-icon name="{{ $groupState['completed'] ? 'check' : 'unlock' }}" :size="15" />
-                                    <span>{{ $groupState['completed'] ? 'View' : 'Access' }} Part {{ $groupState['part'] }}</span>
-                                    @if ($groupState['completed'])
-                                        <span class="opcrf-part-progress-label">Completed</span>
+                    <div
+                        class="opcrf-parts-group-actions"
+                        role="group"
+                        aria-label="Access Parts 2 through 4"
+                        x-data="{ open: false }"
+                        @keydown.escape.window="open = false"
+                    >
+                        @if (collect($part['group_states'])->contains(fn (array $state): bool => $state['can_access']))
+                            <button
+                                type="button"
+                                class="opcrf-part-action opcrf-parts-menu-trigger"
+                                aria-haspopup="true"
+                                :aria-expanded="open.toString()"
+                                @click="open = !open"
+                                @click.outside="open = false"
+                            >
+                                <x-icon name="unlock" :size="15" />
+                                <span>Access Parts 2–4</span>
+                                <x-icon name="chevron-down" :size="14" />
+                            </button>
+                            <div class="opcrf-parts-menu" x-cloak x-show="open" role="menu">
+                                @foreach ($part['group_states'] as $groupState)
+                                    @if ($groupState['can_access'])
+                                        <a
+                                            href="{{ route('opcrf.part', ['part' => $groupState['part']]) }}"
+                                            class="opcrf-parts-menu-item"
+                                            role="menuitem"
+                                        >
+                                            <x-icon name="{{ $groupState['completed'] ? 'check' : 'unlock' }}" :size="15" />
+                                            <span>{{ $groupState['completed'] ? 'View' : 'Access' }} Part {{ $groupState['part'] }}</span>
+                                            @if ($groupState['completed'])
+                                                <span class="opcrf-part-progress-label">Completed</span>
+                                            @endif
+                                        </a>
+                                    @else
+                                        <span class="opcrf-parts-menu-item opcrf-parts-menu-item--locked" aria-disabled="true">
+                                            <x-icon name="lock" :size="15" />
+                                            <span>Part {{ $groupState['part'] }} locked</span>
+                                        </span>
                                     @endif
-                                </a>
-                            @else
-                                <span class="opcrf-part-action opcrf-part-action--locked" aria-disabled="true">
-                                    <x-icon name="lock" :size="15" />
-                                    <span>Part {{ $groupState['part'] }} locked</span>
-                                </span>
-                            @endif
-                        @endforeach
+                                @endforeach
+                            </div>
+                        @else
+                            <span class="opcrf-part-action opcrf-part-action--locked" aria-disabled="true">
+                                <x-icon name="lock" :size="15" />
+                                <span>Parts 2–4 locked</span>
+                            </span>
+                        @endif
                     </div>
                 @elseif ($part['can_access'])
                     <a href="{{ route('opcrf.part', ['part' => $part['part']]) }}" class="opcrf-part-action">

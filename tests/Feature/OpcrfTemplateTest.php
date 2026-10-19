@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\District;
+use App\Models\OpcrfSchedule;
 use App\Models\OpcrfSubmission;
 use App\Models\OpcrfTemplate;
 use App\Models\School;
@@ -12,6 +13,7 @@ use App\Support\OpcrfTemplatePersonalizer;
 use App\Support\PurePhpZipReader;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Tests\Concerns\BuildsOpcrfWorkbooks;
 use Tests\TestCase;
 
@@ -64,6 +66,8 @@ class OpcrfTemplateTest extends TestCase
             ->get(route('home'))
             ->assertOk()
             ->assertSee('The complete form — all four parts — is available now.')
+            ->assertSee('Download Complete OPCRF (Parts I–IV)')
+            ->assertSee('Your approved Part I, when available, is included')
             ->assertSee(route('opcrf.template'), false);
     }
 
@@ -77,6 +81,41 @@ class OpcrfTemplateTest extends TestCase
             ->get(route('home'))
             ->assertOk()
             ->assertSee('Parts II–IV become available on March 16, the end of the school year term');
+    }
+
+    public function test_a_locked_submission_can_still_download_the_full_template_when_parts_two_to_four_are_open(): void
+    {
+        $staff = $this->loginUser('staff');
+        $admin = $this->loginUser('chief', true);
+        $this->travelTo('2026-06-15 10:00:00');
+        OpcrfSchedule::create([
+            'opcrf_year' => 2026,
+            'part_number' => OpcrfSchedule::PART_TWO,
+            'start_datetime' => now()->subDay(),
+            'end_datetime' => now()->addDay(),
+            'is_enabled' => true,
+            'created_by' => $admin->id,
+        ]);
+        OpcrfSubmission::create([
+            'user_id' => $staff->id,
+            'opcrf_part' => OpcrfSubmission::PART_ONE,
+            'employee_name' => $staff->name,
+            'position' => 'Teacher I',
+            'review_period' => 'January to December 2026',
+            'division_office' => 'Schools Division Office',
+            'objectives' => 'Saved objective',
+            'accomplishments' => 'Saved accomplishment',
+            'self_rating' => 4.5,
+            'status' => OpcrfSubmission::STATUS_FOR_COMPLIANCE,
+            'submitted_at' => now()->subDay(),
+        ]);
+
+        $this->actingAs($staff)
+            ->get(route('home'))
+            ->assertOk()
+            ->assertSee('OPCRF submitted — locked')
+            ->assertSee('Download Complete OPCRF (Parts I–IV)')
+            ->assertSee(route('opcrf.template'), false);
     }
 
     public function test_superadmins_do_not_see_the_template_card_on_their_dashboard(): void
@@ -162,6 +201,53 @@ class OpcrfTemplateTest extends TestCase
             substr_count($original['xl/worksheets/sheet1.xml'], '<f'),
             substr_count($sheet, '<f'),
             'Personalization must not disturb the template\'s formulas.'
+        );
+    }
+
+    public function test_the_full_template_download_includes_the_latest_saved_part_one_cells(): void
+    {
+        config(['opcrf.part_one.part_one_only' => false]);
+        Storage::fake('local');
+
+        $staff = $this->loginUser('staff');
+        $this->travelTo('2026-04-01 10:00:00');
+
+        $savedWorkbook = $this->buildOpcrfWorkbook([
+            'F19' => 'Saved objective from Part I',
+            'S19' => 'Saved accomplishment from Part I',
+            'T19' => 4,
+        ]);
+        $storedPath = 'opcrf-submissions/'.$staff->id.'/saved-part-one.xlsx';
+        Storage::disk('local')->put($storedPath, file_get_contents($savedWorkbook));
+
+        OpcrfSubmission::create([
+            'user_id' => $staff->id,
+            'opcrf_part' => OpcrfSubmission::PART_ONE,
+            'employee_name' => $staff->name,
+            'position' => 'Teacher I',
+            'review_period' => 'January to December 2026',
+            'division_office' => 'Schools Division Office',
+            'objectives' => 'Saved objective from Part I',
+            'accomplishments' => 'Saved accomplishment from Part I',
+            'self_rating' => 4,
+            'file_path' => $storedPath,
+            'file_original_name' => 'saved-part-one.xlsx',
+            'submitted_at' => now(),
+        ]);
+
+        $response = $this->actingAs($staff)->get(route('opcrf.template'));
+
+        $response->assertOk()->assertDownload('OPCRF_Staff.xlsx');
+        $downloadPath = $this->stageWorkbook((string) $response->baseResponse->getContent());
+        $download = new OpcrfSpreadsheet($downloadPath);
+        $cells = $download->firstSheetCells();
+
+        $this->assertSame('Saved objective from Part I', $cells['F19'] ?? null);
+        $this->assertSame('Saved accomplishment from Part I', $cells['S19'] ?? null);
+        $this->assertSame('4', $cells['T19'] ?? null);
+        $this->assertSame(
+            ['PART I (CY 2025 & SY2025-2026)', 'PART II', 'PART III', 'PART IV'],
+            $download->sheetNames() ? array_column($download->sheetNames(), 'name') : []
         );
     }
 

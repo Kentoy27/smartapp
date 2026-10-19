@@ -191,6 +191,45 @@ class OpcrfFormTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_the_legacy_form_cannot_update_an_opcrf_at_the_final_reviewer(): void
+    {
+        $user = $this->staffUser();
+        $finalReviewer = User::create([
+            'name' => 'Final Reviewer',
+            'username' => 'SY',
+            'email' => 'final-reviewer@example.com',
+            'password' => Hash::make('password123'),
+            'is_superadmin' => true,
+        ]);
+        config(['opcrf.next_reviewer' => 'SY']);
+        $this->partOneSchedule();
+        OpcrfSubmission::create(array_merge($this->validInput(), [
+            'user_id' => $user->id,
+            'self_rating' => 4.5,
+            'submitted_at' => now()->subHour(),
+            'reviewer_id' => $finalReviewer->id,
+            'status' => OpcrfSubmission::STATUS_PENDING,
+        ]));
+
+        Livewire::actingAs($user)
+            ->test(OpcrfForm::class)
+            ->fill($this->validInput())
+            ->call('submitForReview')
+            ->assertForbidden();
+
+        Livewire::actingAs($user)
+            ->test(OpcrfForm::class)
+            ->fill($this->validInput())
+            ->call('confirmSubmit')
+            ->assertForbidden();
+
+        $this->assertSame(
+            OpcrfSubmission::STATUS_PENDING,
+            OpcrfSubmission::firstOrFail()->status
+        );
+        $this->assertSame(0, OpcrfSubmission::firstOrFail()->reviews()->count());
+    }
+
     public function test_cancelling_the_review_returns_to_the_filled_form_without_saving(): void
     {
         $user = $this->staffUser();

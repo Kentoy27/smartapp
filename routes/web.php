@@ -14,6 +14,7 @@ use App\Support\MemXlsxExporter;
 use App\Support\OpcrfAccess;
 use App\Support\OpcrfPartOne;
 use App\Support\OpcrfTemplatePersonalizer;
+use App\Support\OpcrfWorkbookProgress;
 use App\Support\OpcrfWorkbookTrim;
 use App\Support\WfpAllotment;
 use App\Support\WfpAllotmentXlsxExporter;
@@ -291,7 +292,48 @@ Route::middleware('auth')->group(function () {
             // The bytes are built before the response is created: a streamed
             // callback must echo its output (its return value is ignored),
             // and anything else risks an empty 0-byte download.
-            $bytes = OpcrfTemplatePersonalizer::personalizeFor($user, $includeAllParts);
+            $templateBytes = OpcrfPartOne::templateBytes($includeAllParts);
+            $partOneSubmissions = OpcrfSubmission::query()
+                ->where('user_id', $user->id)
+                ->where('opcrf_part', OpcrfSubmission::PART_ONE);
+            $savedPartOne = $includeAllParts
+                ? (clone $partOneSubmissions)->approved()->latest('id')->first()
+                : null;
+            $savedPartOne ??= $partOneSubmissions->latest('id')->first();
+            $savedWorkbookPath = $savedPartOne?->downloadPath();
+            $hasSavedWorkbook = $savedPartOne?->hasFile()
+                && $savedWorkbookPath !== null
+                && Storage::disk('local')->exists($savedWorkbookPath);
+
+            if ($hasSavedWorkbook) {
+                $templateBytes = OpcrfWorkbookProgress::mergePartOne(
+                    $templateBytes,
+                    Storage::disk('local')->path($savedWorkbookPath)
+                );
+            }
+
+            $bytes = OpcrfTemplatePersonalizer::personalize(
+                $templateBytes,
+                OpcrfTemplatePersonalizer::identityFor($user),
+                $user->id,
+                (string) config('opcrf.template.version', '2026.1')
+            );
+
+            if ($savedPartOne !== null) {
+                $bytes = OpcrfWorkbookProgress::mergeSubmissionData(
+                    $bytes,
+                    [
+                        'employee_name' => $savedPartOne->employee_name,
+                        'position' => $savedPartOne->position,
+                        'review_period' => $savedPartOne->review_period,
+                        'division_office' => $savedPartOne->division_office,
+                        'objectives' => $savedPartOne->objectives,
+                        'accomplishments' => $savedPartOne->accomplishments,
+                        'self_rating' => $savedPartOne->self_rating,
+                    ],
+                    ! $hasSavedWorkbook
+                );
+            }
         } catch (RuntimeException $e) {
             // The shipped template is missing or unreadable: say so rather
             // than serving a 0-byte workbook the user cannot open.

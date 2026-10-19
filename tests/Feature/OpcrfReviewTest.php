@@ -679,6 +679,7 @@ class OpcrfReviewTest extends TestCase
 
         $this->assertTrue($submission->isApproved());
         $this->assertSame(OpcrfSubmission::STATUS_FOR_COMPLIANCE, $submission->status);
+        $this->assertSame('Approved', $submission->statusLabelFor($admin));
         $this->assertSame($admin->id, $submission->approved_by);
         $this->assertNotNull($submission->approved_at);
 
@@ -743,7 +744,10 @@ class OpcrfReviewTest extends TestCase
         Livewire::actingAs($admin)
             ->test(OpcrfReview::class)
             ->call('openReview', $submission->id)
-            ->assertSee('Compliance — Final Sign-off');
+            ->assertSee('Approved')
+            ->assertSee('Status: Approved')
+            ->assertDontSee('Compliance — Final Sign-off')
+            ->assertDontSee('For Compliance → For Compliance');
     }
 
     public function test_compliance_routes_onward_to_the_next_superadmin(): void
@@ -795,7 +799,7 @@ class OpcrfReviewTest extends TestCase
             ->test(OpcrfReview::class)
             ->assertSee('Jane D. Doe')
             ->call('openReview', $submission->id)
-            ->assertSee('Compliance / Approved')
+            ->assertSee('Approved')
             ->assertSee('Compliant — on to the next review.')
             ->assertSee('Forwarded to: <strong>'.$next->username.'</strong>', false);
     }
@@ -987,15 +991,15 @@ class OpcrfReviewTest extends TestCase
         // Superadmin: the review table marks which submissions are done.
         Livewire::actingAs($admin)
             ->test(OpcrfReview::class)
-            ->assertSee('For Compliance')
+            ->assertSee('Approved')
             ->assertSee('Pending Review')
             ->assertSee('July to December 2026');
 
-        // Staff: their own table shows the compliance mark, and offers the
+        // Staff: their own table shows the approval, and offers the
         // download action for the approved submission only.
         Livewire::actingAs($staff)
             ->test(OpcrfMovs::class)
-            ->assertSee('For Compliance')
+            ->assertSee('Approved')
             ->assertSee('Pending Review')
             ->assertSee(route('opcrf.submission.download', $approved), false)
             ->assertDontSee(route('opcrf.submission.download', $pending), false);
@@ -1425,7 +1429,7 @@ class OpcrfReviewTest extends TestCase
             ->assertSee('Jane D. Doe')
             ->assertSee('Pending Review')
             ->call('openReview', $submission->id)
-            ->assertSee('Compliance / Approved')
+            ->assertSee('Approved')
             ->assertSee('Compliant — on to the next review.')
             ->assertSee('Forwarded to: <strong>'.$next->username.'</strong>', false);
     }

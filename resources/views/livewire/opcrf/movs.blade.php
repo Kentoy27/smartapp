@@ -87,6 +87,7 @@
                     <thead>
                         <tr>
                             <th scope="col">Submitted</th>
+                            <th scope="col">Form</th>
                             <th scope="col">Review Period</th>
                             <th scope="col">Employee</th>
                             <th scope="col">Position</th>
@@ -102,6 +103,7 @@
                                 <td>
                                     <span class="cell-strong">{{ $submission->submitted_at->format('M j, Y g:i A') }}</span>
                                 </td>
+                                <td>{{ $submission->partLabel() }}</td>
                                 <td>{{ $submission->review_period !== '' ? $submission->review_period : '—' }}</td>
                                 <td>{{ $submission->employee_name !== '' ? $submission->employee_name : '—' }}</td>
                                 <td>{{ $submission->position !== '' ? $submission->position : '—' }}</td>
