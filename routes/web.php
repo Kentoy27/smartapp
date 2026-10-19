@@ -75,31 +75,6 @@ Route::middleware('auth')->group(function () {
         // shared caching) and the row-only path rule live in
         // User::signatureImageResponse(), shared with the OPCRF route below.
         return $user->signatureImageResponse();
-        /** @var FilesystemAdapter $disk */
-        $disk = Storage::disk('local');
-
-        abort_unless($disk->exists($user->signature_path), 404);
-
-        $extension = strtolower(pathinfo((string) $user->signature_original_name, PATHINFO_EXTENSION));
-        $name = 'signature-'.$user->id.($extension !== '' ? '.'.$extension : '');
-
-        $response = $disk->response($user->signature_path, $name);
-
-        // The preview is shown inline in an <img>; a signature is personal
-        // data, so it must never be cached by a shared cache or kept in the
-        // browser's history as a downloadable file.
-        $response->headers->set(
-            'Content-Disposition',
-            $response->headers->makeDisposition(ResponseHeaderBag::DISPOSITION_INLINE, $name),
-        );
-
-        if ($user->signature_mime_type) {
-            $response->headers->set('Content-Type', $user->signature_mime_type);
-        }
-
-        $response->headers->set('Cache-Control', 'private, no-store, max-age=0');
-
-        return $response;
     })->name('profile.signature');
 
     Route::get('/app', function () {
@@ -304,11 +279,6 @@ Route::middleware('auth')->group(function () {
         $includeAllParts = OpcrfPartOne::fullTemplateAvailable();
 
         if (! $partOneAccessible && ! $includeAllParts) {
-        // The personalized template IS Part 1, so it answers to Part 1's
-        // schedule. Re-checked here, on the server: the dashboard's button is
-        // only a convenience, and a staff member outside Part 1's window must
-        // not be able to fetch the form by typing the URL.
-        if (! OpcrfAccess::canAccess($user, OpcrfSchedule::PART_ONE)) {
             $state = OpcrfAccess::partState($user, OpcrfSchedule::PART_ONE);
 
             return redirect()
