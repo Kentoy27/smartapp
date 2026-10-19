@@ -10,14 +10,18 @@ use App\Models\MonthlyExpenditureItem;
 use App\Models\MonthlyExpenditureMatrix;
 use App\Models\School;
 use App\Models\User;
+use App\Models\WfpPlan;
 use App\Support\PurePhpZipReader;
+use App\Support\WfpGenerator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Livewire\Livewire;
+use Tests\Concerns\BuildsMemWorkbooks;
 use Tests\TestCase;
 
 class MemMatrixTest extends TestCase
 {
+    use BuildsMemWorkbooks;
     use RefreshDatabase;
 
     private function schoolHead(string $name = 'Test School'): User
@@ -81,6 +85,18 @@ class MemMatrixTest extends TestCase
             ->assertOk();
     }
 
+    public function test_clicking_a_row_opens_its_matrix(): void
+    {
+        // The row itself is clickable (not just the ⋯ menu's "Open"): the
+        // component action the row fires redirects to the matrix editor.
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        Livewire::actingAs($sh)->test(MemMatrixList::class)
+            ->call('open', $matrix->id)
+            ->assertRedirect(route('wfp.matrices.edit', ['matrix' => $matrix->id]));
+    }
+
     public function test_the_component_refuses_a_guest_and_a_non_school_head(): void
     {
         $viewer = User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]);
@@ -98,50 +114,240 @@ class MemMatrixTest extends TestCase
             ->assertSee('Section,Objective,Activity Description', false);
     }
 
-    // ---------------------------------------------------------------- create
+    // ----------------------------------------------------------- year init
 
-    public function test_the_school_head_can_create_a_matrix(): void
+    public function test_the_year_filter_defaults_to_the_current_calendar_year(): void
+    {
+        Livewire::actingAs($this->schoolHead())->test(MemMatrixList::class)
+            ->assertSet('year', (string) now()->year);
+    }
+
+    public function test_the_selected_year_is_restored_from_the_query_string(): void
+    {
+        // The year lives in the URL, so a refresh keeps the SH where they
+        // were rather than snapping back to the current year.
+        Livewire::actingAs($this->schoolHead())
+            ->withQueryParams(['year' => '2027'])
+            ->test(MemMatrixList::class)
+            ->assertSet('year', '2027');
+    }
+
+    public function test_the_page_defaults_to_the_latest_planning_year_the_school_has(): void
+    {
+        // With no year in the URL (e.g. arriving from a sidebar link), the page
+        // opens on the newest year the school has — so a year the SH added is
+        // not lost by simply switching tabs.
+        $sh = $this->schoolHead();
+        $this->matrixFor($sh, month: 1, year: 2026);
+        $this->matrixFor($sh, month: 1, year: 2027);
+
+        Livewire::actingAs($sh)->test(MemMatrixList::class)
+            ->assertSet('year', '2027');
+    }
+
+    public function test_the_default_year_is_never_older_than_the_current_calendar_year(): void
+    {
+        // A school that only has past data still lands on the current year.
+        $sh = $this->schoolHead();
+        $this->matrixFor($sh, month: 1, year: 2024);
+
+        Livewire::actingAs($sh)->test(MemMatrixList::class)
+            ->assertSet('year', (string) now()->year);
+    }
+
+    public function test_initializing_a_year_creates_its_twelve_months(): void
     {
         $sh = $this->schoolHead();
 
         Livewire::actingAs($sh)->test(MemMatrixList::class)
-            ->call('openCreate')
-            ->set('createYear', '2026')
-            ->set('createMonth', '7')
-            ->call('create')
+            ->set('year', '2026')
+            ->call('generateYear')
             ->assertHasNoErrors();
 
-        $this->assertDatabaseHas('monthly_expenditure_matrices', [
-            'school_id' => $sh->school_id,
-            'year' => 2026,
-            'month' => 7,
-            'status' => 'draft',
-        ]);
+        $months = MonthlyExpenditureMatrix::where('school_id', $sh->school_id)
+            ->where('year', 2026)
+            ->orderBy('month')
+            ->pluck('month')
+            ->all();
+
+        $this->assertSame(range(1, 12), $months);
+
+        // New months start as blank Drafts with zero lines.
+        $this->assertSame(12, MonthlyExpenditureMatrix::count());
+        $this->assertSame(
+            12,
+            MonthlyExpenditureMatrix::where('status', 'draft')->count()
+        );
+        $this->assertSame(0, MonthlyExpenditureItem::count());
     }
 
-    public function test_a_duplicate_month_is_refused(): void
+    public function test_initializing_the_same_year_again_does_not_duplicate(): void
     {
         $sh = $this->schoolHead();
-        $this->matrixFor($sh, month: 7, year: 2026);
 
-        Livewire::actingAs($sh)->test(MemMatrixList::class)
-            ->call('openCreate')
-            ->set('createYear', '2026')
-            ->set('createMonth', '7')
-            ->call('create')
-            ->assertHasErrors('createMonth');
+        $component = Livewire::actingAs($sh)->test(MemMatrixList::class)
+            ->set('year', '2026')
+            ->call('generateYear');
 
-        $this->assertSame(1, MonthlyExpenditureMatrix::count());
+        $ids = MonthlyExpenditureMatrix::orderBy('id')->pluck('id')->all();
+
+        $component->call('generateYear')->call('generateYear');
+
+        $this->assertSame(12, MonthlyExpenditureMatrix::count());
+        // The same rows, untouched — not replaced.
+        $this->assertSame($ids, MonthlyExpenditureMatrix::orderBy('id')->pluck('id')->all());
     }
 
-    public function test_a_school_head_with_no_school_cannot_create(): void
+    public function test_initializing_a_year_preserves_existing_months_and_creates_only_the_missing(): void
+    {
+        $sh = $this->schoolHead();
+
+        // A finalized July with a line — the record already there.
+        $july = $this->matrixFor($sh, month: 7, year: 2026);
+        $july->update(['status' => MonthlyExpenditureMatrix::STATUS_FINALIZED]);
+        $july->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Existing line',
+        ]);
+        $julyId = $july->id;
+
+        Livewire::actingAs($sh)->test(MemMatrixList::class)
+            ->set('year', '2026')
+            ->call('generateYear');
+
+        $this->assertSame(12, MonthlyExpenditureMatrix::count());
+
+        // July is the SAME row, still finalized, with its line intact.
+        $july->refresh();
+        $this->assertSame($julyId, $july->id);
+        $this->assertSame('finalized', $july->status);
+        $this->assertSame(1, $july->items()->count());
+
+        // The other eleven are new Drafts with no lines.
+        $this->assertSame(11, MonthlyExpenditureMatrix::where('status', 'draft')->count());
+    }
+
+    public function test_initializing_a_year_is_scoped_to_the_callers_school(): void
+    {
+        $owner = $this->schoolHead('School A');
+        $other = $this->schoolHead('School B');
+
+        Livewire::actingAs($owner)->test(MemMatrixList::class)
+            ->set('year', '2026')
+            ->call('generateYear');
+
+        // Nobody else got a single month.
+        $this->assertSame(12, MonthlyExpenditureMatrix::where('school_id', $owner->school_id)->count());
+        $this->assertSame(0, MonthlyExpenditureMatrix::where('school_id', $other->school_id)->count());
+    }
+
+    public function test_changing_the_year_initializes_the_new_year_and_shows_its_months(): void
+    {
+        $sh = $this->schoolHead();
+
+        Livewire::actingAs($sh)->test(MemMatrixList::class)
+            ->set('year', '2025')
+            ->call('generateYear')
+            ->set('year', '2026')
+            // updatedYear hooks in and ensures 2026 exists too.
+            ->assertSet('year', '2026');
+
+        $this->assertSame(12, MonthlyExpenditureMatrix::where('year', 2025)->count());
+        $this->assertSame(12, MonthlyExpenditureMatrix::where('year', 2026)->count());
+    }
+
+    public function test_the_table_lists_the_months_in_calendar_order(): void
+    {
+        $sh = $this->schoolHead();
+
+        Livewire::actingAs($sh)->test(MemMatrixList::class)
+            ->set('year', '2026')
+            ->call('generateYear')
+            ->assertSeeInOrder([
+                'January 2026',
+                'February 2026',
+                'March 2026',
+                'April 2026',
+                'May 2026',
+                'June 2026',
+                'July 2026',
+                'August 2026',
+                'September 2026',
+                'October 2026',
+                'November 2026',
+                'December 2026',
+            ]);
+    }
+
+    public function test_the_status_filter_narrows_the_years_months(): void
+    {
+        $sh = $this->schoolHead();
+
+        Livewire::actingAs($sh)->test(MemMatrixList::class)
+            ->set('year', '2026')
+            ->call('generateYear');
+
+        MonthlyExpenditureMatrix::where('year', 2026)->where('month', 5)
+            ->update(['status' => MonthlyExpenditureMatrix::STATUS_FINALIZED]);
+
+        Livewire::actingAs($sh)->test(MemMatrixList::class)
+            ->set('year', '2026')
+            ->set('status', 'finalized')
+            ->assertSee('May 2026')
+            ->assertDontSee('January 2026');
+    }
+
+    public function test_a_school_head_with_no_school_cannot_initialize_a_year(): void
     {
         $sh = User::factory()->create(['role' => 'user', 'is_superadmin' => false, 'school_id' => null]);
 
         Livewire::actingAs($sh)->test(MemMatrixList::class)
-            ->call('openCreate')
-            ->assertSet('createError', fn ($value) => $value !== null)
-            ->call('create');
+            ->set('year', '2026')
+            ->call('generateYear')
+            ->assertSet('errorMessage', fn ($value) => $value !== null);
+
+        $this->assertSame(0, MonthlyExpenditureMatrix::count());
+    }
+
+    public function test_a_new_year_can_be_added_and_its_twelve_months_are_created(): void
+    {
+        $sh = $this->schoolHead();
+
+        Livewire::actingAs($sh)->test(MemMatrixList::class)
+            ->set('newYear', '2027')
+            ->call('addYear')
+            ->assertSet('errorMessage', null)
+            // The filter switches to the year just added, so its months show.
+            ->assertSet('year', '2027')
+            ->assertSee('January 2027');
+
+        $this->assertSame(
+            12,
+            MonthlyExpenditureMatrix::where('school_id', $sh->school_id)->where('year', 2027)->count()
+        );
+    }
+
+    public function test_adding_an_out_of_range_year_is_rejected(): void
+    {
+        $sh = $this->schoolHead();
+
+        Livewire::actingAs($sh)->test(MemMatrixList::class)
+            ->set('newYear', '1999')
+            ->call('addYear')
+            ->assertSet('errorMessage', fn ($value) => $value !== null);
+
+        $this->assertSame(0, MonthlyExpenditureMatrix::count());
+    }
+
+    public function test_a_school_head_with_no_school_cannot_add_a_year(): void
+    {
+        $sh = User::factory()->create(['role' => 'user', 'is_superadmin' => false, 'school_id' => null]);
+
+        Livewire::actingAs($sh)->test(MemMatrixList::class)
+            ->set('newYear', '2027')
+            ->call('addYear')
+            ->assertSet('errorMessage', fn ($value) => $value !== null);
 
         $this->assertSame(0, MonthlyExpenditureMatrix::count());
     }
@@ -289,7 +495,7 @@ class MemMatrixTest extends TestCase
         $this->assertEquals(100.0, (float) $item->calculated_total);
     }
 
-    public function test_the_account_picker_fills_the_modal_form(): void
+    public function test_choosing_an_account_fills_the_modal_form(): void
     {
         $sh = $this->schoolHead();
         $matrix = $this->matrixFor($sh);
@@ -304,11 +510,83 @@ class MemMatrixTest extends TestCase
 
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
             ->call('openLineModal')
-            ->call('openAccountPicker', 'form')
             ->call('chooseAccount', $classification->id)
             ->assertSet('lineForm.account_title', 'Office Supplies Expenses')
             ->assertSet('lineForm.account_code', '5020301000')
-            ->assertSet('lineForm.account_classification_id', $classification->id);
+            ->assertSet('lineForm.account_classification_id', $classification->id)
+            ->assertSet('accountSearch', 'Office Supplies Expenses');
+    }
+
+    public function test_the_account_combobox_filters_by_title_or_object_code(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        AccountClassification::create([
+            'account_title' => 'Office Supplies Expenses',
+            'rca_code' => '3020301',
+            'uacs_sub_object_code' => '5020301',
+            'uacs_object_code' => '5020301000',
+            'is_active' => true,
+        ]);
+        AccountClassification::create([
+            'account_title' => 'Traveling Expenses',
+            'rca_code' => '3020101',
+            'uacs_sub_object_code' => '5020101',
+            'uacs_object_code' => '5020101000',
+            'is_active' => true,
+        ]);
+
+        $component = Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openLineModal');
+
+        // By a title fragment.
+        $component->set('accountSearch', 'office')
+            ->assertSee('Office Supplies Expenses')
+            ->assertDontSee('Traveling Expenses');
+
+        // By object code.
+        $component->set('accountSearch', '5020101')
+            ->assertSee('Traveling Expenses')
+            ->assertDontSee('Office Supplies Expenses');
+    }
+
+    public function test_typing_without_picking_saves_the_text_as_the_account_title(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openLineModal')
+            ->set('accountSearch', 'Miscellaneous Expenses')
+            ->set('lineForm.activity_description', 'Buy sundries')
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors()
+            ->assertSet('items.0.account_title', 'Miscellaneous Expenses')
+            ->assertSet('items.0.account_classification_id', null);
+    }
+
+    public function test_clear_account_empties_the_line_account(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        $classification = AccountClassification::create([
+            'account_title' => 'Office Supplies Expenses',
+            'rca_code' => '3020301',
+            'uacs_sub_object_code' => '5020301',
+            'uacs_object_code' => '5020301000',
+            'is_active' => true,
+        ]);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openLineModal')
+            ->call('chooseAccount', $classification->id)
+            ->call('clearAccount')
+            ->assertSet('lineForm.account_title', '')
+            ->assertSet('lineForm.account_code', '')
+            ->assertSet('lineForm.account_classification_id', null)
+            ->assertSet('accountSearch', '');
     }
 
     public function test_duplicating_a_line_copies_it_as_a_fresh_unsaved_row(): void
@@ -436,6 +714,62 @@ class MemMatrixTest extends TestCase
         );
     }
 
+    // ------------------------------------------------------------ month tabs
+
+    public function test_the_editor_shows_a_month_tab_for_every_month_of_the_year(): void
+    {
+        $sh = $this->schoolHead();
+        $january = $this->matrixFor($sh, month: 1, year: 2026);
+        $july = $this->matrixFor($sh, month: 7, year: 2026);
+        $december = $this->matrixFor($sh, month: 12, year: 2026);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $july])
+            // All twelve abbreviation tabs are drawn, January first.
+            ->assertSeeInOrder(['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'])
+            // The months that exist link straight to their own matrix.
+            ->assertSee(route('wfp.matrices.edit', ['matrix' => $january->id]), false)
+            ->assertSee(route('wfp.matrices.edit', ['matrix' => $december->id]), false)
+            // The month being edited is marked current (and is not a link).
+            ->assertSeeHtml('mem-month-tab is-current')
+            ->assertSeeHtml('aria-current="page"');
+    }
+
+    public function test_the_month_tabs_are_scoped_to_this_matrixs_school_and_year(): void
+    {
+        $owner = $this->schoolHead('School A');
+        $other = $this->schoolHead('School B');
+
+        $july = $this->matrixFor($owner, month: 7, year: 2026);
+        // Same month, another school and another year — neither belongs here.
+        $otherSchool = $this->matrixFor($other, month: 8, year: 2026);
+        $otherYear = $this->matrixFor($owner, month: 8, year: 2027);
+
+        Livewire::actingAs($owner)->test(MemEditor::class, ['matrix' => $july])
+            ->assertDontSee(route('wfp.matrices.edit', ['matrix' => $otherSchool->id]), false)
+            ->assertDontSee(route('wfp.matrices.edit', ['matrix' => $otherYear->id]), false);
+    }
+
+    public function test_a_month_with_no_matrix_is_shown_inactive(): void
+    {
+        $sh = $this->schoolHead();
+        // Only July exists — the other eleven have no matrix to link to.
+        $july = $this->matrixFor($sh, month: 7, year: 2026);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $july])
+            ->assertSeeHtml('mem-month-tab is-empty');
+    }
+
+    public function test_a_finalized_month_carries_a_status_dot_on_its_tab(): void
+    {
+        $sh = $this->schoolHead();
+        $january = $this->matrixFor($sh, month: 1, year: 2026);
+        $january->update(['status' => MonthlyExpenditureMatrix::STATUS_FINALIZED]);
+        $july = $this->matrixFor($sh, month: 7, year: 2026);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $july])
+            ->assertSeeHtml('mem-month-tab__dot--finalized');
+    }
+
     // ---------------------------------------------------------------- import
 
     public function test_import_previews_then_commits_valid_rows(): void
@@ -461,6 +795,160 @@ class MemMatrixTest extends TestCase
 
         $this->assertSame(2, MonthlyExpenditureItem::count());
         $this->assertEquals(2500.0, (float) MonthlyExpenditureItem::orderBy('id')->first()->calculated_total);
+    }
+
+    // -------------------------------------------------- workbook import
+
+    public function test_a_matrix_workbook_previews_then_commits_across_months(): void
+    {
+        $sh = $this->schoolHead();
+
+        $bytes = $this->memWorkbookBytes([
+            'JAN' => [
+                ['__section__' => 'Operations-Related Expenses'],
+                ['activity_description' => 'Procure supplies', 'quantity' => '10', 'unit_cost' => '250', 'account_code' => '5020301000'],
+            ],
+            'FEB' => [
+                ['activity_description' => 'Build a fence', 'quantity' => '5', 'unit_cost' => '100'],
+            ],
+        ]);
+
+        $component = Livewire::actingAs($sh)->test(MemMatrixList::class)
+            ->set('year', '2026')
+            ->call('openWorkbookImport')
+            ->assertSet('showWorkbookImport', true)
+            ->set('workbookFile', UploadedFile::fake()->createWithContent('matrix.xlsx', $bytes))
+            ->assertSet('workbookValidCount', 2)
+            ->assertSet('workbookInvalidCount', 0);
+
+        // Nothing is written until the import is confirmed.
+        $this->assertSame(0, MonthlyExpenditureItem::count());
+
+        $component->call('commitWorkbookImport')->assertSet('showWorkbookImport', false);
+
+        $this->assertSame(2, MonthlyExpenditureItem::count());
+        $this->assertSame(
+            12,
+            MonthlyExpenditureMatrix::where('school_id', $sh->school_id)->where('year', 2026)->count()
+        );
+
+        $january = MonthlyExpenditureMatrix::where('school_id', $sh->school_id)->where('year', 2026)->where('month', 1)->firstOrFail();
+        $this->assertSame(1, $january->items()->count());
+        $this->assertEquals(2500.0, (float) $january->items()->firstOrFail()->calculated_total);
+    }
+
+    public function test_a_matrix_workbook_import_refuses_another_role(): void
+    {
+        $viewer = User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]);
+
+        $this->assertStringContainsString(
+            'Page Not Found',
+            Livewire::actingAs($viewer)->test(MemMatrixList::class)->html()
+        );
+    }
+
+    // -------------------------------------------------- UACS ordering
+
+    public function test_the_generator_orders_wfp_lines_by_uacs_sort_order(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh, month: 1);
+
+        // Entered in the reverse of the order they should come out in.
+        AccountClassification::create([
+            'account_title' => 'Office Supplies Expenses',
+            'rca_code' => '3020301',
+            'uacs_sub_object_code' => '5020301',
+            'uacs_object_code' => '5020301000',
+            'sort_order' => 20,
+            'is_active' => true,
+        ]);
+        AccountClassification::create([
+            'account_title' => 'Traveling Expenses',
+            'rca_code' => '3020101',
+            'uacs_sub_object_code' => '5020101',
+            'uacs_object_code' => '5020101000',
+            'sort_order' => 10,
+            'is_active' => true,
+        ]);
+
+        $matrix->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Procure supplies',
+            'quantity' => 1,
+            'unit_cost' => 100,
+            'account_code' => '5020301000',
+        ]);
+        $matrix->items()->create([
+            'position' => 2,
+            'section' => 'operations',
+            'activity_description' => 'Travel to training',
+            'quantity' => 1,
+            'unit_cost' => 100,
+            'account_code' => '5020101000',
+        ]);
+
+        $plan = WfpPlan::create([
+            'school_id' => $sh->school_id,
+            'year' => 2026,
+            'status' => WfpPlan::STATUS_DRAFT,
+        ]);
+
+        WfpGenerator::generate($plan, $matrix);
+
+        // sort_order 10 (Traveling) before sort_order 20 (Office Supplies),
+        // regardless of the order the lines were entered in.
+        $this->assertSame(
+            ['5020101000', '5020301000'],
+            $plan->items()->orderBy('position')->pluck('account_code')->all()
+        );
+    }
+
+    public function test_unknown_account_codes_sort_after_known_ones(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh, month: 1);
+
+        AccountClassification::create([
+            'account_title' => 'Office Supplies Expenses',
+            'rca_code' => '3020301',
+            'uacs_sub_object_code' => '5020301',
+            'uacs_object_code' => '5099999999',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+
+        // The known code is entered second.
+        $matrix->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Unknown account line',
+            'quantity' => 1,
+            'unit_cost' => 100,
+            'account_code' => '1111111111',
+        ]);
+        $matrix->items()->create([
+            'position' => 2,
+            'section' => 'operations',
+            'activity_description' => 'Known account line',
+            'quantity' => 1,
+            'unit_cost' => 100,
+            'account_code' => '5099999999',
+        ]);
+
+        $plan = WfpPlan::create([
+            'school_id' => $sh->school_id,
+            'year' => 2026,
+            'status' => WfpPlan::STATUS_DRAFT,
+        ]);
+
+        WfpGenerator::generate($plan, $matrix);
+
+        $this->assertSame(
+            ['5099999999', '1111111111'],
+            $plan->items()->orderBy('position')->pluck('account_code')->all()
+        );
     }
 
     // ---------------------------------------------------------------- export

@@ -75,4 +75,30 @@ return [
         'extensions' => 'csv,txt',
     ],
 
+    /*
+     * The multi-sheet matrix workbook import (one worksheet per month) —
+     * limits and how far down a sheet its header row is looked for.
+     */
+    'workbook' => [
+        'max_size_kb' => (int) env('MEM_WORKBOOK_MAX_KB', 10240),
+
+        /*
+         * The School Head keeps the plan as a macro-enabled workbook
+         * (.xlsm), so both are accepted. Nothing is executed: the reader only
+         * reads the workbook's XML parts, and the macros are never extracted.
+         */
+        'extensions' => 'xlsx,xlsm',
+        'header_scan_rows' => (int) env('MEM_WORKBOOK_HEADER_SCAN_ROWS', 15),
+
+        /*
+         * How many rows above and below the header row to merge into the
+         * header BLOCK. The SH's workbook spreads its header over two rows —
+         * the parent labels (Objectives, Project/Activity/Expenditure,
+         * Account Title, Account Code) on one and the "Resources Needed"
+         * sub-labels (Kind, Quantity, Unit, Unit Cost) beneath — so one row
+         * never maps every column.
+         */
+        'header_band_rows' => (int) env('MEM_WORKBOOK_HEADER_BAND_ROWS', 2),
+    ],
+
 ];

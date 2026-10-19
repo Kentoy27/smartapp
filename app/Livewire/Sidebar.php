@@ -58,7 +58,7 @@ class Sidebar extends Component
         // other group once the reader says so.
         $this->openGroups['wfp'] = true;
 
-        if (!request()->routeIs('mov.index')) {
+        if (! request()->routeIs('mov.index')) {
             return;
         }
 
@@ -96,7 +96,7 @@ class Sidebar extends Component
             if ($requirement?->category?->part !== null) {
                 $partId = $requirement->category->part->id;
                 $this->movOpenParts[$partId] = true;
-                $this->movOpenCategories[$partId . ':' . $requirement->category->id] = true;
+                $this->movOpenCategories[$partId.':'.$requirement->category->id] = true;
 
                 if ($requirement->kra_label !== null && trim($requirement->kra_label) !== '') {
                     $this->movOpenKras[$this->kraNodeKey($requirement->category->id, $requirement->kra_label)] = true;
@@ -248,6 +248,18 @@ class Sidebar extends Component
                 'badge_title' => '%d plans awaiting your review',
                 'section' => 'Files',
                 'order' => 13,
+            ];
+
+            // WFP Uploads: every school's uploaded Work and Financial Plan.
+            // The School Head's own /wfp workspace is the other side of this
+            // workflow, so the admin gets that list as its own destination.
+            $items[] = [
+                'label' => 'WFP Uploads',
+                'route' => 'wfp.submissions.index',
+                'path' => 'wfp-submissions',
+                'icon' => 'chart-column',
+                'section' => 'Files',
+                'order' => 14,
             ];
 
             if (Auth::user()?->canManageUsersAndSchools()) {
@@ -432,7 +444,7 @@ class Sidebar extends Component
         if (str_starts_with($node, 'category-')) {
             $segments = explode('-', substr($node, 9));
 
-            $this->toggleKey($this->movOpenCategories, ($segments[0] ?? '') . ':' . ($segments[1] ?? ''));
+            $this->toggleKey($this->movOpenCategories, ($segments[0] ?? '').':'.($segments[1] ?? ''));
 
             return;
         }
@@ -482,7 +494,7 @@ class Sidebar extends Component
 
         $parts = MovPart::query()
             ->active()
-            ->with(['categories' => fn($query) => $query->active()->with(['requirements' => fn($q) => $q->active()])])
+            ->with(['categories' => fn ($query) => $query->active()->with(['requirements' => fn ($q) => $q->active()])])
             ->orderBy('part_order')
             ->orderBy('id')
             ->get();
@@ -520,13 +532,13 @@ class Sidebar extends Component
                     $categoryDone += $own->isEmpty() ? 0 : 1;
 
                     $mov = [
-                        'key' => 'mov-' . $requirement->id,
+                        'key' => 'mov-'.$requirement->id,
                         'section' => (string) $requirement->id,
                         'label' => $requirement->label(),
                         'hint' => $requirement->title,
                         // A MOV number means nothing on its own in a list
                         // this deep, so the tooltip carries the whole trail.
-                        'title' => $requirement->trail() . ' — ' . $requirement->title,
+                        'title' => $requirement->trail().' — '.$requirement->title,
                         'url' => route('mov.index', ['mov' => $requirement->id]),
                         'status' => $status['key'],
                         'status_label' => $status['label'],
@@ -545,12 +557,12 @@ class Sidebar extends Component
 
                     $kraKey = $this->kraNodeKey($category->id, $kraLabel);
 
-                    if (!isset($kraGroups[$kraKey])) {
+                    if (! isset($kraGroups[$kraKey])) {
                         $kraGroups[$kraKey] = [
                             'key' => $kraKey,
                             'section' => null,
                             'label' => $kraLabel,
-                            'title' => $category->trail() . ' → ' . $kraLabel,
+                            'title' => $category->trail().' → '.$kraLabel,
                             'meta' => '0/0',
                             'open' => isset($this->movOpenKras[$kraKey]),
                             'children' => [],
@@ -560,7 +572,7 @@ class Sidebar extends Component
 
                     $kraGroups[$kraKey]['children'][] = $mov;
                     $kraGroups[$kraKey]['done'] += $own->isEmpty() ? 0 : 1;
-                    $kraGroups[$kraKey]['meta'] = $kraGroups[$kraKey]['done'] . '/' . count($kraGroups[$kraKey]['children']);
+                    $kraGroups[$kraKey]['meta'] = $kraGroups[$kraKey]['done'].'/'.count($kraGroups[$kraKey]['children']);
                 }
 
                 $movs = array_merge(array_values($kraGroups), $movs);
@@ -571,15 +583,15 @@ class Sidebar extends Component
                 $partDone += $categoryDone;
 
                 $categories[] = [
-                    'key' => 'category-' . $part->id . '-' . $category->id,
+                    'key' => 'category-'.$part->id.'-'.$category->id,
                     'section' => (string) $category->id,
                     'label' => $category->name,
                     'title' => $category->trail(),
                     // The letter alone is ambiguous this deep; the trail says
                     // where it sits, and the count says how far it is.
-                    'meta' => $categoryDone . '/' . $categoryTotal,
+                    'meta' => $categoryDone.'/'.$categoryTotal,
                     'url' => route('mov.index', ['category' => $category->id]),
-                    'open' => isset($this->movOpenCategories[$part->id . ':' . $category->id]),
+                    'open' => isset($this->movOpenCategories[$part->id.':'.$category->id]),
                     'children' => $movs,
                 ];
             }
@@ -590,11 +602,11 @@ class Sidebar extends Component
             }
 
             $tree[] = [
-                'key' => 'part-' . $part->id,
+                'key' => 'part-'.$part->id,
                 'section' => null,
                 'label' => $part->name,
                 'title' => $part->name,
-                'meta' => $partDone . '/' . $partTotal,
+                'meta' => $partDone.'/'.$partTotal,
                 'open' => isset($this->movOpenParts[$part->id]),
                 'children' => $categories,
             ];
@@ -605,7 +617,7 @@ class Sidebar extends Component
 
     private function kraNodeKey(int $categoryId, string $kraLabel): string
     {
-        return 'kra-' . $categoryId . '-' . sha1($kraLabel);
+        return 'kra-'.$categoryId.'-'.sha1($kraLabel);
     }
 
     /**

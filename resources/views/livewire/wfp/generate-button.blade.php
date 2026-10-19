@@ -16,14 +16,18 @@
         ></div>
     @endif
 
-    {{-- GENERATE + DOWNLOAD BUTTON. --}}
+    {{-- GENERATE + DOWNLOAD BUTTON: the school's WFP generated from its Monthly
+         Expenditure Matrix when it has one, and the blank account-code form
+         until then. --}}
     <button
         type="button"
         class="opcr-download-btn"
         wire:click="download"
         wire:loading.attr="disabled"
         wire:target="download"
-        title="Generate your school's WFP from the account-code list and download it"
+        title="{{ $this->planYear !== null
+            ? 'Generate your CY '.$this->planYear.' WFP from your Monthly Expenditure Matrix and download it'
+            : 'Generate your school\'s WFP from the account-code list and download it' }}"
     >
         <span wire:loading.remove wire:target="download">
             <x-icon name="download" :size="16" />
@@ -34,4 +38,16 @@
             <span>Generating…</span>
         </span>
     </button>
+
+    {{-- WHICH WORKBOOK: the filled form cannot be produced until the matrix has
+         lines, so the caption says what is actually coming. --}}
+    @if ($this->planYear !== null)
+        <span class="wfp-generate__source">
+            Built from your Monthly Expenditure Matrix (CY {{ $this->planYear }}).
+        </span>
+    @else
+        <span class="wfp-generate__source">
+            Built from your account-code list — complete the rest by hand.
+        </span>
+    @endif
 </div>

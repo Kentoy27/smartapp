@@ -72,9 +72,7 @@ class MemEditor extends Component
     /** The _key of the line being edited in the modal, or null when adding one. */
     public ?string $editingKey = null;
 
-    /** Which row's account the picker fills: a grid row's _key, or 'form'. */
-    public ?string $accountPickerKey = null;
-
+    /** The live query behind the account combobox (title or object code). */
     public string $accountSearch = '';
 
     /* CSV import. */
@@ -234,6 +232,7 @@ class MemEditor extends Component
         $this->editingKey = null;
         $this->lineSection = in_array($section, ['operations', 'project'], true) ? $section : 'operations';
         $this->lineForm = $this->blankRow($this->lineSection);
+        $this->accountSearch = '';
         $this->showLineModal = true;
         $this->resetValidation();
     }
@@ -257,6 +256,7 @@ class MemEditor extends Component
                 ? $row['section']
                 : 'operations';
             $this->lineForm = $row;
+            $this->accountSearch = (string) ($row['account_title'] ?? '');
             $this->showLineModal = true;
             $this->resetValidation();
 
@@ -269,6 +269,7 @@ class MemEditor extends Component
         $this->showLineModal = false;
         $this->editingKey = null;
         $this->lineForm = [];
+        $this->accountSearch = '';
         $this->resetValidation();
     }
 
@@ -283,6 +284,12 @@ class MemEditor extends Component
         $this->guard();
 
         $this->lineForm['section'] = $this->lineSection;
+
+        // The combobox doubles as a free-text title: when no classification was
+        // chosen, whatever was typed becomes the line's account title.
+        if (trim((string) ($this->lineForm['account_title'] ?? '')) === '' && trim($this->accountSearch) !== '') {
+            $this->lineForm['account_title'] = $this->accountSearch;
+        }
 
         $this->validate($this->lineRules(), $this->lineAttributes());
 
@@ -647,53 +654,52 @@ class MemEditor extends Component
         return $user;
     }
 
-    /* -------------------------------------------------------- account picker */
+    /* ------------------------------------------------------ account combobox */
 
-    public function openAccountPicker(string $key): void
-    {
-        $this->guard();
-        $this->accountPickerKey = $key;
-        $this->accountSearch = '';
-        $this->resetValidation('accountSearch');
-    }
-
-    public function closeAccountPicker(): void
-    {
-        $this->accountPickerKey = null;
-        $this->accountSearch = '';
-    }
-
+    /**
+     * Pick an account from the combobox into the line being encoded. The
+     * title, object code and the classification link are all set, and the
+     * search box is left showing the chosen title.
+     */
     public function chooseAccount(int $classificationId): void
     {
         $this->guard();
 
         $classification = AccountClassification::findOrFail($classificationId);
 
-        // The picker fills either the modal's form or one grid row — it is
-        // one search, aimed wherever it was opened from.
-        if ($this->accountPickerKey === 'form') {
-            $this->lineForm['account_title'] = (string) $classification->account_title;
-            $this->lineForm['account_code'] = (string) $classification->uacs_object_code;
-            $this->lineForm['account_classification_id'] = $classification->id;
+        $this->lineForm['account_title'] = (string) $classification->account_title;
+        $this->lineForm['account_code'] = (string) $classification->uacs_object_code;
+        $this->lineForm['account_classification_id'] = $classification->id;
+        $this->accountSearch = (string) $classification->account_title;
 
-            $this->closeAccountPicker();
+        $this->resetValidation('lineForm.account_title');
+        $this->resetValidation('lineForm.account_code');
+    }
 
-            return;
+    /** Clear the line's account — the combobox's × button. */
+    public function clearAccount(): void
+    {
+        $this->guard();
+
+        $this->lineForm['account_title'] = '';
+        $this->lineForm['account_code'] = '';
+        $this->lineForm['account_classification_id'] = null;
+        $this->accountSearch = '';
+
+        $this->resetValidation('lineForm.account_title');
+        $this->resetValidation('lineForm.account_code');
+    }
+
+    /**
+     * The user edited the search box. Once it no longer reads as the chosen
+     * title the line is no longer bound to a specific classification, so drop
+     * the link — a stale id must not be saved under a hand-typed title.
+     */
+    public function updatedAccountSearch(): void
+    {
+        if (trim($this->accountSearch) !== trim((string) ($this->lineForm['account_title'] ?? ''))) {
+            $this->lineForm['account_classification_id'] = null;
         }
-
-        foreach ($this->items as $index => $row) {
-            if (($row['_key'] ?? null) !== $this->accountPickerKey) {
-                continue;
-            }
-
-            $this->items[$index]['account_title'] = (string) $classification->account_title;
-            $this->items[$index]['account_code'] = (string) $classification->uacs_object_code;
-            $this->items[$index]['account_classification_id'] = $classification->id;
-
-            break;
-        }
-
-        $this->closeAccountPicker();
     }
 
     /**
@@ -840,6 +846,47 @@ class MemEditor extends Component
     public function matrix(): MonthlyExpenditureMatrix
     {
         return MonthlyExpenditureMatrix::findOrFail($this->matrixId);
+    }
+
+    /**
+     * The twelve months of this matrix's planning year for the SH's own school,
+     * in calendar order — the month tab strip at the top of the editor. The
+     * month being edited is flagged (`current`); a month whose matrix is missing
+     * (deleted) carries no id and renders inactive. One query for the whole
+     * year, so drawing the strip costs nothing.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    #[Computed]
+    public function months(): array
+    {
+        $matrix = $this->matrix;
+
+        $siblings = MonthlyExpenditureMatrix::query()
+            ->where('school_id', $matrix->school_id)
+            ->where('year', $matrix->year)
+            ->withCount('items')
+            ->get()
+            ->keyBy('month');
+
+        $months = [];
+
+        foreach (MonthlyExpenditureMatrix::MONTH_ABBREVIATIONS as $number => $abbreviation) {
+            $sibling = $siblings->get($number);
+
+            $months[] = [
+                'month' => $number,
+                'abbr' => strtoupper($abbreviation),
+                'label' => $sibling instanceof MonthlyExpenditureMatrix
+                    ? $sibling->periodLabel()
+                    : $abbreviation.' '.$matrix->year,
+                'id' => $sibling instanceof MonthlyExpenditureMatrix ? (int) $sibling->id : null,
+                'status' => $sibling instanceof MonthlyExpenditureMatrix ? $sibling->status : null,
+                'current' => $number === (int) $matrix->month,
+            ];
+        }
+
+        return $months;
     }
 
     public function render()

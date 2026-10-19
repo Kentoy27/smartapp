@@ -876,13 +876,19 @@
             color: var(--text-muted);
         }
 
-        .users-per-page select {
+        .users-per-page select,
+        .users-per-page input {
             border: 1px solid var(--border);
             border-radius: 6px;
             background: var(--bg-elevated);
             color: var(--text);
             font: inherit;
             padding: 6px 8px;
+        }
+
+        /* The "Add year" number field: just wide enough for a 4-digit year. */
+        .users-per-page input[type="number"] {
+            width: 6.5rem;
         }
 
         .data-table th.users-actions-col,
@@ -1586,6 +1592,10 @@
         }
 
         .error-alert-sentinel {
+            display: none;
+        }
+
+        .mem-init-sentinel {
             display: none;
         }
 
@@ -7545,6 +7555,22 @@
             if (window.Livewire && typeof Livewire.hook === 'function') {
                 Livewire.hook('request', function (request) {
                     request.fail(function (payload) {
+                        // A 404 no longer pops Livewire's error overlay. Its
+                        // fallback for ANY failed request is to drop the whole
+                        // response body into a blocking modal (showHtmlModal) —
+                        // and for a 404 that body is the app's own branded
+                        // "Page not found" page, so a stray poll (a background
+                        // wire:poll that raced a wire:navigate, or a page whose
+                        // record is gone) covers the app with a giant 404
+                        // pop-up. Suppress it: a skipped background poll is
+                        // harmless, and a genuinely out-of-date page is one
+                        // reload away.
+                        if (payload.status === 404) {
+                            payload.preventDefault();
+
+                            return;
+                        }
+
                         if (payload.status !== 419) return;
 
                         // Always stop Livewire's native confirm + reload, for

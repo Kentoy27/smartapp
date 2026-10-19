@@ -29,6 +29,41 @@
         </p>
     </div>
 
+    {{-- MONTH NAVIGATION — the twelve months of this matrix's year, so moving
+         through the year never means going back to the list. The month being
+         edited is marked; the others link straight to their own matrix. A month
+         that is validated or finalized carries a small status dot, so the year's
+         progress reads at a glance; a month whose matrix was deleted is
+         inactive. --}}
+    <nav class="mem-month-tabs" aria-label="Months of CY {{ $matrix->year }}">
+        @foreach ($this->months as $tab)
+            @if ($tab['current'])
+                <span class="mem-month-tab is-current" aria-current="page" title="{{ $tab['label'] }}">
+                    <span class="mem-month-tab__abbr">{{ $tab['abbr'] }}</span>
+                    @if (in_array($tab['status'], ['validated', 'finalized'], true))
+                        <span class="mem-month-tab__dot mem-month-tab__dot--{{ $tab['status'] }}" aria-hidden="true"></span>
+                    @endif
+                </span>
+            @elseif ($tab['id'] !== null)
+                <a
+                    href="{{ route('wfp.matrices.edit', ['matrix' => $tab['id']]) }}"
+                    wire:navigate
+                    class="mem-month-tab"
+                    title="Open {{ $tab['label'] }}"
+                >
+                    <span class="mem-month-tab__abbr">{{ $tab['abbr'] }}</span>
+                    @if (in_array($tab['status'], ['validated', 'finalized'], true))
+                        <span class="mem-month-tab__dot mem-month-tab__dot--{{ $tab['status'] }}" aria-hidden="true"></span>
+                    @endif
+                </a>
+            @else
+                <span class="mem-month-tab is-empty" title="{{ $tab['label'] }} — no matrix yet">
+                    <span class="mem-month-tab__abbr">{{ $tab['abbr'] }}</span>
+                </span>
+            @endif
+        @endforeach
+    </nav>
+
     @if ($errorMessage)
         <div class="ac-import-error mem-banner" role="alert">
             {{ $errorMessage }}
@@ -56,8 +91,7 @@
                     <x-icon name="file-spreadsheet" :size="16" />
                     <span>Export XLSX</span>
                 </a>
-
-                <a
+               {{-- kw<a
                     href="{{ route('wfp.matrices.template') }}"
                     class="ac-import-btn"
                     download
@@ -70,7 +104,7 @@
                 <button type="button" class="ac-import-btn" wire:click="openImport">
                     <x-icon name="upload" :size="16" />
                     <span>Import CSV</span>
-                </button>
+                </button> --}}
             </div>
         </div>
 
@@ -331,7 +365,18 @@
                         @endforeach
                     </div>
 
-                    <div class="field mem-line-span">
+                    <div class="field">
+                        <label for="memLineObjective">Objective</label>
+                        <textarea
+                            id="memLineObjective"
+                            rows="2"
+                            wire:model="lineForm.objective"
+                            placeholder="What the activity serves"
+                        ></textarea>
+                        @error('lineForm.objective') <div class="error-text">{{ $message }}</div> @enderror
+                    </div>
+
+                     <div class="field mem-line-span">
                         <label for="memLineActivity">Activity description <span class="field-required">required</span></label>
                         <input
                             id="memLineActivity"
@@ -345,50 +390,11 @@
                     </div>
 
                     <div class="field">
-                        <label for="memLineObjective">Objective</label>
-                        <textarea
-                            id="memLineObjective"
-                            rows="2"
-                            wire:model="lineForm.objective"
-                            placeholder="What the activity serves"
-                        ></textarea>
-                        @error('lineForm.objective') <div class="error-text">{{ $message }}</div> @enderror
-                    </div>
-
-                    <div class="field">
                         <label for="memLineKind">Resource kind</label>
                         <input id="memLineKind" type="text" wire:model="lineForm.resource_kind" placeholder="e.g. MOOE">
                         @error('lineForm.resource_kind') <div class="error-text">{{ $message }}</div> @enderror
                     </div>
-
-                    <div class="field">
-                        <label for="memLineMovs">Activity MOVs</label>
-                        <input id="memLineMovs" type="text" wire:model="lineForm.activity_movs" placeholder="e.g. PO and RIS">
-                        @error('lineForm.activity_movs') <div class="error-text">{{ $message }}</div> @enderror
-                    </div>
-
-                    <div class="field">
-                        <label for="memLineAccount">Account title / code</label>
-                        <div class="mem-account">
-                            <input
-                                id="memLineAccount"
-                                type="text"
-                                wire:model="lineForm.account_title"
-                                placeholder="Account title"
-                            >
-                            <button
-                                type="button"
-                                class="mem-account-btn"
-                                wire:click="openAccountPicker('form')"
-                                title="Pick from Account Classifications"
-                            >
-                                <x-icon name="search" :size="14" />
-                            </button>
-                        </div>
-                        <input type="text" wire:model="lineForm.account_code" placeholder="Object code" aria-label="Account code">
-                        @error('lineForm.account_title') <div class="error-text">{{ $message }}</div> @enderror
-                        @error('lineForm.account_code') <div class="error-text">{{ $message }}</div> @enderror
-                    </div>
+                    
 
                     {{-- Quantity, unit, unit cost and the computed line total sit
                          on one row — they are read together. --}}
@@ -417,6 +423,83 @@
                         </div>
                     </div>
 
+                    {{-- Account title / code: one searchable dropdown. Typing
+                         filters the active account classifications by title or
+                         object code; picking one fills the title, the code and
+                         the classification link. Free text still works — if
+                         nothing is picked, what was typed becomes the title. --}}
+                    <div class="field">
+                        <label for="memLineAccount">Account title / code</label>
+
+                        <div class="mem-combo" x-data="{ open: false }" @click.outside="open = false">
+                            <span class="mem-combo__search" aria-hidden="true">
+                                <x-icon name="search" :size="15" />
+                            </span>
+
+                            <input
+                                id="memLineAccount"
+                                type="text"
+                                autocomplete="off"
+                                role="combobox"
+                                aria-autocomplete="list"
+                                aria-controls="memAccountOptions"
+                                :aria-expanded="String(open)"
+                                wire:model.live.debounce.300ms="accountSearch"
+                                placeholder="Search title or object code…"
+                                @focus="open = true"
+                                @keydown.escape="open = false"
+                                @class(['error' => $errors->has('lineForm.account_title')])
+                            >
+
+                            @if (trim($accountSearch) !== '')
+                                <button
+                                    type="button"
+                                    class="mem-combo__clear"
+                                    wire:click="clearAccount"
+                                    aria-label="Clear account"
+                                    title="Clear"
+                                >
+                                    <x-icon name="x" :size="14" />
+                                </button>
+                            @endif
+
+                            {{-- The open/closed state is a class (like the
+                                 notifications panel), so Livewire re-renders
+                                 never resurrect the menu mid-typing. --}}
+                            <div
+                                id="memAccountOptions"
+                                class="mem-combo__menu"
+                                role="listbox"
+                                :class="open ? 'open' : ''"
+                            >
+                                @forelse ($this->accountOptions as $option)
+                                    <button
+                                        type="button"
+                                        role="option"
+                                        class="mem-combo__option"
+                                        wire:key="ac-opt-{{ $option->id }}"
+                                        wire:click="chooseAccount({{ $option->id }})"
+                                        @click="open = false"
+                                    >
+                                        <span class="mem-combo__option-title">{{ $option->account_title }}</span>
+                                        <span class="mem-combo__option-meta">
+                                            <span class="ac-code">{{ $option->uacs_object_code }}</span>
+                                            @if ($option->rca_code)
+                                                <span class="mem-combo__rca">RCA {{ $option->rca_code }}</span>
+                                            @endif
+                                        </span>
+                                    </button>
+                                @empty
+                                    <div class="mem-combo__empty">No matching account classifications.</div>
+                                @endforelse
+                            </div>
+                        </div>
+
+                        <input type="text" wire:model="lineForm.account_code" placeholder="Object code" aria-label="Account code">
+                        @error('lineForm.account_title') <div class="error-text">{{ $message }}</div> @enderror
+                        @error('lineForm.account_code') <div class="error-text">{{ $message }}</div> @enderror
+                    </div>
+
                     <div class="field">
                         <label for="memLineFunding">Funding source</label>
                         <input id="memLineFunding" type="text" wire:model="lineForm.funding_source" placeholder="e.g. MOOE">
@@ -428,6 +511,12 @@
                         <input id="memLineOrg" type="text" wire:model="lineForm.organizational_classification" placeholder="e.g. School">
                         @error('lineForm.organizational_classification') <div class="error-text">{{ $message }}</div> @enderror
                     </div>
+
+                     <div class="field">
+                        <label for="memLineMovs">Activity MOVs</label>
+                        <input id="memLineMovs" type="text" wire:model="lineForm.activity_movs" placeholder="e.g. PO and RIS">
+                        @error('lineForm.activity_movs') <div class="error-text">{{ $message }}</div> @enderror
+                    </div>
                 </div>
 
                 <div class="modal-actions">
@@ -438,58 +527,6 @@
                     </button>
                 </div>
             </form>
-        </div>
-    </div>
-
-    {{-- ACCOUNT PICKER --}}
-    <div class="modal-backdrop {{ $accountPickerKey !== null ? 'is-open' : '' }}"
-         @if ($accountPickerKey !== null) @click="self && $wire.closeAccountPicker()" @endif
-         role="presentation">
-        <div class="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="memAccountTitle" @click.stop>
-            <div class="modal-head">
-                <h2 id="memAccountTitle">Pick an Account Classification</h2>
-                <button type="button" class="modal-close" wire:click="closeAccountPicker" aria-label="Close" title="Close">×</button>
-            </div>
-
-            <div class="modal-form">
-                <div class="field">
-                    <input
-                        type="search"
-                        placeholder="Search title or code…"
-                        wire:model.live.debounce.300ms="accountSearch"
-                        aria-label="Search account classifications"
-                    >
-                </div>
-
-                <div class="table-wrap ac-import-preview">
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th scope="col">Account Title</th>
-                                <th scope="col">RCA</th>
-                                <th scope="col">Object Code</th>
-                                <th scope="col"></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @forelse ($this->accountOptions as $option)
-                                <tr wire:key="ac-opt-{{ $option->id }}">
-                                    <td><span class="cell-strong">{{ $option->account_title }}</span></td>
-                                    <td><span class="ac-code">{{ $option->rca_code }}</span></td>
-                                    <td><span class="ac-code">{{ $option->uacs_object_code }}</span></td>
-                                    <td>
-                                        <button type="button" class="ac-import-btn" wire:click="chooseAccount({{ $option->id }})">Use</button>
-                                    </td>
-                                </tr>
-                            @empty
-                                <tr>
-                                    <td colspan="4" class="table-empty">No matching account classifications.</td>
-                                </tr>
-                            @endforelse
-                        </tbody>
-                    </table>
-                </div>
-            </div>
         </div>
     </div>
 

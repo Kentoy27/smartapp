@@ -63,14 +63,25 @@ class InspectWfpTemplate extends Command
 
         if ($layout['months'] !== []) {
             $this->newLine();
-            $this->line('  Month columns:');
+            $this->line('  Financial month columns:');
 
             foreach ($layout['months'] as $number => $letter) {
-                $this->line(sprintf('    %-3d %s', $number, $letter));
+                $code = $layout['code_columns_by_month'][$number] ?? '—';
+
+                $this->line(sprintf('    %-3d %-4s object code %s', $number, $letter, $code));
             }
         } elseif ((bool) config('wfp.template.months.enabled', false)) {
             $this->newLine();
-            $this->components->warn('Month columns are enabled but none were found in the header row.');
+            $this->components->warn('Month columns are enabled but none were found in the header block.');
+        }
+
+        if ($layout['physical_months'] !== []) {
+            $this->newLine();
+            $this->line('  Physical month columns:');
+
+            foreach ($layout['physical_months'] as $number => $letter) {
+                $this->line(sprintf('    %-3d %s', $number, $letter));
+            }
         }
 
         return self::SUCCESS;

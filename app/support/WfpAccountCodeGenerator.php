@@ -78,14 +78,59 @@ final class WfpAccountCodeGenerator
 
     /**
      * The generated workbook bytes: the official template patched with the
-     * account-code rows.
+     * account-code rows and stamped with the account's school name.
+     *
+     * The school's name goes into the template's own title-block cell (A6,
+     * under the Schools Division line) so the completed form identifies itself
+     * and a re-upload is recognised (WfpSpreadsheet::detectSchoolName).
      */
-    public static function bytes(): string
+    public static function bytes(?User $user = null): string
     {
-        return WfpTemplateFiller::fill(
+        $layout = WfpTemplate::inspect();
+
+        $bytes = WfpTemplateFiller::fill(
             WfpTemplate::bytes(),
-            self::rows(),
-            WfpTemplate::inspect(),
+            self::rowsFor($layout),
+            $layout,
+        );
+
+        $school = trim((string) ($user?->school?->name ?? ''));
+        $cell = trim((string) config('wfp.template.school_name_cell', 'A6'));
+
+        if ($school === '' || $cell === '') {
+            return $bytes;
+        }
+
+        return WfpTemplateFiller::writeCells($bytes, [$cell => $school]);
+    }
+
+    /**
+     * The rows as the given layout needs them.
+     *
+     * The FY-2026 form has no "Account Title" column: its own convention is to
+     * name the account ("Travelling Expenses-Local", "Other Professional
+     * Services") in the first column, above the activities that belong to it.
+     * So when the form has nowhere else to put the title, it goes into the
+     * Objectives column — a row named only by its object code would tell the
+     * School Head nothing.
+     *
+     * @param  array<string, mixed>  $layout
+     * @return array<int, array<string, mixed>>
+     */
+    private static function rowsFor(array $layout): array
+    {
+        $rows = self::rows();
+
+        if (isset($layout['columns']['account_title'])) {
+            return $rows;
+        }
+
+        return array_map(
+            static fn (array $row): array => [
+                'objective' => $row['account_title'],
+                'account_code' => $row['account_code'],
+            ],
+            $rows,
         );
     }
 

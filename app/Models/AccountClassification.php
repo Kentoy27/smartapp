@@ -37,11 +37,13 @@ class AccountClassification extends Model
         'uacs_sub_object_code',
         'uacs_object_code',
         'covering_ppas',
+        'sort_order',
         'is_active',
     ];
 
     protected $casts = [
         'is_active' => 'boolean',
+        'sort_order' => 'integer',
     ];
 
     public function audits(): HasMany

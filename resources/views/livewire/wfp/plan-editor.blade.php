@@ -50,6 +50,55 @@
         </div>
     @endif
 
+    {{-- VALIDATION — the same report `php artisan wfp:validate` prints, so the
+         SH sees the totals reconcile (and any unknown codes) without the CLI. --}}
+    @php($validation = $this->validation)
+    <details class="card mem-validation" @if (! $validation['passed']) open @endif>
+        <summary class="mem-validation__summary">
+            <span class="cell-strong">Validation</span>
+            @if ($validation['passed'])
+                <span class="badge">Totals reconcile</span>
+            @else
+                <span class="badge badge-muted">Issues found</span>
+            @endif
+            <span class="mem-validation__hint">{{ $validation['missing']['count'] }} row(s) to enrich</span>
+        </summary>
+
+        <div class="mem-validation__body">
+            <p>
+                Totals — matrix <strong>{{ number_format($validation['grand']['matrix'], 2) }}</strong>
+                vs plan <strong>{{ number_format($validation['grand']['plan'], 2) }}</strong>:
+                {{ $validation['grand']['matches'] ? 'match' : 'MISMATCH' }}.
+            </p>
+
+            @if ($validation['unknownCodes'] !== [])
+                <p>
+                    <strong>Account codes not on the master list:</strong>
+                    @foreach ($validation['unknownCodes'] as $row)
+                        <span class="ac-code">{{ $row['code'] }}</span> ({{ $row['count'] }})
+                    @endforeach
+                </p>
+            @endif
+
+            <p>
+                Missing enrichment: {{ $validation['missing']['major_output'] }} without a Major Output,
+                {{ $validation['missing']['performance_indicator'] }} without a Performance Indicator.
+            </p>
+
+            @if ($validation['nearDuplicates'] !== [])
+                <p><strong>Near-duplicate activities (warn only):</strong></p>
+                <ul class="mem-stale-list">
+                    @foreach ($validation['nearDuplicates'] as $pair)
+                        <li>
+                            “{{ \Illuminate\Support\Str::limit($pair['a'], 60) }}”
+                            ~ “{{ \Illuminate\Support\Str::limit($pair['b'], 60) }}”
+                        </li>
+                    @endforeach
+                </ul>
+            @endif
+        </div>
+    </details>
+
     <div class="mem-actions mem-actions--top">
         <div class="mem-actions__group">
             <button type="button" class="btn-ghost" wire:click="save" wire:loading.attr="disabled" wire:target="save">
