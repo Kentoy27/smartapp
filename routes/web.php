@@ -71,12 +71,10 @@ Route::middleware('auth')->group(function () {
         $user = Auth::user();
         abort_unless($user instanceof User && $user->hasSignature(), 404);
 
-<<<<<<< HEAD
         // The account's own file, via the account: the headers (inline, no
         // shared caching) and the row-only path rule live in
         // User::signatureImageResponse(), shared with the OPCRF route below.
         return $user->signatureImageResponse();
-=======
         /** @var FilesystemAdapter $disk */
         $disk = Storage::disk('local');
 
@@ -102,7 +100,6 @@ Route::middleware('auth')->group(function () {
         $response->headers->set('Cache-Control', 'private, no-store, max-age=0');
 
         return $response;
->>>>>>> feature/wfp
     })->name('profile.signature');
 
     Route::get('/app', function () {
@@ -300,7 +297,6 @@ Route::middleware('auth')->group(function () {
         abort_if($user->hasAdminAccess(), 404);
         abort_unless(is_file(OpcrfPartOne::templatePath()), 404);
 
-<<<<<<< HEAD
         // The full workbook is also needed during the shared Parts 2–4 term.
         // Re-check both entry points here; the dashboard and Part pages are
         // only conveniences, not authorization boundaries.
@@ -308,13 +304,11 @@ Route::middleware('auth')->group(function () {
         $includeAllParts = OpcrfPartOne::fullTemplateAvailable();
 
         if (! $partOneAccessible && ! $includeAllParts) {
-=======
         // The personalized template IS Part 1, so it answers to Part 1's
         // schedule. Re-checked here, on the server: the dashboard's button is
         // only a convenience, and a staff member outside Part 1's window must
         // not be able to fetch the form by typing the URL.
         if (! OpcrfAccess::canAccess($user, OpcrfSchedule::PART_ONE)) {
->>>>>>> feature/wfp
             $state = OpcrfAccess::partState($user, OpcrfSchedule::PART_ONE);
 
             return redirect()
