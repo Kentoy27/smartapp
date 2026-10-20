@@ -22,6 +22,7 @@ class DashboardController extends Controller
 
         return view('home', [
             'user' => $user,
+            'isBudgetReviewer' => $user?->isBudgetRole() ?? false,
             // The WFP Template card is for the School Head (SH) role only —
             // no card for superadmins, SDS viewers, or anyone else.
             'wfpTemplate' => (! $hasAdminAccess && $user?->canAccessWfp())

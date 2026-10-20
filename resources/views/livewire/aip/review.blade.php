@@ -65,23 +65,25 @@
                                         <span>Review</span>
                                     </span>
                                 </button>
-                                <button
-                                    type="button"
-                                    class="users-action users-action--danger"
-                                    x-data
-                                    @click="
-                                        window.smartAlert.confirmDelete({
-                                            title: 'Delete this AIP submission?',
-                                            text: 'This will permanently remove the submitted plan, its projects, activities, versions, and review history. You can not undo this action.',
-                                            confirmButtonText: 'Yes, delete'
-                                        }).then(r => { if (r.isConfirmed) $wire.deletePlan({{ $plan->id }}); });
-                                    "
-                                >
-                                    <span class="users-action-inner">
-                                        <x-icon name="trash" :size="14" />
-                                        <span>Delete</span>
-                                    </span>
-                                </button>
+                                @if (auth()->user()?->hasAdminAccess())
+                                    <button
+                                        type="button"
+                                        class="users-action users-action--danger"
+                                        x-data
+                                        @click="
+                                            window.smartAlert.confirmDelete({
+                                                title: 'Delete this AIP submission?',
+                                                text: 'This will permanently remove the submitted plan, its projects, activities, versions, and review history. You can not undo this action.',
+                                                confirmButtonText: 'Yes, delete'
+                                            }).then(r => { if (r.isConfirmed) $wire.deletePlan({{ $plan->id }}); });
+                                        "
+                                    >
+                                        <span class="users-action-inner">
+                                            <x-icon name="trash" :size="14" />
+                                            <span>Delete</span>
+                                        </span>
+                                    </button>
+                                @endif
                             </td>
                         </tr>
                     @empty

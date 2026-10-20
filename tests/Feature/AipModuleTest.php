@@ -295,6 +295,34 @@ class AipModuleTest extends TestCase
         $this->assertSame($admin->id, $plan->assigned_to, 'the revision routes back to the reviewing superadmin');
     }
 
+    public function test_budget_role_can_review_but_cannot_delete_or_author_aips(): void
+    {
+        $sh = $this->schoolHead();
+        $budget = User::factory()->create([
+            'role' => 'budget',
+            'is_superadmin' => false,
+        ]);
+        $plan = $this->draftPlan($sh);
+        $plan->submit($sh);
+
+        $review = Livewire::actingAs($budget)
+            ->test(AipReview::class)
+            ->assertSee($plan->label())
+            ->assertDontSee('Delete')
+            ->call('openReview', $plan->id)
+            ->assertSet('showReview', true)
+            ->call('approve')
+            ->assertHasNoErrors();
+
+        $this->assertSame(AipPlan::STATUS_APPROVED, $plan->fresh()->status);
+        $review->call('deletePlan', $plan->id)->assertNotFound();
+        $this->assertDatabaseHas('aip_plans', ['id' => $plan->id]);
+
+        $this->actingAs($budget)
+            ->get(route('aip.plans.edit', ['plan' => $plan->id]))
+            ->assertNotFound();
+    }
+
     public function test_a_draft_is_invisible_to_reviewers_until_it_is_submitted(): void
     {
         $sh = $this->schoolHead();

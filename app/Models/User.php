@@ -59,6 +59,23 @@ class User extends Authenticatable
         return $this->is_superadmin || $this->role === 'administrator';
     }
 
+    public function isBudgetRole(): bool
+    {
+        return ! $this->is_superadmin && $this->role === 'budget';
+    }
+
+    /** Whether this account may review submitted AIP plans. */
+    public function canReviewAip(): bool
+    {
+        return $this->hasAdminAccess() || $this->isBudgetRole();
+    }
+
+    /** Whether this account may read and download submitted WFP workbooks. */
+    public function canReviewWfp(): bool
+    {
+        return $this->hasAdminAccess() || $this->isBudgetRole();
+    }
+
     /** Whether this account may manage accounts and school organization. */
     public function canManageUsersAndSchools(): bool
     {
@@ -73,6 +90,7 @@ class User extends Authenticatable
 
         return match ($this->role) {
             'administrator' => 'Administrator',
+            'budget' => 'Budget',
             'viewer' => 'SDS Viewer',
             default => 'SH',
         };

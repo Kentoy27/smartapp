@@ -6,16 +6,18 @@
     <section class="dashboard-welcome{{ $user->hasAdminAccess() ? ' dashboard-welcome--admin' : '' }}">
         <div class="dashboard-welcome__copy">
             <span class="dashboard-welcome__eyebrow">
-                {{ $user->hasAdminAccess() ? 'ADMIN WORKSPACE' : 'STAFF WORKSPACE' }}
+                {{ $user->hasAdminAccess() ? 'ADMIN WORKSPACE' : ($isBudgetReviewer ? 'BUDGET REVIEW WORKSPACE' : 'STAFF WORKSPACE') }}
             </span>
             <h1>Welcome back, {{ $user->username }}</h1>
             <p>
                 {{ $user->hasAdminAccess()
                     ? 'Review submissions and keep your school data moving.'
-                    : 'Your performance plan and financial plan, together in one place.' }}
+                    : ($isBudgetReviewer
+                        ? 'Review submitted WFP and AIP plans.'
+                        : 'Your performance plan and financial plan, together in one place.') }}
             </p>
         </div>
-        @unless ($user->hasAdminAccess())
+        @if (! $user->hasAdminAccess() && ! $isBudgetReviewer)
             <a href="{{ route('mov.index') }}" class="dashboard-welcome__link" wire:navigate>
                 <x-icon name="upload" :size="16" />
                 <span>Open MOV checklist</span>
@@ -32,6 +34,23 @@
              half of the WfpUpload flow on /wfp, listed here so the
              superadmin sees who has handed their plan in. --}}
         <livewire:wfp-uploads-list />
+    @elseif ($isBudgetReviewer)
+        <div class="staff-dashboard-grid">
+            <section class="staff-dashboard-panel" aria-labelledby="dashboard-budget-heading">
+                <div class="staff-dashboard-panel__intro">
+                    <span class="staff-dashboard-panel__step">01</span>
+                    <div>
+                        <h2 id="dashboard-budget-heading">Budget review</h2>
+                        <p>Review submitted financial plans. This role cannot edit or submit school plans.</p>
+                    </div>
+                </div>
+                <livewire:wfp-uploads-list />
+                <a href="{{ route('aip.review') }}" class="dashboard-plan-card__link" wire:navigate>
+                    <x-icon name="eye" :size="14" />
+                    Review submitted AIP plans <span aria-hidden="true">→</span>
+                </a>
+            </section>
+        </div>
     @else
         <div class="staff-dashboard-grid{{ $wfpTemplate !== null ? ' has-wfp' : '' }}">
             <section class="staff-dashboard-panel" aria-labelledby="dashboard-opcrf-heading">

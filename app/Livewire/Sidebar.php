@@ -203,14 +203,16 @@ class Sidebar extends Component
             ],
         ];
 
-        $items[] = [
-            'label' => 'APP',
-            'route' => 'procurement.app.index',
-            'path' => 'procurement-app',
-            'icon' => 'file-spreadsheet',
-            'section' => 'Files',
-            'order' => 12,
-        ];
+        if (! Auth::user()?->isBudgetRole()) {
+            $items[] = [
+                'label' => 'APP',
+                'route' => 'procurement.app.index',
+                'path' => 'procurement-app',
+                'icon' => 'file-spreadsheet',
+                'section' => 'Files',
+                'order' => 12,
+            ];
+        }
 
         if (Auth::user()?->hasAdminAccess()) {
             $items[] = [
@@ -298,6 +300,25 @@ class Sidebar extends Component
                     'order' => 22,
                 ];
             }
+        } elseif (Auth::user()?->isBudgetRole()) {
+            $items[] = [
+                'label' => 'Review AIP',
+                'route' => 'aip.review',
+                'path' => 'aip-review',
+                'icon' => 'eye',
+                'badge' => $this->aipCount,
+                'badge_title' => '%d plans awaiting your review',
+                'section' => 'Files',
+                'order' => 13,
+            ];
+            $items[] = [
+                'label' => 'WFP Uploads',
+                'route' => 'wfp.submissions.index',
+                'path' => 'wfp-submissions',
+                'icon' => 'chart-column',
+                'section' => 'Files',
+                'order' => 14,
+            ];
         } else {
             // Opcrf is a staff-facing page: regular users only.
             $items[] = [
@@ -694,7 +715,7 @@ class Sidebar extends Component
     #[On('aip-plan-reviewed')]
     public function refreshAipBadge(): void
     {
-        if (Auth::user()?->hasAdminAccess()) {
+        if (Auth::user()?->canReviewAip()) {
             $this->aipCount = $this->pendingAipPlans();
         }
     }
@@ -730,10 +751,14 @@ class Sidebar extends Component
         if (Auth::user()?->hasAdminAccess()) {
             $this->usersCount = User::count();
             $this->opcrfCount = $this->pendingSubmissions();
-            $this->aipCount = $this->pendingAipPlans();
         } else {
             $this->usersCount = null;
             $this->opcrfCount = null;
+        }
+
+        if (Auth::user()?->canReviewAip()) {
+            $this->aipCount = $this->pendingAipPlans();
+        } else {
             $this->aipCount = null;
         }
 

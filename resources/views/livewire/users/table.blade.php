@@ -222,6 +222,14 @@
                             </label>
 
                             <label class="role-option">
+                                <input type="radio" name="selectedRole" value="budget" wire:model="selectedRole">
+                                <span class="role-option-body">
+                                    <strong>Budget</strong>
+                                    <small>Review submitted WFP and AIP plans only</small>
+                                </span>
+                            </label>
+
+                            <label class="role-option">
                                 <input type="radio" name="selectedRole" value="administrator" wire:model="selectedRole">
                                 <span class="role-option-body">
                                     <strong>Administrator</strong>
@@ -324,6 +332,19 @@
                                 <span class="role-option-body">
                                     <strong>SDS Viewer</strong>
                                     <small>View users only, no account changes</small>
+                                </span>
+                            </label>
+
+                            <label class="role-option">
+                                <input
+                                    type="radio"
+                                    name="role"
+                                    value="budget"
+                                    wire:model.live="role"
+                                >
+                                <span class="role-option-body">
+                                    <strong>Budget</strong>
+                                    <small>Review submitted WFP and AIP plans only</small>
                                 </span>
                             </label>
 

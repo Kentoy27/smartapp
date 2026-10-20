@@ -163,7 +163,7 @@ class UsersTable extends Component
             'password' => $editing || $autoPassword
                 ? ['nullable', 'string', 'min:8']
                 : ['required', 'string', 'min:8'],
-            'role' => ['required', Rule::in(['user', 'viewer', 'administrator', 'superadmin'])],
+            'role' => ['required', Rule::in(['user', 'viewer', 'budget', 'administrator', 'superadmin'])],
         ];
     }
 
@@ -249,7 +249,7 @@ class UsersTable extends Component
         abort_unless($this->canAssignRoles(), 403);
 
         $validated = $this->validate([
-            'selectedRole' => ['required', Rule::in(['user', 'viewer', 'administrator', 'superadmin'])],
+            'selectedRole' => ['required', Rule::in(['user', 'viewer', 'budget', 'administrator', 'superadmin'])],
         ]);
 
         $user = User::findOrFail($this->roleUserId);
@@ -264,6 +264,7 @@ class UsersTable extends Component
         $role = match ($validated['selectedRole']) {
             'superadmin' => 'Super Admin',
             'administrator' => 'Administrator',
+            'budget' => 'Budget',
             'viewer' => 'SDS Viewer',
             default => 'SH',
         };
@@ -330,7 +331,7 @@ class UsersTable extends Component
 
     public function setRole(string $role): void
     {
-        if (! in_array($role, ['user', 'viewer', 'administrator', 'superadmin'], true)) {
+        if (! in_array($role, ['user', 'viewer', 'budget', 'administrator', 'superadmin'], true)) {
             return;
         }
 
@@ -423,6 +424,7 @@ class UsersTable extends Component
         $roleDescription = match ($user->role) {
             'superadmin' => 'a super admin',
             'administrator' => 'an administrator',
+            'budget' => 'a Budget user',
             'viewer' => 'a viewer',
             default => 'a user',
         };

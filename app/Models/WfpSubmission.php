@@ -118,7 +118,7 @@ class WfpSubmission extends Model
             return false;
         }
 
-        return $user->hasAdminAccess() || $this->user_id === $user->id;
+        return $user->canReviewWfp() || $this->user_id === $user->id;
     }
 
     /**

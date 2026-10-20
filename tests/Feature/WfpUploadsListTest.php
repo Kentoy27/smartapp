@@ -240,6 +240,33 @@ class WfpUploadsListTest extends TestCase
             ->assertSee('listed-wfp.xlsx');
     }
 
+    public function test_budget_role_can_review_wfp_uploads_and_download_them_but_cannot_open_authoring(): void
+    {
+        Storage::fake('local');
+        $head = $this->schoolHead('schoolhead', 'Smoke School');
+        $submission = $this->storedSubmission($head, 'budget-review-wfp.xlsx');
+        $budget = User::factory()->create(['role' => 'budget', 'is_superadmin' => false]);
+
+        $items = collect(Livewire::actingAs($budget)->test(Sidebar::class)->instance()->items());
+        $this->assertSame(
+            'wfp.submissions.index',
+            $items->firstWhere('label', 'WFP Uploads')['route']
+        );
+        $this->assertNull($items->firstWhere('label', 'WFP'));
+
+        $this->actingAs($budget)
+            ->get(route('wfp.submissions.index'))
+            ->assertOk()
+            ->assertSee('WFP Uploads')
+            ->assertSee('budget-review-wfp.xlsx');
+
+        $this->get(route('wfp.submission.download', $submission))
+            ->assertOk()
+            ->assertDownload('budget-review-wfp - WFP.xlsx');
+
+        $this->get(route('wfp.index'))->assertNotFound();
+    }
+
     public function test_staff_do_not_get_the_wfp_sidebar_item_or_the_admin_page(): void
     {
         $head = $this->schoolHead('schoolhead', 'Smoke School');

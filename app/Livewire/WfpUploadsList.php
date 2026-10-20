@@ -25,9 +25,7 @@ class WfpUploadsList extends Component
 {
     public function mount(): void
     {
-        // The list spans every school's uploads: numbers and file names that
-        // staff must never see, so a non-admin gets a 404 before rendering.
-        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+        abort_unless(Auth::user()?->canReviewWfp(), 404);
     }
 
     /**

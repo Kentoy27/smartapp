@@ -103,7 +103,7 @@ Route::middleware('auth')->group(function () {
     // anyway, but the order makes the intent explicit).
     Route::get('/aip-review', function () {
         $user = Auth::user();
-        abort_unless($user instanceof User && $user->hasAdminAccess(), 404);
+        abort_unless($user instanceof User && $user->canReviewAip(), 404);
 
         return view('aip.review');
     })->name('aip.review');
@@ -499,7 +499,7 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/wfp/submissions', function () {
         $user = Auth::user();
-        abort_unless($user instanceof User && $user->hasAdminAccess(), 404);
+        abort_unless($user instanceof User && $user->canReviewWfp(), 404);
 
         return view('wfp.submissions');
     })->name('wfp.submissions.index');

@@ -254,7 +254,7 @@ class AipPlan extends Model
      */
     public function isAssignedTo(?User $user): bool
     {
-        if ($user === null || ! $user->hasAdminAccess()) {
+        if ($user === null || ! $user->canReviewAip()) {
             return false;
         }
 
@@ -274,7 +274,7 @@ class AipPlan extends Model
             return false;
         }
 
-        if ($user->hasAdminAccess()) {
+        if ($user->canReviewAip()) {
             return $this->isAssignedTo($user);
         }
 
@@ -283,7 +283,7 @@ class AipPlan extends Model
 
     public function canBeReviewedBy(?User $user): bool
     {
-        return $user !== null && $user->hasAdminAccess() && $this->isAssignedTo($user);
+        return $user !== null && $user->canReviewAip() && $this->isAssignedTo($user);
     }
 
     /**
@@ -304,7 +304,7 @@ class AipPlan extends Model
             return true;
         }
 
-        if (! $user->hasAdminAccess() || $this->status === self::STATUS_DRAFT) {
+        if (! $user->canReviewAip() || $this->status === self::STATUS_DRAFT) {
             return false;
         }
 
@@ -319,7 +319,7 @@ class AipPlan extends Model
      */
     public function scopeVisibleTo(Builder $query, User $reviewer): Builder
     {
-        if ($reviewer->role === 'administrator' && ! $reviewer->is_superadmin) {
+        if ($reviewer->canReviewAip() && ! $reviewer->is_superadmin) {
             return $query;
         }
 
@@ -340,7 +340,7 @@ class AipPlan extends Model
     {
         $query = $query->visibleTo($reviewer);
 
-        if (! ($reviewer->role === 'administrator' && ! $reviewer->is_superadmin)) {
+        if (! ($reviewer->canReviewAip() && ! $reviewer->is_superadmin)) {
             $query->where(function (Builder $held) use ($reviewer): void {
                 $held->whereNull('assigned_to')->orWhere('assigned_to', $reviewer->id);
             });

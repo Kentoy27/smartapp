@@ -74,6 +74,38 @@ class UsersTableTest extends TestCase
         $target->refresh();
         $this->assertFalse($target->is_superadmin);
         $this->assertSame('viewer', $target->role);
+
+        Livewire::actingAs($admin)
+            ->test('users-table')
+            ->call('openRoleModal', $target->id)
+            ->set('selectedRole', 'budget')
+            ->call('updateRole')
+            ->assertHasNoErrors();
+
+        $this->assertSame('budget', $target->refresh()->role);
+        $this->assertSame('Budget', $target->roleLabel());
+        $this->assertFalse($target->is_superadmin);
+    }
+
+    public function test_administrator_can_create_a_budget_account(): void
+    {
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
+
+        Livewire::actingAs($admin)
+            ->test('users-table')
+            ->call('openCreateModal')
+            ->set('role', 'budget')
+            ->set('name', 'Budget Reviewer')
+            ->set('username', 'budget_reviewer')
+            ->set('email', 'budget@example.com')
+            ->set('password', 'password123')
+            ->call('saveUser')
+            ->assertHasNoErrors();
+
+        $budget = User::where('username', 'budget_reviewer')->firstOrFail();
+        $this->assertSame('budget', $budget->role);
+        $this->assertNull($budget->school_id);
+        $this->assertFalse($budget->is_superadmin);
     }
 
     public function test_users_can_be_deleted_but_not_yourself(): void

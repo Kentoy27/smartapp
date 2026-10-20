@@ -48,9 +48,7 @@ class AipReview extends Component
 
     public function mount(): void
     {
-        // Superadmin-only: the table lists every school's plans, so a regular
-        // user must never mount it.
-        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+        abort_unless(Auth::user()?->canReviewAip(), 404);
     }
 
     /* ------------------------------------------------------------ computed */
@@ -76,7 +74,7 @@ class AipReview extends Component
     #[Computed]
     public function reviewPlan(): ?AipPlan
     {
-        if (! Auth::user()?->hasAdminAccess() || $this->reviewId === null) {
+        if (! Auth::user()?->canReviewAip() || $this->reviewId === null) {
             return null;
         }
 
@@ -147,7 +145,7 @@ class AipReview extends Component
 
     public function openReview(int $planId): void
     {
-        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+        abort_unless(Auth::user()?->canReviewAip(), 404);
 
         // Routing is the authorization boundary: a plan routed to another
         // reviewer must not open, not even by a crafted call.
@@ -186,7 +184,7 @@ class AipReview extends Component
 
     public function approve(): void
     {
-        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+        abort_unless(Auth::user()?->canReviewAip(), 404);
 
         $plan = $this->reviewPlan;
 
