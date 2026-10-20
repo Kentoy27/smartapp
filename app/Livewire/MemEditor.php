@@ -412,6 +412,72 @@ class MemEditor extends Component
     }
 
     /**
+     * Put a line at a new position inside its own section, after the SH
+     * drags it. The list on screen is one section, so `position` is the
+     * row's zero-based index among that section's lines; the section is
+     * derived from the line itself rather than trusted from the browser.
+     * Only that section's slots move — the other section keeps its rows,
+     * and their places, untouched.
+     *
+     * The new order is written straight away (the same write Save Draft
+     * uses), because a sorted list that is lost the moment the SH opens
+     * another month is not sorted at all.
+     */
+    public function reorderRow(string $key, int $position): void
+    {
+        $this->guard();
+
+        $section = null;
+        foreach ($this->items as $row) {
+            if (($row['_key'] ?? null) === $key) {
+                $section = (string) ($row['section'] ?? 'operations');
+                break;
+            }
+        }
+
+        if ($section === null) {
+            return; // a crafted or stale key: nothing to move
+        }
+
+        $slots = [];
+        $rows = [];
+
+        foreach ($this->items as $index => $row) {
+            if ((string) ($row['section'] ?? 'operations') === $section) {
+                $slots[] = $index;
+                $rows[] = $row;
+            }
+        }
+
+        $from = null;
+        foreach ($rows as $index => $row) {
+            if (($row['_key'] ?? null) === $key) {
+                $from = $index;
+                break;
+            }
+        }
+
+        if ($from === null) {
+            return;
+        }
+
+        $position = max(0, min($position, count($rows) - 1));
+
+        if ($position === $from) {
+            return;
+        }
+
+        $moved = array_splice($rows, $from, 1);
+        array_splice($rows, $position, 0, $moved);
+
+        foreach ($slots as $slot => $index) {
+            $this->items[$index] = $rows[$slot];
+        }
+
+        $this->persist($this->matrixStatus);
+    }
+
+    /**
      * Move a line to the other section (Operations ↔ Project). The grid
      * groups by section rather than carrying a per-row dropdown, so this is
      * how a line changes section — one click, no list to open.
@@ -863,8 +929,11 @@ class MemEditor extends Component
      * The twelve months of this matrix's planning year for the SH's own school,
      * in calendar order — the month tab strip at the top of the editor. The
      * month being edited is flagged (`current`); a month whose matrix is missing
-     * (deleted) carries no id and renders inactive. One query for the whole
-     * year, so drawing the strip costs nothing.
+     * (deleted) carries no id and renders inactive. Each tab also carries that
+     * month's total: the month being edited reads the unsaved grid (so it agrees
+     * with the summary strip), the others read their persisted lines. A month
+     * with no lines has no total (null) rather than a misleading zero. One query
+     * for the whole year, so drawing the strip costs nothing.
      *
      * @return array<int, array<string, mixed>>
      */
@@ -877,6 +946,7 @@ class MemEditor extends Component
             ->where('school_id', $matrix->school_id)
             ->where('year', $matrix->year)
             ->withCount('items')
+            ->withSum('items', 'calculated_total')
             ->get()
             ->keyBy('month');
 
@@ -884,6 +954,7 @@ class MemEditor extends Component
 
         foreach (MonthlyExpenditureMatrix::MONTH_ABBREVIATIONS as $number => $abbreviation) {
             $sibling = $siblings->get($number);
+            $isCurrent = $number === (int) $matrix->month;
 
             $months[] = [
                 'month' => $number,
@@ -893,7 +964,12 @@ class MemEditor extends Component
                     : $abbreviation.' '.$matrix->year,
                 'id' => $sibling instanceof MonthlyExpenditureMatrix ? (int) $sibling->id : null,
                 'status' => $sibling instanceof MonthlyExpenditureMatrix ? $sibling->status : null,
-                'current' => $number === (int) $matrix->month,
+                'current' => $isCurrent,
+                'total' => $isCurrent
+                    ? ($this->items === [] ? null : $this->totals['grand'])
+                    : ($sibling instanceof MonthlyExpenditureMatrix && $sibling->items_count > 0
+                        ? (float) ($sibling->items_sum_calculated_total ?? 0)
+                        : null),
             ];
         }
 

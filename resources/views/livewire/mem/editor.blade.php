@@ -34,15 +34,28 @@
          edited is marked; the others link straight to their own matrix. A month
          that is validated or finalized carries a small status dot, so the year's
          progress reads at a glance; a month whose matrix was deleted is
-         inactive. --}}
+         inactive. Each tab also carries that month's total — the same figure as
+         the monthly total at the bottom — so the year's spending reads without
+         opening the months one by one. --}}
     <nav class="mem-month-tabs" aria-label="Months of CY {{ $matrix->year }}">
         @foreach ($this->months as $tab)
+            @php($tabTotal = $tab['total'] !== null ? number_format($tab['total'], 2) : null)
+
             @if ($tab['current'])
                 <span class="mem-month-tab is-current" aria-current="page" title="{{ $tab['label'] }}">
-                    <span class="mem-month-tab__abbr">{{ $tab['abbr'] }}</span>
-                    @if (in_array($tab['status'], ['validated', 'finalized'], true))
-                        <span class="mem-month-tab__dot mem-month-tab__dot--{{ $tab['status'] }}" aria-hidden="true"></span>
-                    @endif
+                    <span class="mem-month-tab__head">
+                        <span class="mem-month-tab__abbr">{{ $tab['abbr'] }}</span>
+                        @if (in_array($tab['status'], ['validated', 'finalized'], true))
+                            <span class="mem-month-tab__dot mem-month-tab__dot--{{ $tab['status'] }}" aria-hidden="true"></span>
+                        @endif
+                    </span>
+                    <span class="mem-month-tab__total">
+                        @if ($tabTotal !== null)
+                            <span class="sr-only">Monthly total </span>{{ $tabTotal }}
+                        @else
+                            <span aria-hidden="true">—</span>
+                        @endif
+                    </span>
                 </span>
             @elseif ($tab['id'] !== null)
                 <a
@@ -51,14 +64,26 @@
                     class="mem-month-tab"
                     title="Open {{ $tab['label'] }}"
                 >
-                    <span class="mem-month-tab__abbr">{{ $tab['abbr'] }}</span>
-                    @if (in_array($tab['status'], ['validated', 'finalized'], true))
-                        <span class="mem-month-tab__dot mem-month-tab__dot--{{ $tab['status'] }}" aria-hidden="true"></span>
-                    @endif
+                    <span class="mem-month-tab__head">
+                        <span class="mem-month-tab__abbr">{{ $tab['abbr'] }}</span>
+                        @if (in_array($tab['status'], ['validated', 'finalized'], true))
+                            <span class="mem-month-tab__dot mem-month-tab__dot--{{ $tab['status'] }}" aria-hidden="true"></span>
+                        @endif
+                    </span>
+                    <span class="mem-month-tab__total">
+                        @if ($tabTotal !== null)
+                            <span class="sr-only">Monthly total </span>{{ $tabTotal }}
+                        @else
+                            <span aria-hidden="true">—</span>
+                        @endif
+                    </span>
                 </a>
             @else
                 <span class="mem-month-tab is-empty" title="{{ $tab['label'] }} — no matrix yet">
-                    <span class="mem-month-tab__abbr">{{ $tab['abbr'] }}</span>
+                    <span class="mem-month-tab__head">
+                        <span class="mem-month-tab__abbr">{{ $tab['abbr'] }}</span>
+                    </span>
+                    <span class="mem-month-tab__total" aria-hidden="true">—</span>
                 </span>
             @endif
         @endforeach
@@ -78,8 +103,9 @@
     <div class="card">
         <div class="card-head users-toolbar">
             <p class="mem-toolbar-copy">
-                Lines are grouped by section. Use a row's pencil to edit it; the totals below update as you go.
+                Lines are grouped by section. Drag a row's grip to reorder it — the new order saves automatically. The pencil edits a line; totals update as you go.
             </p>
+
 
             <div class="ac-toolbar-actions mem-toolbar">
                 <a
@@ -107,6 +133,28 @@
                 </button>
             </div>
         </div>
+
+            {{-- THE TOTALS, on one full-width strip: the old tfoot put them at the
+             far right of a 1500px-wide table, where they were the first thing
+             scrolled past and the last thing seen. --}}
+        @if ($items !== [])
+            <div class="mem-summary">
+                <div class="mem-summary__item">
+                    <span class="mem-summary__label">Operations subtotal</span>
+                    <span class="mem-summary__value">{{ number_format($this->totals['operations'], 2) }}</span>
+                </div>
+
+                <div class="mem-summary__item">
+                    <span class="mem-summary__label">Project subtotal</span>
+                    <span class="mem-summary__value">{{ number_format($this->totals['project'], 2) }}</span>
+                </div>
+
+                <div class="mem-summary__item mem-summary__item--grand">
+                    <span class="mem-summary__label">Monthly total</span>
+                    <span class="mem-summary__value">{{ number_format($this->totals['grand'], 2) }}</span>
+                </div>
+            </div>
+        @endif
 
         @if ($items === [])
             <div class="mem-empty">
@@ -177,7 +225,7 @@
                                     <th scope="col" class="users-actions-col">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody>
+                            <tbody wire:sort="reorderRow">
                                 @forelse ($sectionRows as $entry)
                                     {{-- A read-only LIST row. The line is changed in the
                                          modal (the pencil), not by typing into the grid,
@@ -194,8 +242,20 @@
                                     @php($quantity = trim((string) ($row['quantity'] ?? '')))
                                     @php($unit = trim((string) ($row['unit'] ?? '')))
                                     @php($unitCost = trim((string) ($row['unit_cost'] ?? '')))
-                                    <tr wire:key="row-{{ $row['_key'] }}">
-                                        <td class="mem-rownum">{{ $i + 1 }}</td>
+                                    <tr wire:key="row-{{ $row['_key'] }}" wire:sort:item="{{ $row['_key'] }}">
+                                        <td class="mem-rownum">
+                                            <span class="mem-rownum__inner">
+                                                <span
+                                                    class="mem-drag-handle"
+                                                    wire:sort:handle
+                                                    title="Drag to reorder"
+                                                    aria-hidden="true"
+                                                >
+                                                    <x-icon name="grip-lines" :size="16" />
+                                                </span>
+                                                <span>{{ $i + 1 }}</span>
+                                            </span>
+                                        </td>
                                         <td>
                                             <span class="cell-strong">{{ $row['activity_description'] !== '' ? $row['activity_description'] : '—' }}</span>
                                             @if ($objective !== '')

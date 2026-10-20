@@ -685,6 +685,61 @@ class MemMatrixTest extends TestCase
         $this->assertSame('Build a fence', $item->activity_description);
     }
 
+    public function test_a_line_can_be_dragged_to_a_new_position_within_its_section(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        $component = Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('addRow')
+            ->call('addRow')
+            ->call('addRow', 'project')
+            ->call('addRow');
+
+        $component->set('items.0.activity_description', 'Payment for electricity')
+            ->set('items.1.activity_description', 'Payment of school clerk')
+            ->set('items.2.activity_description', 'Build a fence')
+            ->set('items.3.activity_description', 'Procure supplies');
+
+        $keys = array_column($component->get('items'), '_key');
+
+        // Drag the fourth line to the top of Operations. The project line
+        // between them keeps its own place in the matrix.
+        $component->call('reorderRow', $keys[3], 0)->assertHasNoErrors();
+
+        $items = $component->get('items');
+
+        $this->assertSame(
+            ['Procure supplies', 'Payment for electricity', 'Build a fence', 'Payment of school clerk'],
+            array_column($items, 'activity_description')
+        );
+        $this->assertSame(
+            ['operations', 'operations', 'project', 'operations'],
+            array_column($items, 'section')
+        );
+
+        // A drop writes the order immediately, without Save Draft — opening
+        // another month must not lose it. Positions are 1..4 in the new order.
+        $this->assertSame(
+            ['Procure supplies', 'Payment for electricity', 'Build a fence', 'Payment of school clerk'],
+            $matrix->items()->pluck('activity_description')->all()
+        );
+        $this->assertSame([1, 2, 3, 4], $matrix->items()->pluck('position')->all());
+    }
+
+    public function test_the_line_lists_are_wired_for_drag_reordering(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('addRow')
+            ->assertSeeHtml('wire:sort="reorderRow"')
+            ->assertSeeHtml('wire:sort:item="new-')
+            // Only the grip starts a drag, so the row's buttons still click.
+            ->assertSeeHtml('wire:sort:handle');
+    }
+
     public function test_the_grid_renders_one_grouped_block_per_section(): void
     {
         $sh = $this->schoolHead();
@@ -814,6 +869,53 @@ class MemMatrixTest extends TestCase
 
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $july])
             ->assertSeeHtml('mem-month-tab__dot--finalized');
+    }
+
+    public function test_each_month_tab_carries_that_months_total(): void
+    {
+        $sh = $this->schoolHead();
+        $january = $this->matrixFor($sh, month: 1, year: 2026);
+        $july = $this->matrixFor($sh, month: 7, year: 2026);
+
+        $january->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Procure supplies',
+            'quantity' => 2,
+            'unit_cost' => 1000,
+            'calculated_total' => 2000,
+        ]);
+
+        $component = Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $july]);
+
+        // January's tab reads its persisted lines.
+        $component->assertSee('2,000.00');
+
+        $months = collect($component->instance()->months())->keyBy('month');
+
+        $this->assertSame(2000.0, $months[1]['total']);
+        // July is being edited and has no lines yet; February has no matrix.
+        $this->assertNull($months[7]['total']);
+        $this->assertNull($months[2]['total']);
+    }
+
+    public function test_the_current_months_tab_follows_the_unsaved_grid(): void
+    {
+        $sh = $this->schoolHead();
+        $july = $this->matrixFor($sh, month: 7, year: 2026);
+
+        $component = Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $july])
+            ->call('openLineModal')
+            ->set('lineForm.activity_description', 'Procure supplies')
+            ->set('lineForm.quantity', '3')
+            ->set('lineForm.unit_cost', '500')
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors();
+
+        $julyTab = collect($component->instance()->months())->firstWhere('month', 7);
+
+        // Nothing is saved yet, but the tab already matches the total strip.
+        $this->assertSame(1500.0, $julyTab['total']);
     }
 
     // ---------------------------------------------------------------- import
