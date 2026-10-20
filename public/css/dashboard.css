@@ -838,6 +838,15 @@ control to a real radio size and keep it from growing as a flex item. */
 .modal-form .mem-line-fields .field { margin-bottom: 0; }
 .mem-line-fields .mem-line-span { grid-column: 1 / -1; }
 .mem-line-fields .mem-line-sections { justify-self: start; }
+/* The line dialog's textareas grow to fit their text instead of scrolling:
+   the two-row Objective box was hiding most of a long objective behind its
+   own scrollbar. field-sizing ignores `rows`, so the min-height preserves
+   the old two-row box for short or empty values (2 x 1.5 line-height +
+   18px padding + 2px border). */
+.mem-line-fields textarea {
+    field-sizing: content;
+    min-height: calc(2 * 1.5em + 20px);
+}
 @media (max-width: 720px) {
     .mem-line-fields { grid-template-columns: 1fr; }
     .mem-line-fields .mem-line-span { grid-column: auto; }

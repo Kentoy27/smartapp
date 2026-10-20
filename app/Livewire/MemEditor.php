@@ -141,6 +141,8 @@ class MemEditor extends Component
             'funding_source' => (string) ($item->funding_source ?? ''),
             'organizational_classification' => (string) ($item->organizational_classification ?? ''),
             'activity_movs' => (string) ($item->activity_movs ?? ''),
+            'major_output' => (string) ($item->major_output ?? ''),
+            'performance_indicator' => (string) ($item->performance_indicator ?? ''),
         ];
     }
 
@@ -162,6 +164,8 @@ class MemEditor extends Component
             'funding_source' => '',
             'organizational_classification' => '',
             'activity_movs' => '',
+            'major_output' => '',
+            'performance_indicator' => '',
         ];
     }
 
@@ -186,6 +190,8 @@ class MemEditor extends Component
             'items.*.funding_source' => ['nullable', 'string', 'max:255'],
             'items.*.organizational_classification' => ['nullable', 'string', 'max:255'],
             'items.*.activity_movs' => ['nullable', 'string', 'max:2000'],
+            'items.*.major_output' => ['nullable', 'string', 'max:2000'],
+            'items.*.performance_indicator' => ['nullable', 'string', 'max:2000'],
         ];
     }
 
@@ -202,6 +208,9 @@ class MemEditor extends Component
             'items.*.unit_cost' => 'unit cost',
             'items.*.account_title' => 'account title',
             'items.*.account_code' => 'account code',
+            'items.*.major_output' => 'major output',
+            'items.*.performance_indicator' => 'performance indicator',
+            'items.*.activity_movs' => 'activity MOVs',
         ];
     }
 
@@ -566,6 +575,8 @@ class MemEditor extends Component
                     'funding_source' => self::nullIfBlank($row['funding_source'] ?? null),
                     'organizational_classification' => self::nullIfBlank($row['organizational_classification'] ?? null),
                     'activity_movs' => self::nullIfBlank($row['activity_movs'] ?? null),
+                    'major_output' => self::nullIfBlank($row['major_output'] ?? null),
+                    'performance_indicator' => self::nullIfBlank($row['performance_indicator'] ?? null),
                 ]);
                 $item->syncTotal();
                 $item->save();
@@ -596,7 +607,7 @@ class MemEditor extends Component
      */
     private static function isBlank(array $row): bool
     {
-        foreach (['activity_description', 'objective', 'resource_kind', 'quantity', 'unit', 'unit_cost', 'account_title', 'account_code', 'funding_source', 'organizational_classification', 'activity_movs'] as $field) {
+        foreach (['activity_description', 'objective', 'resource_kind', 'quantity', 'unit', 'unit_cost', 'account_title', 'account_code', 'funding_source', 'organizational_classification', 'activity_movs', 'major_output', 'performance_indicator'] as $field) {
             if (trim((string) ($row[$field] ?? '')) !== '') {
                 return false;
             }

@@ -91,7 +91,7 @@
                     <x-icon name="file-spreadsheet" :size="16" />
                     <span>Export XLSX</span>
                 </a>
-               {{-- kw<a
+               <a
                     href="{{ route('wfp.matrices.template') }}"
                     class="ac-import-btn"
                     download
@@ -104,7 +104,7 @@
                 <button type="button" class="ac-import-btn" wire:click="openImport">
                     <x-icon name="upload" :size="16" />
                     <span>Import CSV</span>
-                </button> --}}
+                </button>
             </div>
         </div>
 
@@ -397,11 +397,13 @@
                     
 
                     {{-- Quantity, unit, unit cost and the computed line total sit
-                         on one row — they are read together. --}}
+                         on one row — they are read together. Quantity and unit
+                         cost are live so the total recalculates while typing
+                         instead of waiting for a blur or a save. --}}
                     <div class="mem-line-money mem-line-span">
                         <div class="field">
                             <label for="memLineQty">Quantity</label>
-                            <input id="memLineQty" type="number" step="0.01" min="0" inputmode="decimal" wire:model="lineForm.quantity" placeholder="0">
+                            <input id="memLineQty" type="number" step="0.01" min="0" inputmode="decimal" wire:model.live.debounce.300ms="lineForm.quantity" placeholder="0">
                             @error('lineForm.quantity') <div class="error-text">{{ $message }}</div> @enderror
                         </div>
 
@@ -413,7 +415,7 @@
 
                         <div class="field">
                             <label for="memLineCost">Unit cost</label>
-                            <input id="memLineCost" type="number" step="0.01" min="0" inputmode="decimal" wire:model="lineForm.unit_cost" placeholder="0.00">
+                            <input id="memLineCost" type="number" step="0.01" min="0" inputmode="decimal" wire:model.live.debounce.300ms="lineForm.unit_cost" placeholder="0.00">
                             @error('lineForm.unit_cost') <div class="error-text">{{ $message }}</div> @enderror
                         </div>
 
@@ -512,9 +514,36 @@
                         @error('lineForm.organizational_classification') <div class="error-text">{{ $message }}</div> @enderror
                     </div>
 
-                     <div class="field">
+                    <div class="field">
+                        <label for="memLineMajorOutput">Major output</label>
+                        <textarea
+                            id="memLineMajorOutput"
+                            rows="2"
+                            wire:model="lineForm.major_output"
+                            placeholder="The result this line delivers"
+                        ></textarea>
+                        @error('lineForm.major_output') <div class="error-text">{{ $message }}</div> @enderror
+                    </div>
+
+                    <div class="field">
+                        <label for="memLinePerformanceIndicator">Performance indicator</label>
+                        <textarea
+                            id="memLinePerformanceIndicator"
+                            rows="2"
+                            wire:model="lineForm.performance_indicator"
+                            placeholder="How the output is measured"
+                        ></textarea>
+                        @error('lineForm.performance_indicator') <div class="error-text">{{ $message }}</div> @enderror
+                    </div>
+
+                    <div class="field mem-line-span">
                         <label for="memLineMovs">Activity MOVs</label>
-                        <input id="memLineMovs" type="text" wire:model="lineForm.activity_movs" placeholder="e.g. PO and RIS">
+                        <textarea
+                            id="memLineMovs"
+                            rows="2"
+                            wire:model="lineForm.activity_movs"
+                            placeholder="e.g. PO and RIS"
+                        ></textarea>
                         @error('lineForm.activity_movs') <div class="error-text">{{ $message }}</div> @enderror
                     </div>
                 </div>

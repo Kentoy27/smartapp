@@ -428,6 +428,52 @@ class MemMatrixTest extends TestCase
         $this->assertEquals(2500.0, (float) MonthlyExpenditureItem::firstOrFail()->calculated_total);
     }
 
+    public function test_the_line_total_recalculates_while_the_money_fields_are_typed(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openLineModal')
+            // Live, not deferred: the total follows the two inputs as they are
+            // typed instead of waiting for a blur or a save.
+            ->assertSeeHtml('wire:model.live.debounce.300ms="lineForm.quantity"')
+            ->assertSeeHtml('wire:model.live.debounce.300ms="lineForm.unit_cost"')
+            ->set('lineForm.quantity', '2')
+            ->set('lineForm.unit_cost', '6000')
+            ->assertSee('12,000.00');
+    }
+
+    public function test_the_line_modal_captures_the_output_and_movs_fields(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openLineModal')
+            ->set('lineForm.activity_description', 'Conduct reading camp')
+            ->set('lineForm.major_output', 'Reading camp conducted')
+            ->set('lineForm.performance_indicator', '80% of learners attend')
+            ->set('lineForm.activity_movs', 'Attendance sheet, photos')
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors()
+            ->call('saveDraft')
+            ->assertHasNoErrors();
+
+        $item = MonthlyExpenditureItem::firstOrFail();
+
+        $this->assertSame('Reading camp conducted', $item->major_output);
+        $this->assertSame('80% of learners attend', $item->performance_indicator);
+        $this->assertSame('Attendance sheet, photos', $item->activity_movs);
+
+        // Reopening the line in the modal shows the saved wording.
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix->fresh()])
+            ->call('openEditModal', 'item-'.$item->id)
+            ->assertSet('lineForm.major_output', 'Reading camp conducted')
+            ->assertSet('lineForm.performance_indicator', '80% of learners attend')
+            ->assertSet('lineForm.activity_movs', 'Attendance sheet, photos');
+    }
+
     public function test_the_add_line_modal_requires_an_activity_description(): void
     {
         $sh = $this->schoolHead();
