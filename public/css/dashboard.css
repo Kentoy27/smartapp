@@ -838,11 +838,29 @@ control to a real radio size and keep it from growing as a flex item. */
 .modal-form .mem-line-fields .field { margin-bottom: 0; }
 .mem-line-fields .mem-line-span { grid-column: 1 / -1; }
 .mem-line-fields .mem-line-sections { justify-self: start; }
+/* The line dialog's textareas grow to fit their text instead of scrolling:
+   the two-row Objective box was hiding most of a long objective behind its
+   own scrollbar. field-sizing ignores `rows`, so the min-height preserves
+   the old two-row box for short or empty values (2 x 1.5 line-height +
+   18px padding + 2px border). */
+.mem-line-fields textarea {
+    field-sizing: content;
+    min-height: calc(2 * 1.5em + 20px);
+}
 @media (max-width: 720px) {
     .mem-line-fields { grid-template-columns: 1fr; }
     .mem-line-fields .mem-line-span { grid-column: auto; }
 }
 .mem-rownum { color: var(--text-faint); font-variant-numeric: tabular-nums; text-align: right; }
+/* Drag-to-reorder (Livewire's wire:sort): the grip is the only handle, so
+   the row's buttons keep working normally. The library owns the motion;
+   these rules only make the grip findable and the drag legible. */
+.mem-rownum__inner { display: inline-flex; align-items: center; gap: 4px; }
+.mem-drag-handle { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 5px; color: var(--text-faint); cursor: grab; }
+.mem-list tbody tr:hover .mem-drag-handle { color: var(--text-muted); }
+.mem-drag-handle:active,
+body.sorting .mem-drag-handle { cursor: grabbing; }
+.mem-list tbody tr.sortable-chosen { background: var(--bg-muted); }
 .mem-linetotal { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
 .mem-linetotal--grand { font-size: 1rem; }
 .mem-total-label { text-align: right; font-weight: 600; color: var(--text-muted); }
@@ -1816,9 +1834,13 @@ control to a real radio size and keep it from growing as a flex item. */
 
 .mem-month-tab {
     display: inline-flex;
+    /* The twelve months share the strip's full width (and a wrapped row still
+       stretches edge to edge) instead of clustering left at their text size. */
+    flex: 1 1 0;
+    flex-direction: column;
     align-items: center;
-    gap: 6px;
-    padding: 7px 14px;
+    gap: 2px;
+    padding: 7px 12px;
     border-radius: 7px;
     font-size: 0.8125rem;
     font-weight: 600;
@@ -1838,6 +1860,26 @@ a.mem-month-tab:hover { background: var(--bg-hover); color: var(--text-strong); 
 }
 
 .mem-month-tab.is-empty { color: var(--text-faint); opacity: 0.55; cursor: not-allowed; }
+
+/* The abbreviation and its status dot sit on the first line; the month's
+   total sits beneath them, the same figure as the monthly total strip. */
+.mem-month-tab__head {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.mem-month-tab__total {
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0;
+    line-height: 1.2;
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+}
+
+.mem-month-tab.is-current .mem-month-tab__total { color: var(--primary); }
+a.mem-month-tab:hover .mem-month-tab__total { color: var(--text-muted); }
 
 .mem-month-tab__dot {
     width: 6px;

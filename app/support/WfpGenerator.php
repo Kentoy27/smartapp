@@ -17,11 +17,10 @@ use Illuminate\Support\Facades\DB;
  * place, matched by `source_expenditure_item_id`:
  *
  *   - MEM-derived columns are refreshed from the current MEM line;
- *   - the WFP-only columns (`major_output`, `performance_indicator`) are never
- *     touched, so anything the SH typed survives;
- *   - the shared columns (`funding_source`, `organizational_classification`,
- *     `activity_movs`) take the MEM value when the MEM now carries one, and the
- *     existing WFP-entered value otherwise;
+ *   - the enrichment columns (`major_output`, `performance_indicator`,
+ *     `funding_source`, `organizational_classification`, `activity_movs`) take
+ *     the MEM value when the MEM now carries one, and the existing
+ *     WFP-entered value otherwise;
  *   - lines whose MEM line is gone are deleted; new lines are inserted;
  *   - every line records the MEM version it was mapped from.
  *
@@ -87,23 +86,24 @@ class WfpGenerator
                 $wfp = $existing->pull($sourceId) ?? new WfpItem([
                     'wfp_plan_id' => $plan->id,
                     'source_expenditure_item_id' => $sourceId,
-                    'major_output' => null,
-                    'performance_indicator' => null,
                 ]);
 
                 $isNew = ! $wfp->exists;
 
                 $wfp->fill($payload['fields']);
 
-                // WFP-only: only ever set on creation. Shared carried fields:
-                // the MEM value wins when it now carries one.
+                // Enrichment fields: the MEM value wins when it now carries
+                // one, so a value the SH typed on the WFP survives regeneration
+                // until the MEM supplies its own.
                 if ($isNew) {
-                    $wfp->major_output = null;
-                    $wfp->performance_indicator = null;
+                    $wfp->major_output = $payload['major_output'];
+                    $wfp->performance_indicator = $payload['performance_indicator'];
                     $wfp->funding_source = $payload['funding_source'];
                     $wfp->organizational_classification = $payload['organizational_classification'];
                     $wfp->activity_movs = $payload['activity_movs'];
                 } else {
+                    $wfp->major_output = self::prefer($payload['major_output'], $wfp->major_output);
+                    $wfp->performance_indicator = self::prefer($payload['performance_indicator'], $wfp->performance_indicator);
                     $wfp->funding_source = self::prefer($payload['funding_source'], $wfp->funding_source);
                     $wfp->organizational_classification = self::prefer($payload['organizational_classification'], $wfp->organizational_classification);
                     $wfp->activity_movs = self::prefer($payload['activity_movs'], $wfp->activity_movs);
@@ -223,7 +223,7 @@ class WfpGenerator
     }
 
     /**
-     * @return array{fields: array<string, mixed>, funding_source: ?string, organizational_classification: ?string, activity_movs: ?string, group_key: string, source_matrix_id: int, source_matrix_version: int, position: int}
+     * @return array{fields: array<string, mixed>, major_output: ?string, performance_indicator: ?string, funding_source: ?string, organizational_classification: ?string, activity_movs: ?string, group_key: string, source_matrix_id: int, source_matrix_version: int, position: int}
      */
     private static function payload(MonthlyExpenditureItem $item, MonthlyExpenditureMatrix $matrix, int $position): array
     {
@@ -243,6 +243,8 @@ class WfpGenerator
                 // silently become an empty WFP cell.
                 'financial_target' => $item->calculated_total ?? $item->recalculateTotal(),
             ],
+            'major_output' => $item->major_output,
+            'performance_indicator' => $item->performance_indicator,
             'funding_source' => $item->funding_source,
             'organizational_classification' => $item->organizational_classification,
             'activity_movs' => $item->activity_movs,

@@ -16,10 +16,11 @@ use Livewire\Component;
 
 /**
  * The generated-WFP editor: a grouped preview of the plan's lines, with the
- * WFP-only fields editable — filling one in clears its review flag.
+ * enrichment fields editable — filling one in clears its review flag.
  *
- * The plan can be regenerated from the MEM at any time (the SH's WFP-only
- * entries survive), approved, and downloaded as a patched copy of the official
+ * The plan can be regenerated from the MEM at any time (the SH's enrichment
+ * entries survive while the MEM is blank), approved, and downloaded as a
+ * patched copy of the official
  * template. An out-of-date banner shows, per source matrix, when a MEM has
  * moved on since the plan was generated.
  */
@@ -29,7 +30,7 @@ class WfpPlanEditor extends Component
     #[Locked]
     public int $planId = 0;
 
-    /** Editable WFP-only fields, keyed by WFP item id. */
+    /** Editable enrichment fields, keyed by WFP item id. */
     public array $items = [];
 
     public ?string $successMessage = null;

@@ -165,7 +165,7 @@ final class WfpValidator
 
     /**
      * Rows still missing a Major Output or a Performance Indicator — the two
-     * WFP-only fields the MEM cannot supply.
+     * enrichment fields the MEM line can supply, but this WFP row has not.
      *
      * @param  Collection<int, WfpItem>  $items
      * @return array{major_output: int, performance_indicator: int, count: int, items: array<int, array{id: int, activity: string}>}

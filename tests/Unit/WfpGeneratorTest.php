@@ -161,6 +161,43 @@ class WfpGeneratorTest extends TestCase
         $this->assertSame('MOOE', $wfp->fresh()->funding_source);
     }
 
+    public function test_output_fields_from_the_mem_enrich_the_generated_wfp(): void
+    {
+        $this->school();
+        $matrix = $this->matrix();
+        $line = $this->line($matrix, [
+            'major_output' => 'Reading camp conducted',
+            'performance_indicator' => '80% of learners attend',
+        ]);
+        $plan = $this->plan();
+
+        WfpGenerator::generate($plan, $matrix);
+
+        $wfp = $plan->items()->firstOrFail();
+        $this->assertSame('Reading camp conducted', $wfp->major_output);
+        $this->assertSame('80% of learners attend', $wfp->performance_indicator);
+        $this->assertFalse($wfp->needs_review);
+
+        // A WFP-entered wording survives while the MEM is blank.
+        $line->major_output = null;
+        $line->performance_indicator = null;
+        $line->save();
+        $wfp->major_output = 'WFP wording';
+        $wfp->save();
+        $matrix->bumpVersion();
+
+        WfpGenerator::generate($plan, $matrix);
+        $this->assertSame('WFP wording', $wfp->fresh()->major_output);
+
+        // Once the MEM carries one, it wins.
+        $line->major_output = 'MEM wording';
+        $line->save();
+        $matrix->bumpVersion();
+
+        WfpGenerator::generate($plan, $matrix);
+        $this->assertSame('MEM wording', $wfp->fresh()->major_output);
+    }
+
     public function test_gone_lines_are_removed(): void
     {
         $this->school();

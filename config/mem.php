@@ -10,11 +10,12 @@
 | sections a line may belong to, and which WFP fields count as "needs review"
 | when they end up empty.
 |
-| `wfp_flag_on_generation` lists the WFP-only fields — the ones the MEM never
-| carries, so they are ALWAYS empty the first time a plan is generated — and
-| `wfp_flag_when_empty` lists the carried fields that flag only when the MEM
-| left them blank. Together they are the flaggable set: a field that is empty
-| is flagged, and filling it in the editor clears its flag.
+| `wfp_flag_on_generation` lists the enrichment fields the School Head
+| normally completes on the WFP, and `wfp_flag_when_empty` lists the carried
+| fields that flag when the MEM left them blank. Together they are the
+| flaggable set: a field that is empty is flagged, and filling it in the
+| editor clears its flag. A MEM line now supplies the enrichment fields too,
+| so they flag only when both the MEM and the WFP leave them empty.
 |
 */
 
@@ -48,8 +49,8 @@ return [
     ],
 
     /*
-     * WFP-only fields: never carried from the MEM, so always flagged on the
-     * first generation of a plan.
+     * Enrichment fields normally typed on the WFP. The MEM carries them too,
+     * so they are flagged only while neither source supplies a value.
      */
     'wfp_flag_on_generation' => [
         'major_output',

@@ -141,6 +141,8 @@ class MemEditor extends Component
             'funding_source' => (string) ($item->funding_source ?? ''),
             'organizational_classification' => (string) ($item->organizational_classification ?? ''),
             'activity_movs' => (string) ($item->activity_movs ?? ''),
+            'major_output' => (string) ($item->major_output ?? ''),
+            'performance_indicator' => (string) ($item->performance_indicator ?? ''),
         ];
     }
 
@@ -162,6 +164,8 @@ class MemEditor extends Component
             'funding_source' => '',
             'organizational_classification' => '',
             'activity_movs' => '',
+            'major_output' => '',
+            'performance_indicator' => '',
         ];
     }
 
@@ -186,6 +190,8 @@ class MemEditor extends Component
             'items.*.funding_source' => ['nullable', 'string', 'max:255'],
             'items.*.organizational_classification' => ['nullable', 'string', 'max:255'],
             'items.*.activity_movs' => ['nullable', 'string', 'max:2000'],
+            'items.*.major_output' => ['nullable', 'string', 'max:2000'],
+            'items.*.performance_indicator' => ['nullable', 'string', 'max:2000'],
         ];
     }
 
@@ -202,6 +208,9 @@ class MemEditor extends Component
             'items.*.unit_cost' => 'unit cost',
             'items.*.account_title' => 'account title',
             'items.*.account_code' => 'account code',
+            'items.*.major_output' => 'major output',
+            'items.*.performance_indicator' => 'performance indicator',
+            'items.*.activity_movs' => 'activity MOVs',
         ];
     }
 
@@ -403,6 +412,72 @@ class MemEditor extends Component
     }
 
     /**
+     * Put a line at a new position inside its own section, after the SH
+     * drags it. The list on screen is one section, so `position` is the
+     * row's zero-based index among that section's lines; the section is
+     * derived from the line itself rather than trusted from the browser.
+     * Only that section's slots move — the other section keeps its rows,
+     * and their places, untouched.
+     *
+     * The new order is written straight away (the same write Save Draft
+     * uses), because a sorted list that is lost the moment the SH opens
+     * another month is not sorted at all.
+     */
+    public function reorderRow(string $key, int $position): void
+    {
+        $this->guard();
+
+        $section = null;
+        foreach ($this->items as $row) {
+            if (($row['_key'] ?? null) === $key) {
+                $section = (string) ($row['section'] ?? 'operations');
+                break;
+            }
+        }
+
+        if ($section === null) {
+            return; // a crafted or stale key: nothing to move
+        }
+
+        $slots = [];
+        $rows = [];
+
+        foreach ($this->items as $index => $row) {
+            if ((string) ($row['section'] ?? 'operations') === $section) {
+                $slots[] = $index;
+                $rows[] = $row;
+            }
+        }
+
+        $from = null;
+        foreach ($rows as $index => $row) {
+            if (($row['_key'] ?? null) === $key) {
+                $from = $index;
+                break;
+            }
+        }
+
+        if ($from === null) {
+            return;
+        }
+
+        $position = max(0, min($position, count($rows) - 1));
+
+        if ($position === $from) {
+            return;
+        }
+
+        $moved = array_splice($rows, $from, 1);
+        array_splice($rows, $position, 0, $moved);
+
+        foreach ($slots as $slot => $index) {
+            $this->items[$index] = $rows[$slot];
+        }
+
+        $this->persist($this->matrixStatus);
+    }
+
+    /**
      * Move a line to the other section (Operations ↔ Project). The grid
      * groups by section rather than carrying a per-row dropdown, so this is
      * how a line changes section — one click, no list to open.
@@ -566,6 +641,8 @@ class MemEditor extends Component
                     'funding_source' => self::nullIfBlank($row['funding_source'] ?? null),
                     'organizational_classification' => self::nullIfBlank($row['organizational_classification'] ?? null),
                     'activity_movs' => self::nullIfBlank($row['activity_movs'] ?? null),
+                    'major_output' => self::nullIfBlank($row['major_output'] ?? null),
+                    'performance_indicator' => self::nullIfBlank($row['performance_indicator'] ?? null),
                 ]);
                 $item->syncTotal();
                 $item->save();
@@ -596,7 +673,7 @@ class MemEditor extends Component
      */
     private static function isBlank(array $row): bool
     {
-        foreach (['activity_description', 'objective', 'resource_kind', 'quantity', 'unit', 'unit_cost', 'account_title', 'account_code', 'funding_source', 'organizational_classification', 'activity_movs'] as $field) {
+        foreach (['activity_description', 'objective', 'resource_kind', 'quantity', 'unit', 'unit_cost', 'account_title', 'account_code', 'funding_source', 'organizational_classification', 'activity_movs', 'major_output', 'performance_indicator'] as $field) {
             if (trim((string) ($row[$field] ?? '')) !== '') {
                 return false;
             }
@@ -852,8 +929,11 @@ class MemEditor extends Component
      * The twelve months of this matrix's planning year for the SH's own school,
      * in calendar order — the month tab strip at the top of the editor. The
      * month being edited is flagged (`current`); a month whose matrix is missing
-     * (deleted) carries no id and renders inactive. One query for the whole
-     * year, so drawing the strip costs nothing.
+     * (deleted) carries no id and renders inactive. Each tab also carries that
+     * month's total: the month being edited reads the unsaved grid (so it agrees
+     * with the summary strip), the others read their persisted lines. A month
+     * with no lines has no total (null) rather than a misleading zero. One query
+     * for the whole year, so drawing the strip costs nothing.
      *
      * @return array<int, array<string, mixed>>
      */
@@ -866,6 +946,7 @@ class MemEditor extends Component
             ->where('school_id', $matrix->school_id)
             ->where('year', $matrix->year)
             ->withCount('items')
+            ->withSum('items', 'calculated_total')
             ->get()
             ->keyBy('month');
 
@@ -873,6 +954,7 @@ class MemEditor extends Component
 
         foreach (MonthlyExpenditureMatrix::MONTH_ABBREVIATIONS as $number => $abbreviation) {
             $sibling = $siblings->get($number);
+            $isCurrent = $number === (int) $matrix->month;
 
             $months[] = [
                 'month' => $number,
@@ -882,7 +964,12 @@ class MemEditor extends Component
                     : $abbreviation.' '.$matrix->year,
                 'id' => $sibling instanceof MonthlyExpenditureMatrix ? (int) $sibling->id : null,
                 'status' => $sibling instanceof MonthlyExpenditureMatrix ? $sibling->status : null,
-                'current' => $number === (int) $matrix->month,
+                'current' => $isCurrent,
+                'total' => $isCurrent
+                    ? ($this->items === [] ? null : $this->totals['grand'])
+                    : ($sibling instanceof MonthlyExpenditureMatrix && $sibling->items_count > 0
+                        ? (float) ($sibling->items_sum_calculated_total ?? 0)
+                        : null),
             ];
         }
 
