@@ -11,9 +11,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  *
  * A WFP line is month-grained and maps 1:1 to a MEM line, so the target lands
  * in the correct month by construction. The MEM-derived columns are refreshed
- * on every regeneration; the WFP-only columns (`major_output`,
- * `performance_indicator`) are never touched by the generator, so anything the
- * SH typed survives regeneration.
+ * on every regeneration; the enrichment columns (`major_output`,
+ * `performance_indicator`, `funding_source`, `organizational_classification`,
+ * `activity_movs`) take the MEM value when it carries one, so a value the SH
+ * typed on the WFP survives while the MEM is blank.
  *
  * `needs_review` / `review_fields` record which flaggable fields are still
  * empty. `refreshFlags()` recomputes them from the row's current values, so
@@ -75,9 +76,8 @@ class WfpItem extends Model
     }
 
     /**
-     * The fields the editor watches for review: a WFP-only pair that is empty
-     * until the SH fills it in, plus the carried fields that flag when the MEM
-     * left them blank.
+     * The fields the editor watches for review: the enrichment pair plus the
+     * carried fields, each flagged while its value is empty.
      *
      * @return array<int, string>
      */

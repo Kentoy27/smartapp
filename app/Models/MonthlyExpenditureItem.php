@@ -34,6 +34,8 @@ class MonthlyExpenditureItem extends Model
         'funding_source',
         'organizational_classification',
         'activity_movs',
+        'major_output',
+        'performance_indicator',
     ];
 
     protected $casts = [
