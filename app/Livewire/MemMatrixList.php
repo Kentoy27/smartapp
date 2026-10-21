@@ -266,15 +266,6 @@ class MemMatrixList extends Component
         return $matrices->count() - $before;
     }
 
-    /* ---------------------------------------------------------------- open */
-
-    public function open(MonthlyExpenditureMatrix $matrix)
-    {
-        abort_unless($matrix->managedBy(Auth::user()), 404);
-
-        return $this->redirect(route('wfp.matrices.edit', ['matrix' => $matrix->id]), navigate: true);
-    }
-
     /* -------------------------------------------------------------- export */
 
     /**

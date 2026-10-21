@@ -153,30 +153,33 @@
                     @forelse ($matrices as $matrix)
                         <tr
                             wire:key="mem-{{ $matrix->id }}"
-                            class="mem-row-clickable"
-                            wire:click="open({{ $matrix->id }})"
-                            title="Open {{ $matrix->periodLabel() }}"
                         >
-                            <td><span class="cell-strong">{{ $matrix->periodLabel() }}</span></td>
+                            <td>
+                                <a
+                                    class="cell-strong"
+                                    href="{{ route('wfp.matrices.edit', ['matrix' => $matrix->id]) }}"
+                                    wire:navigate.hover
+                                    title="Open {{ $matrix->periodLabel() }}"
+                                >{{ $matrix->periodLabel() }}</a>
+                            </td>
                             <td><span class="ac-code">{{ $matrix->fiscalYearLabel() }}</span></td>
                             <td>{{ $matrix->items_count }}</td>
                             <td>
                                 <span class="mem-status mem-status--{{ $matrix->status }}">{{ ucfirst($matrix->status) }}</span>
                             </td>
                             <td>{{ $matrix->updated_at?->diffForHumans() ?? '—' }}</td>
-                            {{-- The actions cell stops click bubbling so opening the ⋯ menu (or
-                                 picking an item) never also triggers the row's "open". --}}
-                            <td class="users-actions-col" @click.stop>
+                            <td class="users-actions-col">
                                 <x-row-menu :label="'Actions for '.$matrix->periodLabel()">
-                                    <x-row-menu-item
-                                        wire:click="open({{ $matrix->id }})"
-                                        wire:loading.attr="disabled"
-                                        wire:target="open"
+                                    <a
+                                        role="menuitem"
+                                        class="row-menu-item"
+                                        href="{{ route('wfp.matrices.edit', ['matrix' => $matrix->id]) }}"
+                                        wire:navigate.hover
                                         title="Open {{ $matrix->periodLabel() }}"
                                     >
                                         <x-icon name="file-text" :size="15" />
                                         <span>Open</span>
-                                    </x-row-menu-item>
+                                    </a>
 
                                     <x-row-menu-item
                                         wire:click="export({{ $matrix->id }})"

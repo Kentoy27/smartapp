@@ -85,16 +85,18 @@ class MemMatrixTest extends TestCase
             ->assertOk();
     }
 
-    public function test_clicking_a_row_opens_its_matrix(): void
+    public function test_matrix_open_links_navigate_directly_to_the_editor(): void
     {
-        // The row itself is clickable (not just the ⋯ menu's "Open"): the
-        // component action the row fires redirects to the matrix editor.
         $sh = $this->schoolHead();
         $matrix = $this->matrixFor($sh);
+        $url = route('wfp.matrices.edit', ['matrix' => $matrix->id]);
 
-        Livewire::actingAs($sh)->test(MemMatrixList::class)
-            ->call('open', $matrix->id)
-            ->assertRedirect(route('wfp.matrices.edit', ['matrix' => $matrix->id]));
+        Livewire::actingAs($sh)
+            ->test(MemMatrixList::class)
+            ->assertSee('href="'.$url.'"', false)
+            ->assertSee('wire:navigate.hover', false);
+
+        $this->actingAs($sh)->get($url)->assertOk();
     }
 
     public function test_the_component_refuses_a_guest_and_a_non_school_head(): void
