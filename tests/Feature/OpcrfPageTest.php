@@ -3,12 +3,19 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Models\District;
+use App\Models\OpcrfSubmission;
+use App\Models\School;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
+use Livewire\Livewire;
+use Tests\Concerns\BuildsOpcrfWorkbooks;
 use Tests\TestCase;
 
 class OpcrfPageTest extends TestCase
 {
+    use BuildsOpcrfWorkbooks;
     use RefreshDatabase;
 
     private function staffUser(): User
@@ -69,6 +76,133 @@ class OpcrfPageTest extends TestCase
 
         $this->actingAs($admin)
             ->get(route('opcrf.index'))
+            ->assertNotFound();
+    }
+
+    public function test_viewers_can_view_opcrf_parts_but_cannot_open_an_editable_part(): void
+    {
+        $viewer = User::create([
+            'name' => 'SDS Viewer',
+            'username' => 'sdsviewer',
+            'email' => 'sdsviewer@example.com',
+            'password' => Hash::make('password123'),
+            'role' => 'viewer',
+            'is_superadmin' => false,
+        ]);
+
+        $this->actingAs($viewer)
+            ->get(route('opcrf.index'))
+            ->assertOk()
+            ->assertSee('Part details are available to School Heads only.')
+            ->assertDontSee('Access Part 1')
+            ->assertDontSee('Access Parts 2–4')
+            ->assertDontSee('View only');
+
+        $this->get(route('opcrf.part', ['part' => 1]))
+            ->assertNotFound();
+
+        \Livewire\Livewire::actingAs($viewer)
+            ->test(\App\Livewire\OpcrfParts::class)
+            ->assertSee('Part details are available to School Heads only.')
+            ->assertDontSee('Access Part 1')
+            ->assertDontSee('Access Parts 2–4');
+
+        $html = \Livewire\Livewire::actingAs($viewer)
+            ->test(\App\Livewire\Sidebar::class, ['usersCount' => 0])
+            ->html();
+
+        $this->assertStringContainsString('href="'.route('opcrf.index').'"', $html);
+    }
+
+    public function test_viewers_can_review_school_head_submissions_with_school_and_district(): void
+    {
+        Storage::fake('local');
+        $district = District::create(['name' => 'North District']);
+        $school = School::create([
+            'district_id' => $district->id,
+            'name' => 'Riverside Elementary School',
+        ]);
+        $head = User::factory()->create([
+            'name' => 'Jordan School Head',
+            'username' => 'riverside-head',
+            'role' => 'user',
+            'is_superadmin' => false,
+            'school_id' => $school->id,
+        ]);
+        $nonHead = User::factory()->create([
+            'role' => 'administrator',
+            'is_superadmin' => false,
+        ]);
+
+        $path = 'opcrf-submissions/'.$head->id.'/submitted.xlsx';
+        Storage::disk('local')->put($path, file_get_contents($this->buildFullOpcrfWorkbook()));
+        $submission = OpcrfSubmission::create([
+            'user_id' => $head->id,
+            'employee_name' => 'Jordan School Head',
+            'position' => 'School Head',
+            'review_period' => 'January to December 2026',
+            'division_office' => 'Schools Division Office',
+            'objectives' => 'Objectives',
+            'accomplishments' => 'Accomplishments',
+            'self_rating' => 4.25,
+            'submitted_at' => now(),
+            'file_path' => $path,
+            'file_original_name' => 'submitted.xlsx',
+        ]);
+        OpcrfSubmission::create([
+            'user_id' => $nonHead->id,
+            'employee_name' => 'Administrator',
+            'position' => 'Administrator',
+            'review_period' => 'January to December 2026',
+            'division_office' => 'Schools Division Office',
+            'objectives' => 'Objectives',
+            'accomplishments' => 'Accomplishments',
+            'self_rating' => 4,
+            'submitted_at' => now(),
+        ]);
+
+        $viewer = User::factory()->create([
+            'role' => 'viewer',
+            'is_superadmin' => false,
+        ]);
+
+        $this->actingAs($viewer)
+            ->get(route('opcrf.index'))
+            ->assertOk()
+            ->assertSee('Submitted OPCRFs from School Heads')
+            ->assertSee('Jordan School Head')
+            ->assertSee('Riverside Elementary School')
+            ->assertSee('North District')
+            ->assertSee('View OPCRF')
+            ->assertDontSee('Administrator');
+
+        Livewire::actingAs($viewer)
+            ->test(\App\Livewire\OpcrfViewerSubmissions::class)
+            ->set('search', 'Jordan')
+            ->assertSee('type="text"', false)
+            ->assertSee('class="users-clear"', false)
+            ->set('search', 'Riverside')
+            ->assertSee('Jordan School Head')
+            ->assertDontSee('Administrator')
+            ->set('search', 'North District')
+            ->assertSee('Riverside Elementary School')
+            ->set('search', 'missing school head')
+            ->assertSee('No School Head OPCRF submissions match your search.')
+            ->call('clearSearch')
+            ->assertSee('Jordan School Head')
+            ->set('search', 'Jordan')
+            ->call('openSubmission', $submission->id)
+            ->assertSee('Submitted OPCRF — Riverside Elementary School')
+            ->assertSee('Submitted form')
+            ->assertSee('PART I-A')
+            ->assertSee('PART II')
+            ->assertSee('PART III')
+            ->assertSee('PART IV')
+            ->assertDontSee('Download workbook')
+            ->assertDontSee('Review Decision')
+            ->assertDontSee('Approve');
+
+        $this->get(route('opcrf.submission.download', $submission))
             ->assertNotFound();
     }
 

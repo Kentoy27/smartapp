@@ -129,6 +129,22 @@ class OpcrfTemplateTest extends TestCase
             ->assertDontSee('OPCRF-TEMPLATE.xlsx');
     }
 
+    public function test_viewers_cannot_see_or_download_the_opcrf_template(): void
+    {
+        $viewer = $this->loginUser('viewer');
+        $viewer->forceFill(['role' => 'viewer'])->save();
+
+        $this->actingAs($viewer)
+            ->get(route('home'))
+            ->assertOk()
+            ->assertDontSee('OPCRF Template')
+            ->assertDontSee(route('opcrf.template'), false)
+            ->assertDontSee('Performance plan')
+            ->assertDontSee('Upload Commitment');
+
+        $this->get(route('opcrf.template'))->assertNotFound();
+    }
+
     public function test_inside_the_final_term_users_download_the_whole_template(): void
     {
         config(['opcrf.part_one.part_one_only' => false]);

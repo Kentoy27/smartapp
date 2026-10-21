@@ -32,7 +32,7 @@ class EnsureOpcrfPartIsOpen
         $user = $request->user();
 
         abort_if($user === null, 403);
-        abort_if($user->hasAdminAccess(), 404);
+        abort_unless($user->canAccessOpcrfTemplate(), 404);
 
         // Read off the route rather than taking it as a middleware argument:
         // only the guard itself decides which Part is on trial, and a

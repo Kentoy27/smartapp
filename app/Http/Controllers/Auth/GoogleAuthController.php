@@ -57,6 +57,6 @@ class GoogleAuthController extends Controller
         Auth::login($user, remember: true);
         session()->regenerate();
 
-        return redirect()->intended('/home');
+        return redirect()->route('home');
     }
 }

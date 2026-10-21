@@ -55,7 +55,7 @@ class LoginController extends Controller
         $request->session()->regenerate();
 
         return redirect()
-            ->intended('/home')
+            ->route('home')
             ->with('success', 'Login successful. Welcome back!');
     }
 

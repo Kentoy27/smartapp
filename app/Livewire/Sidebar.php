@@ -203,17 +203,6 @@ class Sidebar extends Component
             ],
         ];
 
-        if (! Auth::user()?->isBudgetRole()) {
-            $items[] = [
-                'label' => 'APP',
-                'route' => 'procurement.app.index',
-                'path' => 'procurement-app',
-                'icon' => 'file-spreadsheet',
-                'section' => 'Files',
-                'order' => 12,
-            ];
-        }
-
         if (Auth::user()?->hasAdminAccess()) {
             $items[] = [
                 'label' => 'OPCRF',
@@ -320,15 +309,29 @@ class Sidebar extends Component
                 'order' => 14,
             ];
         } else {
-            // Opcrf is a staff-facing page: regular users only.
-            $items[] = [
-                'label' => 'OPCRF',
-                'route' => 'opcrf.index',
-                'path' => 'opcrf',
-                'icon' => 'clipboard-list',
-                'section' => 'Files',
-                'order' => 10,
-            ];
+            // Viewers may see the OPCRF status page, but not download a
+            // template or open an editable Part.
+            if (Auth::user()?->canViewOpcrfParts()) {
+                $items[] = [
+                    'label' => 'OPCRF',
+                    'route' => 'opcrf.index',
+                    'path' => 'opcrf',
+                    'icon' => 'clipboard-list',
+                    'section' => 'Files',
+                    'order' => 10,
+                ];
+            }
+
+            if (Auth::user()?->canReviewWfp()) {
+                $items[] = [
+                    'label' => 'WFP Review',
+                    'route' => 'wfp.submissions.index',
+                    'path' => 'wfp-submissions',
+                    'icon' => 'chart-column',
+                    'section' => 'Files',
+                    'order' => 14,
+                ];
+            }
 
             // AIP is for the School Head (SH) role only — the school owns
             // one Annual Implementation Plan per year, and the SH authors it.

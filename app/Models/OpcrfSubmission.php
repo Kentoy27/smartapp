@@ -813,6 +813,19 @@ class OpcrfSubmission extends Model
     }
 
     /**
+     * SDS Viewers may render a School Head's submission in-app, but cannot
+     * download the workbook or access submissions from other roles.
+     */
+    public function canBeViewedBySdsViewer(?User $user): bool
+    {
+        return $user?->canReviewAllOpcrfSubmissions() === true
+            && $this->user()
+                ->where('role', 'user')
+                ->where('is_superadmin', false)
+                ->exists();
+    }
+
+    /**
      * Hand the submission to another superadmin — a routing step, NOT a
      * final decision: the review trail records who forwarded it, to whom,
      * and any remarks, and the receiving superadmin finds the submission

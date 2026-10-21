@@ -32,9 +32,20 @@ class OpcrfParts extends Component
     {
         $user = Auth::user();
 
-        abort_if($user === null || $user->hasAdminAccess(), 404);
+        abort_unless($user?->canViewOpcrfParts(), 404);
 
         $year = OpcrfAccess::currentYear();
+        $readOnly = $user->role === 'viewer';
+        if ($readOnly) {
+            return view('livewire.opcrf.parts', [
+                'year' => $year,
+                'parts' => [],
+                'now' => now(),
+                'openCount' => 0,
+                'readOnly' => true,
+            ]);
+        }
+
         $now = now();
         $parts = OpcrfAccess::allParts($user, $year, $now);
         $groupStates = array_values(array_filter(
@@ -61,6 +72,7 @@ class OpcrfParts extends Component
             'parts' => $displayParts,
             'now' => $now,
             'openCount' => count(array_filter($parts, fn (array $p): bool => $p['open'])),
+            'readOnly' => false,
         ]);
     }
 }

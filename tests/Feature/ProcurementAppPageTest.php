@@ -26,13 +26,13 @@ class ProcurementAppPageTest extends TestCase
             ->assertSee('APP Records')
             ->assertSee('No APP records are available yet.');
 
-        $this->assertMatchesRegularExpression(
-            '/href="'.preg_quote(route('procurement.app.index'), '/').'"\s+class="nav-item active"/',
+        $this->assertStringNotContainsString(
+            'href="'.route('procurement.app.index').'"',
             $response->getContent()
         );
     }
 
-    public function test_app_is_listed_in_the_files_sidebar_for_authenticated_roles(): void
+    public function test_app_is_hidden_from_the_sidebar_for_all_roles(): void
     {
         $users = [
             User::factory()->create(),
@@ -44,15 +44,20 @@ class ProcurementAppPageTest extends TestCase
                 'role' => 'superadmin',
                 'is_superadmin' => true,
             ]),
+            User::factory()->create([
+                'role' => 'budget',
+                'is_superadmin' => false,
+            ]),
+            User::factory()->create([
+                'role' => 'viewer',
+                'is_superadmin' => false,
+            ]),
         ];
 
         foreach ($users as $user) {
             $items = collect(Livewire::actingAs($user)->test(Sidebar::class)->instance()->items());
-            $app = $items->firstWhere('label', 'APP');
 
-            $this->assertNotNull($app);
-            $this->assertSame('procurement.app.index', $app['route']);
-            $this->assertSame('Files', $app['section']);
+            $this->assertNull($items->firstWhere('label', 'APP'));
         }
     }
 }

@@ -5,7 +5,7 @@
 
          The superadmin's District List is deliberately NOT here: it has its
          own page behind the sidebar's "Districts & Schools" item. --}}
-    @if (! $isSuperAdmin)
+    @if ($canAccessOpcrfTemplate)
         @if ($opcrfLocked)
             {{-- LOCKED CARD: an OPCRF at its final review step or past its
                  edit window cannot be changed from the dashboard. --}}

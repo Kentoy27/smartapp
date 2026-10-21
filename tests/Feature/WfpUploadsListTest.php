@@ -267,6 +267,33 @@ class WfpUploadsListTest extends TestCase
         $this->get(route('wfp.index'))->assertNotFound();
     }
 
+    public function test_viewer_can_open_wfp_review_and_download_a_school_heads_upload(): void
+    {
+        Storage::fake('local');
+        $head = $this->schoolHead('schoolhead', 'Smoke School');
+        $submission = $this->storedSubmission($head, 'viewer-review-wfp.xlsx');
+        $viewer = User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]);
+
+        $items = collect(Livewire::actingAs($viewer)->test(Sidebar::class)->instance()->items());
+        $this->assertSame(
+            'wfp.submissions.index',
+            $items->firstWhere('label', 'WFP Review')['route']
+        );
+
+        $this->actingAs($viewer)
+            ->get(route('wfp.submissions.index'))
+            ->assertOk()
+            ->assertSee('WFP Review')
+            ->assertSee('Smoke School')
+            ->assertSee('viewer-review-wfp.xlsx');
+
+        $this->get(route('wfp.submission.download', $submission))
+            ->assertOk()
+            ->assertDownload('viewer-review-wfp - WFP.xlsx');
+
+        $this->get(route('wfp.index'))->assertNotFound();
+    }
+
     public function test_staff_do_not_get_the_wfp_sidebar_item_or_the_admin_page(): void
     {
         $head = $this->schoolHead('schoolhead', 'Smoke School');

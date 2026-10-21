@@ -1,11 +1,11 @@
 @extends('layouts.dashboard')
 
-@section('title', 'WFP Uploads — SmartApp')
+@section('title', (auth()->user()?->canReviewAllOpcrfSubmissions() ? 'WFP Review' : 'WFP Uploads').' — SmartApp')
 
 @section('content')
     <div class="page-header">
-        <h1>WFP Uploads</h1>
-        <p>Every school's uploaded Work and Financial Plan, with a copy of each archived workbook.</p>
+        <h1>{{ auth()->user()?->canReviewAllOpcrfSubmissions() ? 'WFP Review' : 'WFP Uploads' }}</h1>
+        <p>Every School Head's uploaded Work and Financial Plan, with a copy of each archived workbook.</p>
     </div>
 
     {{-- The same list the dashboard card renders, as the page's own body.

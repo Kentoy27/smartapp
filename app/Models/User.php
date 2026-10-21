@@ -73,7 +73,31 @@ class User extends Authenticatable
     /** Whether this account may read and download submitted WFP workbooks. */
     public function canReviewWfp(): bool
     {
-        return $this->hasAdminAccess() || $this->isBudgetRole();
+        return $this->hasAdminAccess()
+            || $this->isBudgetRole()
+            || (! $this->is_superadmin && $this->role === 'viewer');
+    }
+
+    /** Whether this account may view submitted OPCRFs across School Heads. */
+    public function canReviewAllOpcrfSubmissions(): bool
+    {
+        return ! $this->is_superadmin && $this->role === 'viewer';
+    }
+
+    /** Whether this account may download its own OPCRF template. */
+    public function canAccessOpcrfTemplate(): bool
+    {
+        return ! $this->hasAdminAccess()
+            && $this->role !== 'superadmin'
+            && ! $this->isBudgetRole()
+            && $this->role !== 'viewer';
+    }
+
+    /** Whether this account may view the OPCRF parts and schedule page. */
+    public function canViewOpcrfParts(): bool
+    {
+        return $this->canAccessOpcrfTemplate()
+            || (! $this->is_superadmin && $this->role === 'viewer');
     }
 
     /** Whether this account may manage accounts and school organization. */

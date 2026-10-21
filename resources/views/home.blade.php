@@ -6,7 +6,11 @@
     <section class="dashboard-welcome{{ $user->hasAdminAccess() ? ' dashboard-welcome--admin' : '' }}">
         <div class="dashboard-welcome__copy">
             <span class="dashboard-welcome__eyebrow">
-                {{ $user->hasAdminAccess() ? 'ADMIN WORKSPACE' : ($isBudgetReviewer ? 'BUDGET REVIEW WORKSPACE' : 'STAFF WORKSPACE') }}
+                {{ $user->hasAdminAccess()
+                    ? 'ADMIN WORKSPACE'
+                    : ($isBudgetReviewer
+                        ? 'BUDGET REVIEW WORKSPACE'
+                        : ($user->canAccessOpcrfTemplate() ? 'STAFF WORKSPACE' : 'VIEWER WORKSPACE')) }}
             </span>
             <h1>Welcome back, {{ $user->username }}</h1>
             <p>
@@ -14,16 +18,18 @@
                     ? 'Review submissions and keep your school data moving.'
                     : ($isBudgetReviewer
                         ? 'Review submitted WFP and AIP plans.'
-                        : 'Your performance plan and financial plan, together in one place.') }}
+                        : ($user->canAccessOpcrfTemplate()
+                            ? 'Your performance plan and financial plan, together in one place.'
+                            : 'View OPCRF part schedules and status.')) }}
             </p>
         </div>
-        @if (! $user->hasAdminAccess() && ! $isBudgetReviewer)
+        @if ($user->canAccessOpcrfTemplate())
             <a href="{{ route('mov.index') }}" class="dashboard-welcome__link" wire:navigate.hover>
                 <x-icon name="upload" :size="16" />
                 <span>Open MOV checklist</span>
                 <span aria-hidden="true">→</span>
             </a>
-        @endunless
+        @endif
     </section>
 
     @if ($user->hasAdminAccess())
@@ -51,14 +57,14 @@
                 </a>
             </section>
         </div>
-    @else
+    @elseif ($user->canAccessOpcrfTemplate())
         <div class="staff-dashboard-grid{{ $wfpTemplate !== null ? ' has-wfp' : '' }}">
             <section class="staff-dashboard-panel" aria-labelledby="dashboard-opcrf-heading">
                 <div class="staff-dashboard-panel__intro">
                     <span class="staff-dashboard-panel__step">01</span>
                     <div>
                         <h2 id="dashboard-opcrf-heading">Performance plan</h2>
-                        <p>Prepare your OPCRF and follow its review status.</p>
+                        <p>Prepare your OPCRF, upload your commitment, and follow its review status.</p>
                     </div>
                 </div>
                 <livewire:dashboard-summary />

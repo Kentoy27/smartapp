@@ -77,6 +77,29 @@ class LoginPageTest extends TestCase
             ->assertSee('Login successful', false);
     }
 
+    public function test_login_does_not_return_a_user_to_an_unavailable_intended_page(): void
+    {
+        $user = User::factory()->create([
+            'username' => 'schoolhead',
+            'email' => 'schoolhead@example.com',
+            'password' => 'correct-password',
+            'role' => 'user',
+            'is_superadmin' => false,
+        ]);
+
+        $this->get(route('users.index'))
+            ->assertRedirect(route('login'));
+
+        $this->post(route('login'), [
+            'login' => $user->username,
+            'password' => 'correct-password',
+        ])->assertRedirect(route('home'));
+
+        $this->get(route('home'))
+            ->assertOk()
+            ->assertSee('STAFF WORKSPACE');
+    }
+
     public function test_administrator_login_opens_the_admin_dashboard_and_pages(): void
     {
         User::factory()->create([

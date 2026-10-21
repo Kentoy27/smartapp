@@ -8,7 +8,7 @@
      ago lands here without a reload. --}}
 <div class="card wfp-uploads-list" wire:poll.15s>
     <div class="card-head">
-        <div class="card-title">WFP Uploads</div>
+        <div class="card-title">{{ auth()->user()?->canReviewAllOpcrfSubmissions() ? 'WFP Review' : 'WFP Uploads' }}</div>
         <span class="wfp-uploads-count">
             {{ $this->schoolCount() }} {{ $this->schoolCount() === 1 ? 'school' : 'schools' }} uploaded
         </span>

@@ -103,6 +103,25 @@ class GoogleAuthTest extends TestCase
         $this->assertAuthenticatedAs($existing);
     }
 
+    public function test_google_login_does_not_return_to_an_unavailable_intended_page(): void
+    {
+        $existing = User::factory()->create([
+            'email' => 'jane@example.com',
+            'username' => 'janedoe',
+            'google_id' => '1234567890',
+            'role' => 'user',
+            'is_superadmin' => false,
+        ]);
+        $this->withSession(['url.intended' => route('users.index')]);
+        $this->mockSocialite($this->fakeGoogleUser());
+
+        $response = $this->get(route('google.callback'));
+
+        $response->assertRedirect(route('home'));
+        $this->assertAuthenticatedAs($existing);
+        $this->get(route('home'))->assertOk()->assertSee('STAFF WORKSPACE');
+    }
+
     public function test_google_account_of_a_different_existing_user_is_rejected(): void
     {
         User::factory()->create([

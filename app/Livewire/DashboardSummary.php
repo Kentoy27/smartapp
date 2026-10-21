@@ -38,22 +38,24 @@ class DashboardSummary extends Component
     {
         $user = Auth::user();
         $isSuperAdmin = (bool) $user?->hasAdminAccess();
+        $canAccessOpcrfTemplate = $user?->canAccessOpcrfTemplate() ?? false;
 
         return view('livewire.dashboard.summary', [
             'isSuperAdmin' => $isSuperAdmin,
+            'canAccessOpcrfTemplate' => $canAccessOpcrfTemplate,
             // A submitted OPCRF stays editable through its Part 1 deadline;
             // returned submissions retain their existing revision flow.
-            'opcrfLocked' => $isSuperAdmin ? false : $this->opcrfLocked($user),
+            'opcrfLocked' => $canAccessOpcrfTemplate ? $this->opcrfLocked($user) : false,
             // Part availability by school-year term: the full workbook is
             // available during Part 1 or the shared Parts 2–4 term.
-            'opcrfPartOne' => $isSuperAdmin ? null : OpcrfPartOne::summary(),
+            'opcrfPartOne' => $canAccessOpcrfTemplate ? OpcrfPartOne::summary() : null,
             // The personalized template this account last generated, and the
             // name it was generated with — the status panel's "✓ Template
             // Generated" state, with a download link back to the same file.
-            'opcrfTemplate' => $isSuperAdmin || $user === null ? null : $this->latestTemplate($user),
+            'opcrfTemplate' => $canAccessOpcrfTemplate ? $this->latestTemplate($user) : null,
             // The submission in flight, with every archived version, so a
             // returned form can be revised without Version 1 disappearing.
-            'opcrfSubmission' => $isSuperAdmin || $user === null ? null : $this->currentSubmission($user),
+            'opcrfSubmission' => $canAccessOpcrfTemplate ? $this->currentSubmission($user) : null,
         ]);
     }
 

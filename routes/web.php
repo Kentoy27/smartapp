@@ -31,7 +31,7 @@ use Symfony\Component\HttpFoundation\ResponseHeaderBag;
 
 Route::get('/', function () {
     if (Auth::check()) {
-        return redirect()->intended('/home');
+        return redirect()->route('home');
     }
 
     return redirect()->route('login');
@@ -194,7 +194,7 @@ Route::middleware('auth')->group(function () {
     // superadmin's schedule puts it in, open or locked.
     Route::get('/opcrf', function () {
         $user = Auth::user();
-        abort_if($user instanceof User && $user->hasAdminAccess(), 404);
+        abort_unless($user instanceof User && $user->canViewOpcrfParts(), 404);
 
         return view('opcrf.parts');
     })->name('opcrf.index');
@@ -269,7 +269,7 @@ Route::middleware('auth')->group(function () {
             abort(404);
         }
 
-        abort_if($user->hasAdminAccess(), 404);
+        abort_unless($user->canAccessOpcrfTemplate(), 404);
         abort_unless(is_file(OpcrfPartOne::templatePath()), 404);
 
         // The full workbook is also needed during the shared Parts 2–4 term.
@@ -382,10 +382,8 @@ Route::middleware('auth')->group(function () {
         $storedPath = Storage::disk('local')->path((string) $submission->downloadPath());
 
         // The owner's official copy follows the same part rule as their
-        // template: Part I only until the school year's final term. The
-        // superadmin's review download is always the archived file as
-        // stored — the trimmer needs a real workbook, so anything it
-        // cannot read (or a workbook with no PART I tab) is served as-is.
+        // template: Part I only until the school year's final term. Reviewer
+        // downloads always receive the archived file as stored.
         $bytes = null;
 
         if (! $user->hasAdminAccess() && ! OpcrfPartOne::windowOpen()) {
@@ -422,7 +420,10 @@ Route::middleware('auth')->group(function () {
             abort(404);
         }
 
-        abort_unless($submission->canBeDownloadedBy($user), 404);
+        abort_unless(
+            $submission->canBeDownloadedBy($user) || $submission->canBeViewedBySdsViewer($user),
+            404
+        );
         abort_unless($submission->hasSignedFile(), 404);
 
         $ratee = $submission->user;
@@ -493,8 +494,9 @@ Route::middleware('auth')->group(function () {
      * Financial Plan, as its own destination for the sidebar.
      *
      * The same list the dashboard card shows, reachable on its own URL.
-     * Admin-only: the School Head's /wfp workspace stays their own side of
-     * the workflow, and the Livewire component re-checks the gate too.
+     * The School Head's /wfp workspace stays their own side of the workflow;
+     * administrators, Budget reviewers, and SDS Viewers can read submissions.
+     * The Livewire component re-checks the gate too.
      * ----------------------------------------------------------------- */
 
     Route::get('/wfp/submissions', function () {

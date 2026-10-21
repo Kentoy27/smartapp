@@ -17,9 +17,9 @@ use Livewire\Component;
  * superadmin sees all of them together — school, uploader, file, size and
  * when it came in — with a download that serves the archived workbook.
  *
- * Superadmin-only (mount() aborts for everyone else), and it polls like the
- * rest of the dashboard's data-driven cards so an upload made a second ago
- * shows up without a reload.
+ * Read-only for administrators, Budget reviewers, and SDS Viewers. It polls
+ * like the rest of the dashboard's data-driven cards so a new upload appears
+ * without a reload.
  */
 class WfpUploadsList extends Component
 {

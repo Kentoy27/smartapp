@@ -8,7 +8,7 @@ use App\Models\OpcrfSubmission;
 use App\Models\OpcrfSubmissionVersion;
 use App\Models\User;
 use App\Notifications\OpcrfDecided;
-use App\Support\OpcrfSpreadsheet;
+use App\Support\OpcrfSubmissionWorkbook;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
@@ -113,50 +113,7 @@ class OpcrfReview extends Component
     {
         $submission = $this->reviewSubmission();
 
-        if ($submission === null || ! $submission->hasFile()) {
-            return null;
-        }
-
-        try {
-            $storedPath = Storage::disk('local')->path((string) $submission->downloadPath());
-
-            $spreadsheet = new OpcrfSpreadsheet($storedPath);
-
-            $sheet = [
-                'title' => mb_substr($spreadsheet->title(), 0, 200),
-                'headers' => $spreadsheet->headerCells(),
-                'evaluators' => $spreadsheet->evaluatorCells(),
-                // The office's Statement of Purpose (row 8) — the form's
-                // longest piece of prose, previously dropped entirely.
-                'purpose' => $spreadsheet->purposeStatement(),
-                'parts' => array_map(
-                    fn (array $part): array => [
-                        'key' => $part['key'],
-                        'title' => mb_substr($part['title'], 0, 200),
-                        'note' => mb_substr($part['note'], 0, 600),
-                        'rows' => $this->numberedRows($part['entries']),
-                        'total_score' => $part['total_score'],
-                        'has_total_row' => $part['has_total_row'],
-                        // The part's own column wording and its
-                        // planning/evaluation band captions, read from the
-                        // workbook's header row.
-                        'captions' => $part['captions'] ?? [],
-                        'fields' => array_keys($part['captions'] ?? []) ?: [
-                            'kra', 'attribution', 'objective', 'timeline', 'weight',
-                            'target_value', 'target_description', 'measure', 'scale',
-                            'movs', 'accomplishments', 'rating', 'average', 'weighted_average',
-                        ],
-                        'bands' => $part['bands'] ?? ['planning' => '', 'evaluation' => ''],
-                    ],
-                    $spreadsheet->parts()
-                ),
-                'signers' => $spreadsheet->signers(),
-            ];
-        } catch (\RuntimeException) {
-            return null; // Unreadable / not a workbook — show the summary instead.
-        }
-
-        return $sheet;
+        return $submission === null ? null : OpcrfSubmissionWorkbook::sheet($submission);
     }
 
     /**
@@ -192,13 +149,7 @@ class OpcrfReview extends Component
             return null;
         }
 
-        try {
-            return (new OpcrfSpreadsheet(
-                Storage::disk('local')->path((string) $submission->downloadPath())
-            ))->workbook();
-        } catch (\RuntimeException) {
-            return null;
-        }
+        return OpcrfSubmissionWorkbook::workbook($submission);
     }
 
     /**
@@ -210,23 +161,6 @@ class OpcrfReview extends Component
     public function reviewSignatures(): array
     {
         return $this->reviewSubmission()?->reviewerSignatures() ?? [];
-    }
-
-    /**
-     * 1-based numbering for the objectives table's first column (the
-     * template numbers objectives implicitly by row order) — shared with
-     * the staff upload flow's identical helper.
-     *
-     * @param  array<int, array{row: int, objectives: string, timeline: string, criteria: array<int, array{label: string, accomplishments: string, rating: ?float}>}>  $entries
-     * @return array<int, array{row: int, number: int, objectives: string, timeline: string, criteria: array<int, array{label: string, accomplishments: string, rating: ?float}>}>
-     */
-    private function numberedRows(array $entries): array
-    {
-        return array_map(function (array $entry, int $index): array {
-            $entry['number'] = $index + 1;
-
-            return $entry;
-        }, array_values($entries), array_keys(array_values($entries)));
     }
 
     /**

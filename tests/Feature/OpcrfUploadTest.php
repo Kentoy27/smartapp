@@ -629,6 +629,22 @@ class OpcrfUploadTest extends TestCase
         $this->assertDatabaseCount('opcrf_submissions', 0);
     }
 
+    public function test_viewers_are_blocked_from_the_opcrf_upload_component(): void
+    {
+        $viewer = User::create([
+            'name' => 'SDS Viewer',
+            'username' => 'viewer',
+            'email' => 'viewer@example.com',
+            'password' => Hash::make('password123'),
+            'role' => 'viewer',
+            'is_superadmin' => false,
+        ]);
+
+        Livewire::actingAs($viewer)
+            ->test(OpcrfUpload::class)
+            ->assertNotFound();
+    }
+
     public function test_the_upload_button_sits_beside_download_on_the_template_card(): void
     {
         $user = $this->staffUser();

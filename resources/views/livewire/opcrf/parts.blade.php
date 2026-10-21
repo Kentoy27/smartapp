@@ -21,7 +21,9 @@
     <div class="opcrf-parts-head">
         <h2 class="opcrf-parts-title">OPCRF {{ $year }}</h2>
         <p class="opcrf-parts-sub">
-            @if ($openCount > 0)
+            @if ($readOnly)
+                Part details are available to School Heads only.
+            @elseif ($openCount > 0)
                 {{ $openCount === 1 ? 'One Part is' : $openCount.' Parts are' }} open for you now.
             @else
                 No Part is open at the moment — each one below says when it opens.
@@ -29,6 +31,7 @@
         </p>
     </div>
 
+    @unless ($readOnly)
     <div class="opcrf-parts-grid">
         @foreach ($parts as $part)
             <div class="opcrf-part-card opcrf-part-card--{{ $part['card_tone'] }}" wire:key="{{ $part['is_grouped_term'] ? 'parts-2-4' : 'part-1' }}">
@@ -63,7 +66,12 @@
                     <p class="opcrf-part-countdown">{{ $part['countdown'] }}</p>
                 @endif
 
-                @if ($part['is_grouped_term'])
+                @if ($readOnly)
+                    <span class="opcrf-part-action opcrf-part-action--locked" aria-disabled="true">
+                        <x-icon name="eye" :size="15" />
+                        <span>View only</span>
+                    </span>
+                @elseif ($part['is_grouped_term'])
                     <div
                         class="opcrf-parts-group-actions"
                         role="group"
@@ -129,4 +137,5 @@
             </div>
         @endforeach
     </div>
+    @endunless
 </div>

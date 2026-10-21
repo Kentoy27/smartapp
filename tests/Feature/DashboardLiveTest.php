@@ -169,6 +169,7 @@ class DashboardLiveTest extends TestCase
             ->assertOk()
             ->assertSee('staff-dashboard-grid', false)
             ->assertSee('Performance plan')
+            ->assertSee('upload your commitment')
             ->assertSee('Financial plan')
             ->assertSee('Download OPCRF Template')
             ->assertSee('Upload Commitment')
