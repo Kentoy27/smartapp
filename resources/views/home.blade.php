@@ -18,7 +18,7 @@
             </p>
         </div>
         @if (! $user->hasAdminAccess() && ! $isBudgetReviewer)
-            <a href="{{ route('mov.index') }}" class="dashboard-welcome__link" wire:navigate>
+            <a href="{{ route('mov.index') }}" class="dashboard-welcome__link" wire:navigate.hover>
                 <x-icon name="upload" :size="16" />
                 <span>Open MOV checklist</span>
                 <span aria-hidden="true">→</span>
@@ -45,7 +45,7 @@
                     </div>
                 </div>
                 <livewire:wfp-uploads-list />
-                <a href="{{ route('aip.review') }}" class="dashboard-plan-card__link" wire:navigate>
+                <a href="{{ route('aip.review') }}" class="dashboard-plan-card__link" wire:navigate.hover>
                     <x-icon name="eye" :size="14" />
                     Review submitted AIP plans <span aria-hidden="true">→</span>
                 </a>
@@ -91,10 +91,10 @@
                         <div class="dashboard-plan-card__actions">
                             <livewire:wfp-generate-button :key="'wfp-generate-card'" />
                         </div>
-                        <a href="{{ route('wfp.index') }}" class="dashboard-plan-card__link" wire:navigate>
+                        <a href="{{ route('wfp.index') }}" class="dashboard-plan-card__link" wire:navigate.hover>
                             Open WFP workspace <span aria-hidden="true">→</span>
                         </a>
-                        <a href="{{ route('wfp.matrices.index') }}" class="dashboard-plan-card__link" wire:navigate>
+                        <a href="{{ route('wfp.matrices.index') }}" class="dashboard-plan-card__link" wire:navigate.hover>
                             <x-icon name="file-spreadsheet" :size="14" />
                             Monthly Expenditure Matrix <span aria-hidden="true">→</span>
                         </a>

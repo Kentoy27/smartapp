@@ -27,7 +27,7 @@
                          dialog is the way to the signature, so the link to the
                          account it belongs to sits here. --}}
                     <p class="modal-footnote">
-                        <a href="{{ route('profile.index') }}" wire:navigate>Open the full profile page</a>
+                        <a href="{{ route('profile.index') }}" wire:navigate.hover>Open the full profile page</a>
                         — your account details, on the page you can bookmark.
                     </p>
                 </div>

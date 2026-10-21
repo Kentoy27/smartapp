@@ -29,6 +29,7 @@ class SidebarWfpNavTest extends TestCase
             // Both pages are inside the group, one click away on arrival.
             ->assertSee('Work & Financial Plan')
             ->assertSee(route('wfp.index'), false)
+            ->assertSee('wire:navigate.hover', false)
             ->assertSee('Monthly Expenditure Matrix')
             ->assertSee(route('wfp.matrices.index'), false)
             // The disclosure reads expanded without being clicked.

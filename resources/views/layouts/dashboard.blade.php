@@ -7068,6 +7068,8 @@
             <div class="credits-modal-body">
                 <p class="credits-modal-name" id="creditsModalDescription">John Kenneth Ang</p>
                 <p class="credits-modal-role">Full-Stack Developer</p>
+                <p class="credits-modal-name">Jethro Salvio</p>
+                <p class="credits-modal-role">Supporting Full-Stack Developer</p>
             </div>
         </section>
     </div>

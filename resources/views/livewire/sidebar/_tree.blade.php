@@ -63,7 +63,7 @@
         <a
             class="nav-mov{{ $onScreen ? ' is-active' : '' }}"
             href="{{ $node['url'] }}"
-            wire:navigate
+            wire:navigate.hover
             title="{{ $node['title'] }} — {{ $node['status_label'] }}"
             aria-label="{{ $node['label'] }} — {{ $node['title'] }} — {{ $node['status_label'] }}"
             aria-current="{{ $onScreen ? 'true' : 'false' }}"
@@ -94,7 +94,7 @@
         <a
             class="nav-group-link{{ request()->routeIs($node['route']) ? ' is-active' : '' }}"
             href="{{ $node['url'] }}"
-            wire:navigate
+            wire:navigate.hover
             title="{{ $node['title'] ?? $node['label'] }}"
             aria-current="{{ request()->routeIs($node['route']) ? 'true' : 'false' }}"
             wire:key="nav-group-link-{{ $node['key'] }}"

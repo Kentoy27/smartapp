@@ -16,7 +16,7 @@
 
     <div class="page-header">
         <div class="memory-breadcrumb">
-            <a href="{{ route('wfp.matrices.index') }}" wire:navigate>Monthly Expenditure Matrix</a>
+            <a href="{{ route('wfp.matrices.index') }}" wire:navigate.hover>Monthly Expenditure Matrix</a>
             <span aria-hidden="true">›</span>
             <span>WFP {{ $plan->fiscalYearLabel() }}</span>
         </div>

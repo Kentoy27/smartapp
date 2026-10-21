@@ -16,7 +16,7 @@
 
     <div class="page-header">
         <div class="memory-breadcrumb">
-            <a href="{{ route('aip.index') }}" wire:navigate>Annual Implementation Plan</a>
+            <a href="{{ route('aip.index') }}" wire:navigate.hover>Annual Implementation Plan</a>
             <span aria-hidden="true">›</span>
             <span>{{ $plan->fiscalYearLabel() }}</span>
         </div>
@@ -104,7 +104,7 @@
         @if ($plan->wfpPlan)
             <p class="mem-toolbar-copy aip-wfp-note">
                 Linked to the
-                <a href="{{ route('wfp.plans.edit', ['plan' => $plan->wfpPlan->id]) }}" wire:navigate>Work and Financial Plan for {{ $plan->wfpPlan->fiscalYearLabel() }}</a>
+                <a href="{{ route('wfp.plans.edit', ['plan' => $plan->wfpPlan->id]) }}" wire:navigate.hover>Work and Financial Plan for {{ $plan->wfpPlan->fiscalYearLabel() }}</a>
                 — use <strong>Copy from WFP</strong> to start from its lines.
             </p>
         @endif

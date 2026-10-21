@@ -126,7 +126,7 @@
                                 <td class="mem-linetotal">{{ number_format($plan->annualBudgetTotal(), 2) }}</td>
                                 <td>
                                     @if ($plan->wfpPlan)
-                                        <a href="{{ route('wfp.plans.edit', ['plan' => $plan->wfpPlan->id]) }}" wire:navigate>
+                                        <a href="{{ route('wfp.plans.edit', ['plan' => $plan->wfpPlan->id]) }}" wire:navigate.hover>
                                             {{ $plan->wfpPlan->fiscalYearLabel() }}
                                         </a>
                                     @else
@@ -147,7 +147,7 @@
                                     <a
                                         href="{{ route('aip.plans.edit', ['plan' => $plan->id]) }}"
                                         class="users-action"
-                                        wire:navigate
+                                        wire:navigate.hover
                                     >
                                         <span class="users-action-inner">
                                             <x-icon name="file-spreadsheet" :size="14" />

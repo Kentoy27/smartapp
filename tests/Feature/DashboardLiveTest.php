@@ -92,7 +92,9 @@ class DashboardLiveTest extends TestCase
                 ->assertSee('id="creditsModal"', false)
                 ->assertSee('System Credits')
                 ->assertSee('John Kenneth Ang')
-                ->assertSee('Full-Stack Developer');
+                ->assertSee('Full-Stack Developer')
+                ->assertSee('Jethro Salvio')
+                ->assertSee('Supporting Full-Stack Developer');
         }
     }
 

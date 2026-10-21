@@ -91,7 +91,7 @@
             <a
                 href="{{ route($item['route']) }}"
                 class="nav-item{{ request()->routeIs($item['route']) ? ' active' : '' }}"
-                wire:navigate
+                wire:navigate.hover
                 wire:current.exact="active"
                 wire:key="sidebar-{{ $item['path'] }}"
             >

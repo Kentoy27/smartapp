@@ -43,7 +43,7 @@
             @forelse ($this->lines() as $line)
                 <a
                     href="{{ $line['link'] }}"
-                    wire:navigate
+                    wire:navigate.hover
                     wire:click="markRead('{{ $line['id'] }}')"
                     class="notif-item {{ $line['unread'] ? 'is-unread' : '' }}"
                     wire:key="notif-{{ $line['id'] }}"

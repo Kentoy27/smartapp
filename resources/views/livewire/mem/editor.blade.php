@@ -17,7 +17,7 @@
 
     <div class="page-header">
         <div class="memory-breadcrumb">
-            <a href="{{ route('wfp.matrices.index') }}" wire:navigate>Monthly Expenditure Matrix</a>
+            <a href="{{ route('wfp.matrices.index') }}" wire:navigate.hover>Monthly Expenditure Matrix</a>
             <span aria-hidden="true">›</span>
             <span>{{ $matrix->periodLabel() }}</span>
         </div>
@@ -47,7 +47,7 @@
             @elseif ($tab['id'] !== null)
                 <a
                     href="{{ route('wfp.matrices.edit', ['matrix' => $tab['id']]) }}"
-                    wire:navigate
+                    wire:navigate.hover
                     class="mem-month-tab"
                     title="Open {{ $tab['label'] }}"
                 >
