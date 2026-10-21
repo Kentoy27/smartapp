@@ -63,7 +63,7 @@
                 <div class="staff-dashboard-panel__intro">
                     <span class="staff-dashboard-panel__step">01</span>
                     <div>
-                        <h2 id="dashboard-opcrf-heading">Performance plan</h2>
+                        <h2 id="dashboard-opcrf-heading">Office Performance Commitment and Review Form (OPCRF)</h2>
                         <p>Prepare your OPCRF, upload your commitment, and follow its review status.</p>
                     </div>
                 </div>
