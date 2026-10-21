@@ -1,5 +1,6 @@
 {{-- ONE LEVEL of a sidebar navigation tree, rendered by itself so the tree
-     can be any depth: the MOV checklist's Part → Category → KRA → MOV.
+     can be any depth: Part 1 section → KRA → MOV (other Parts retain
+     Part → Category → KRA → MOV).
 
      Three kinds of node, and the difference between them is the whole point
      of the tree:
@@ -15,8 +16,8 @@
          has no tree of its own one level down — the WFP group's two pages.
          It is marked by the route it is on rather than by a status dot.
 
-     Each level steps in, so Part → category → KRA → MOV is legible at a
-     glance, and the count on every branch covers the MOVs listed beneath it. --}}
+     Each level steps in, so the hierarchy is legible at a glance, and the
+     count on every branch covers the MOVs listed beneath it. --}}
 @foreach ($nodes as $node)
     @if (($node['children'] ?? []) !== [])
         {{-- A BRANCH: opens what is under it. The row is one target —

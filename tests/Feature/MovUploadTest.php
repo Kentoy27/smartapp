@@ -261,23 +261,25 @@ class MovUploadTest extends TestCase
 
         $tree = collect($this->movTreeFor($staff));
 
-        // The Parts exactly as the tables hold them — not a hardcoded
-        // Part 1 … Part 4. There is no "All MOVs" leaf: the whole checklist
-        // is where the page opens, and the tree is Parts and what is under
-        // them.
+        // Part I's A/B/C sections each have their own top-level navigation
+        // node; the other Parts still follow their catalogue names.
         $this->assertSame(
-            MovPart::query()->active()->orderBy('part_order')->orderBy('id')->pluck('name')->all(),
+            MovPart::query()
+                ->active()
+                ->orderBy('part_order')
+                ->orderBy('id')
+                ->get()
+                ->flatMap(fn (MovPart $part): array => $part->name === 'PART 1'
+                    ? ['PART 1-A', 'PART 1-B', 'PART 1-C']
+                    : [$part->name])
+                ->all(),
             $tree->pluck('label')->all(),
         );
 
-        // A/B/C remain distinct and each uses the KRA labels from its own
-        // official template section before listing the MOV leaves.
-        $part = $tree->firstWhere('label', 'PART 1');
-        $categories = collect($part['children']);
-
-        $this->assertSame(['A', 'B', 'C'], $categories->pluck('label')->all());
-
-        $categoryA = $categories->firstWhere('label', 'A');
+        // A/B/C each use the KRA labels from their own official section.
+        $categoryA = $tree->firstWhere('label', 'PART 1-A');
+        $categoryB = $tree->firstWhere('label', 'PART 1-B');
+        $categoryC = $tree->firstWhere('label', 'PART 1-C');
         $kraGroupsA = collect($categoryA['children']);
         $this->assertSame([
             'KRA 1: School Leadership and Administration',
@@ -303,8 +305,6 @@ class MovUploadTest extends TestCase
         );
 
         // Each category carries its own list: B has four and C has three.
-        $categoryB = $categories->firstWhere('label', 'B');
-        $categoryC = $categories->firstWhere('label', 'C');
         $this->assertCount(4, $this->movLeaves($categoryB['children']));
         $this->assertCount(3, $this->movLeaves($categoryC['children']));
         $this->assertSame([
@@ -323,10 +323,36 @@ class MovUploadTest extends TestCase
             fn (array $group): int => $kraMovNumbers($group)[0],
         )->all());
 
-        // The counts on the two headers are over exactly what is listed
-        // beneath them.
+        // Each header's count covers exactly the MOVs listed beneath it.
         $this->assertSame('0/16', $categoryA['meta']);
-        $this->assertSame('0/23', $part['meta']);
+        $this->assertSame('0/4', $categoryB['meta']);
+        $this->assertSame('0/3', $categoryC['meta']);
+    }
+
+    public function test_the_sidebar_sorts_kras_and_movs_by_their_numbers(): void
+    {
+        $this->seedChecklist();
+        $staff = $this->staff();
+
+        MovRequirement::whereHas('category', fn ($query) => $query->where('name', 'A'))
+            ->get()
+            ->each(fn (MovRequirement $requirement) => $requirement->update([
+                'display_order' => 100 - $requirement->display_order,
+            ]));
+
+        $partA = collect($this->movTreeFor($staff))->firstWhere('label', 'PART 1-A');
+        $groups = collect($partA['children']);
+
+        $this->assertSame([1, 2, 3, 4], $groups->map(
+            fn (array $group): int => (int) substr($group['label'], 4, 1),
+        )->all());
+        $this->assertSame(
+            [[1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11], [12, 13, 14, 15, 16]],
+            $groups->map(fn (array $group): array => collect($this->movLeaves($group['children']))
+                ->map(fn (array $mov): int => (int) substr($mov['label'], 4))
+                ->all()
+            )->all(),
+        );
     }
 
     public function test_a_category_the_config_grows_appears_in_the_tree_with_its_own_movs(): void
@@ -412,10 +438,9 @@ class MovUploadTest extends TestCase
         $this->assertSame('ok', $this->movLeaf($this->movTreeFor($one), $requirement->id)['status']);
         $this->assertSame('none', $this->movLeaf($this->movTreeFor($two), $requirement->id)['status']);
 
-        // The Part and category counts follow the same person's rows — and
-        // the Part's own total is the whole of what it holds, 16 + 4 + 3.
-        $this->assertSame('1/23', collect($this->movTreeFor($one))->firstWhere('label', 'PART 1')['meta']);
-        $this->assertSame('0/23', collect($this->movTreeFor($two))->firstWhere('label', 'PART 1')['meta']);
+        // The Part 1-A count follows the same person's uploads.
+        $this->assertSame('1/16', collect($this->movTreeFor($one))->firstWhere('label', 'PART 1-A')['meta']);
+        $this->assertSame('0/16', collect($this->movTreeFor($two))->firstWhere('label', 'PART 1-A')['meta']);
     }
 
     public function test_a_mov_whose_picture_was_asked_back_reads_as_asking_for_attention(): void
@@ -452,11 +477,11 @@ class MovUploadTest extends TestCase
         $this->seedChecklist();
         $staff = $this->staff();
 
-        $partMeta = fn () => collect($this->movTreeFor($staff))->firstWhere('label', 'PART 1')['meta'];
+        $partMeta = fn () => collect($this->movTreeFor($staff))->firstWhere('label', 'PART 1-A')['meta'];
 
-        // 16 + 4 + 3, straight off the tables — not a constant in a view.
+        // Counts are straight off the tables, not a constant in a view.
         $this->assertSame(23, MovRequirement::query()->active()->required()->count());
-        $this->assertSame('0/23', $partMeta());
+        $this->assertSame('0/16', $partMeta());
 
         // Upload against one required MOV and the count follows it.
         UserMov::create([
@@ -470,7 +495,7 @@ class MovUploadTest extends TestCase
             'uploaded_at' => now(),
         ]);
 
-        $this->assertSame('1/23', $partMeta());
+        $this->assertSame('1/16', $partMeta());
     }
 
     public function test_the_sidebar_carries_no_progress_panel(): void
@@ -492,7 +517,7 @@ class MovUploadTest extends TestCase
         // What is left above the tree is nothing at all: the panel is gone,
         // and so is the search box that used to sit in it.
         $this->assertStringNotContainsString('Search MOV...', $html);
-        $this->assertStringContainsString("toggleMovNode('part-", $html);
+        $this->assertStringContainsString("toggleMovNode('category-", $html);
     }
 
     public function test_the_sidebar_carries_no_search_box(): void
@@ -511,13 +536,12 @@ class MovUploadTest extends TestCase
         $this->assertStringNotContainsString('nav-mov-search', $html);
         $this->assertStringNotContainsString('movSearch', $html);
 
-        // The tree it did have is untouched by the removal: still the whole
-        // checklist, every MOV under its own Part and category.
+        // The tree still lists the whole checklist, split into sections.
         $tree = $this->movTreeFor($staff);
 
         $movs = collect($this->movLeaves($tree));
 
-        $this->assertSame(['PART 1'], collect($tree)->pluck('label')->all());
+        $this->assertSame(['PART 1-A', 'PART 1-B', 'PART 1-C'], collect($tree)->pluck('label')->all());
         $this->assertCount(
             MovRequirement::query()->active()->count(),
             $movs,
@@ -533,13 +557,10 @@ class MovUploadTest extends TestCase
         $part = MovPart::where('name', 'PART 1')->firstOrFail();
         $categoryA = MovCategory::where('mov_part_id', $part->id)->where('name', 'A')->firstOrFail();
 
-        // Open the dropdown, the Part and the category so the MOV leaves are
-        // rendered — the tree starts collapsed, and a MOV link only exists
-        // once its category is open.
+        // Open Part 1-A and its KRA so the MOV leaves are rendered.
         $html = Livewire::actingAs($staff)
             ->test(Sidebar::class)
             ->call('toggleGroup', 'movs')
-            ->call('toggleMovNode', 'part-'.$part->id)
             ->call('toggleMovNode', 'category-'.$part->id.'-'.$categoryA->id)
             ->call('toggleMovNode', $this->kraNodeKey($categoryA, 'KRA 1: School Leadership and Administration'))
             ->html();
@@ -550,8 +571,8 @@ class MovUploadTest extends TestCase
         $this->assertStringContainsString('wire:click="toggleGroup(\'movs\')"', $html);
         $this->assertStringContainsString('aria-controls="sidebar-group-movs"', $html);
 
-        // The dropdown carries Parts, categories and MOVs — and no "All MOVs"
-        // leaf. Every MOV in it is a link to that MOV on its own.
+        // The dropdown carries Part 1-A/B/C, KRA groups and MOVs — and no
+        // "All MOVs" leaf. Every MOV in it links to that MOV on its own.
         $this->assertStringNotContainsString('nav-subitem', $html);
         $this->assertStringNotContainsString('No MOVs are configured yet', $html);
         $this->assertStringContainsString(
@@ -583,33 +604,23 @@ class MovUploadTest extends TestCase
         $this->seedChecklist();
         $staff = $this->staff();
 
-        // Nothing filters the rail: the tree is the whole checklist, every
-        // MOV under its own Part and category, in the catalogue's order.
+        // Nothing filters the rail: the whole checklist is split into
+        // Part 1-A/B/C, in the catalogue's order.
         $tree = collect($this->movTreeFor($staff));
 
-        $this->assertSame(['PART 1'], $tree->pluck('label')->all());
+        $this->assertSame(['PART 1-A', 'PART 1-B', 'PART 1-C'], $tree->pluck('label')->all());
 
-        $part = $tree->last();
-
-        $categories = collect($part['children']);
-
-        $this->assertSame(['A', 'B', 'C'], $categories->pluck('label')->all());
-
-        $movs = collect($this->movLeaves($categories->first()['children']));
+        $movs = collect($this->movLeaves($tree->first()['children']));
 
         $this->assertCount(16, $movs);
         $this->assertSame('MOV 1', $movs->first()['label']);
         $this->assertStringContainsString('KRA 1: School Leadership and Administration', $movs->first()['title']);
 
-        // The counts cover everything the branch holds.
-        $this->assertSame('0/16', $categories->first()['meta']);
-        $this->assertSame('0/23', $part['meta']);
+        // The count covers exactly the MOVs the branch holds.
+        $this->assertSame('0/16', $tree->first()['meta']);
 
-        // One entry per active Part in the database, and nothing else.
-        $this->assertCount(
-            MovPart::query()->active()->count(),
-            collect($this->movTreeFor($staff)),
-        );
+        // Part 1 is represented by three section rows instead of one Part row.
+        $this->assertCount(MovPart::query()->active()->count() + 2, $tree);
         $this->assertStringNotContainsString(
             'All MOVs',
             Livewire::actingAs($staff)->test(Sidebar::class)->call('toggleGroup', 'movs')->html(),
@@ -626,18 +637,15 @@ class MovUploadTest extends TestCase
 
         $component = Livewire::actingAs($staff)->test(Sidebar::class);
 
-        $component->call('toggleMovNode', 'part-'.$part->id)
-            ->assertSet('movOpenParts.'.$part->id, true);
-
         $component->call('toggleMovNode', 'category-'.$part->id.'-'.$categoryA->id)
             ->assertSet('movOpenCategories.'.$part->id.':'.$categoryA->id, true);
 
-        $component->call('toggleMovNode', 'part-'.$part->id)
-            ->assertSet('movOpenParts.'.$part->id, false);
+        $component->call('toggleMovNode', 'category-'.$part->id.'-'.$categoryA->id)
+            ->assertSet('movOpenCategories.'.$part->id.':'.$categoryA->id, false);
 
         // A MOV is a link, not a node to open: nothing happens.
         $component->call('toggleMovNode', 'mov-'.$this->wfpRequirement()->id)
-            ->assertSet('movOpenParts.'.$part->id, false);
+            ->assertSet('movOpenCategories.'.$part->id.':'.$categoryA->id, false);
     }
 
     public function test_a_focused_mov_does_not_prevent_its_tree_nodes_from_closing(): void
@@ -658,12 +666,7 @@ class MovUploadTest extends TestCase
             ->set('movOpenCategories.'.$part->id.':'.$category->id, true)
             ->set('movOpenKras.'.$kraKey, true);
 
-        $component->call('toggleMovNode', 'part-'.$part->id)
-            ->assertSet('movOpenParts.'.$part->id, false)
-            ->assertDontSee("toggleMovNode('category-".$part->id.'-'.$category->id."')");
-
-        $component->call('toggleMovNode', 'part-'.$part->id)
-            ->call('toggleMovNode', 'category-'.$part->id.'-'.$category->id)
+        $component->call('toggleMovNode', 'category-'.$part->id.'-'.$category->id)
             ->assertSet('movOpenCategories.'.$part->id.':'.$category->id, false)
             ->assertDontSee('href="'.route('mov.index', ['mov' => $requirement->id]).'"', false);
     }
@@ -678,39 +681,38 @@ class MovUploadTest extends TestCase
 
         $html = $this->actingAs($staff)->get(route('mov.index'))->getContent();
 
-        // The tree starts straight at the first Part: nothing is stacked
-        // above it, neither a progress block nor a search box.
+        // The tree starts at Part 1-A, with no progress or search box stacked
+        // above it.
         $this->assertStringNotContainsString('Search MOV...', $html);
 
-        // A Part is a disclosure in its own right; its categories are one
-        // click further in, not listed on arrival.
-        $this->assertStringContainsString("toggleMovNode('part-".$part->id."')", $html);
+        // Part 1-A is the disclosure; its KRA groups are one click further in.
+        $this->assertStringContainsString('PART 1-A', $html);
+        $this->assertStringContainsString("toggleMovNode('category-".$part->id.'-'.$categoryA->id."')", $html);
         $this->assertStringContainsString('nav-tree--1', $html);
-        $this->assertStringNotContainsString("toggleMovNode('category-", $html);
 
-        // Opening it reveals the categories — one level deeper, each with
-        // its own id, and each a disclosure of its own.
+        // Opening it reveals its KRA groups one level deeper.
         $html = Livewire::actingAs($staff)->test(Sidebar::class)
             ->call('toggleGroup', 'movs')
-            ->call('toggleMovNode', 'part-'.$part->id)
+            ->call('toggleMovNode', 'category-'.$part->id.'-'.$categoryA->id)
             ->html();
 
-        $this->assertStringContainsString("toggleMovNode('category-".$part->id.'-'.$categoryA->id."')", $html);
+        $this->assertStringContainsString(
+            "toggleMovNode('".$this->kraNodeKey($categoryA, 'KRA 1: School Leadership and Administration')."')",
+            $html
+        );
         $this->assertStringContainsString('nav-tree--2', $html);
 
-        // Categories reveal their KRA groups, and each group reveals its MOVs.
+        // A KRA reveals its MOVs.
         $html = Livewire::actingAs($staff)->test(Sidebar::class)
             ->call('toggleGroup', 'movs')
-            ->call('toggleMovNode', 'part-'.$part->id)
             ->call('toggleMovNode', 'category-'.$part->id.'-'.$categoryA->id)
             ->html();
 
         $this->assertStringContainsString('KRA 1: School Leadership and Administration', $html);
-        $this->assertStringContainsString('nav-tree--3', $html);
+        $this->assertStringContainsString('nav-tree--2', $html);
 
         $html = Livewire::actingAs($staff)->test(Sidebar::class)
             ->call('toggleGroup', 'movs')
-            ->call('toggleMovNode', 'part-'.$part->id)
             ->call('toggleMovNode', 'category-'.$part->id.'-'.$categoryA->id)
             ->call('toggleMovNode', $this->kraNodeKey($categoryA, 'KRA 1: School Leadership and Administration'))
             ->html();
@@ -843,12 +845,10 @@ class MovUploadTest extends TestCase
             ->firstOrFail();
         $kraLabel = 'KRA 1: School Leadership and Administration';
 
-        // Open the dropdown and the Part, so the category's MOV leaves are
-        // rendered — each one a link to that MOV on its own page.
+        // Open Part 1-B and its KRA so its MOV leaves are rendered.
         $html = Livewire::actingAs($staff)
             ->test(Sidebar::class)
             ->call('toggleGroup', 'movs')
-            ->call('toggleMovNode', 'part-'.$part->id)
             ->call('toggleMovNode', 'category-'.$part->id.'-'.$categoryB->id)
             ->call('toggleMovNode', $this->kraNodeKey($categoryB, $kraLabel))
             ->html();

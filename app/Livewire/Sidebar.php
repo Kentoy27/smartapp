@@ -112,6 +112,7 @@ class Sidebar extends Component
 
             if ($category?->part !== null) {
                 $this->movOpenParts[$category->part->id] = true;
+                $this->movOpenCategories[$category->part->id.':'.$category->id] = true;
             }
         }
     }
@@ -479,22 +480,23 @@ class Sidebar extends Component
     }
 
     /**
-     * The MOV checklist as the sidebar walks it: Part → Category → KRA → MOV,
-     * with each MOV carrying the signed-in user's own upload state.
+     * The MOV checklist as the sidebar walks it: Part 1 section → KRA → MOV,
+     * with other Parts retaining their category level and each MOV carrying
+     * the signed-in user's own upload state.
      *
      * Built from the same catalogue rows the checklist page renders, with the
      * same active-only scoping, so the navigation can never offer a Part,
      * category, KRA or MOV that the page does not have. Nothing about the
      * shape is hardcoded: the Parts, categories, KRA labels and MOVs — and
-     * every MOV number and title — come from the tables, so if Part 1 → A
-     * holds four MOVs and Part 1 → B holds seven, that is exactly what is
+     * every MOV number and title — come from the tables, so if Part 1-A
+     * holds four MOVs and Part 1-B holds seven, that is exactly what is
      * listed.
      *
      * A MOV is identified by its requirement id, never by its number: MOV 1
-     * under Part 1 → A is a different requirement from MOV 1 under Part 1 → B,
+     * under Part 1-A is a different requirement from MOV 1 under Part 1-B,
      * and the link each leaf carries is that requirement's own deep link.
      *
-     * The tree is Parts and the MOVs under them, and nothing else: the whole
+     * The tree is Part sections and the MOVs under them, and nothing else: the whole
      * checklist is where the page opens and how it comes back to it, so no
      * "All MOVs" leaf is offered here to point at where you already are.
      *
@@ -557,6 +559,7 @@ class Sidebar extends Component
 
                     $mov = [
                         'key' => 'mov-'.$requirement->id,
+                        'sort_number' => $requirement->mov_number,
                         'section' => (string) $requirement->id,
                         'label' => $requirement->label(),
                         'hint' => $requirement->title,
@@ -591,6 +594,7 @@ class Sidebar extends Component
                             'open' => isset($this->movOpenKras[$kraKey]),
                             'children' => [],
                             'done' => 0,
+                            'order' => count($kraGroups),
                         ];
                     }
 
@@ -599,7 +603,45 @@ class Sidebar extends Component
                     $kraGroups[$kraKey]['meta'] = $kraGroups[$kraKey]['done'].'/'.count($kraGroups[$kraKey]['children']);
                 }
 
-                $movs = array_merge(array_values($kraGroups), $movs);
+                $orderedKras = array_values($kraGroups);
+                usort($orderedKras, static function (array $left, array $right): int {
+                    preg_match('/\bKRA\s+(\d+)\b/i', $left['label'], $leftMatch);
+                    preg_match('/\bKRA\s+(\d+)\b/i', $right['label'], $rightMatch);
+
+                    $leftNumber = isset($leftMatch[1]) ? (int) $leftMatch[1] : null;
+                    $rightNumber = isset($rightMatch[1]) ? (int) $rightMatch[1] : null;
+
+                    if ($leftNumber !== null && $rightNumber !== null && $leftNumber !== $rightNumber) {
+                        return $leftNumber <=> $rightNumber;
+                    }
+
+                    if (($leftNumber === null) !== ($rightNumber === null)) {
+                        return $leftNumber === null ? 1 : -1;
+                    }
+
+                    return $left['order'] <=> $right['order'];
+                });
+
+                foreach ($orderedKras as &$kraGroup) {
+                    usort($kraGroup['children'], static fn (array $left, array $right): int =>
+                        [$left['sort_number'], (int) $left['section']] <=> [$right['sort_number'], (int) $right['section']]
+                    );
+
+                    foreach ($kraGroup['children'] as &$mov) {
+                        unset($mov['sort_number']);
+                    }
+                    unset($mov);
+
+                    unset($kraGroup['order']);
+                }
+                unset($kraGroup);
+
+                foreach ($movs as &$mov) {
+                    unset($mov['sort_number']);
+                }
+                unset($mov);
+
+                $movs = array_merge($orderedKras, $movs);
 
                 // Rolled in before the category is kept, so a Part's count
                 // always covers everything it holds.
@@ -622,6 +664,22 @@ class Sidebar extends Component
 
             // A Part with nothing configured under it is not a place to go.
             if ($categories === []) {
+                continue;
+            }
+
+            if ($part->name === 'PART 1') {
+                foreach ($categories as $category) {
+                    $tree[] = [
+                        'key' => $category['key'],
+                        'section' => $category['section'],
+                        'label' => 'PART 1-'.$category['label'],
+                        'title' => 'PART 1-'.$category['label'],
+                        'meta' => $category['meta'],
+                        'open' => $category['open'],
+                        'children' => $category['children'],
+                    ];
+                }
+
                 continue;
             }
 
