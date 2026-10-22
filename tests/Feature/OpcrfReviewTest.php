@@ -679,7 +679,7 @@ class OpcrfReviewTest extends TestCase
 
         $this->assertTrue($submission->isApproved());
         $this->assertSame(OpcrfSubmission::STATUS_FOR_COMPLIANCE, $submission->status);
-        $this->assertSame('Approved', $submission->statusLabelFor($admin));
+        $this->assertSame('Approved by '.$admin->name, $submission->statusLabelFor($admin));
         $this->assertSame($admin->id, $submission->approved_by);
         $this->assertNotNull($submission->approved_at);
 
@@ -744,8 +744,9 @@ class OpcrfReviewTest extends TestCase
         Livewire::actingAs($admin)
             ->test(OpcrfReview::class)
             ->call('openReview', $submission->id)
-            ->assertSee('Approved')
-            ->assertSee('Status: Approved')
+            ->assertSee('Approved by '.$admin->name)
+            ->assertSee('Compliant')
+            ->assertSee('Status: Compliant')
             ->assertDontSee('Compliance — Final Sign-off')
             ->assertDontSee('For Compliance → For Compliance');
     }
@@ -799,7 +800,7 @@ class OpcrfReviewTest extends TestCase
             ->test(OpcrfReview::class)
             ->assertSee('Jane D. Doe')
             ->call('openReview', $submission->id)
-            ->assertSee('Approved')
+            ->assertSee('Compliant')
             ->assertSee('Compliant — on to the next review.')
             ->assertSee('Forwarded to: <strong>'.$next->username.'</strong>', false);
     }

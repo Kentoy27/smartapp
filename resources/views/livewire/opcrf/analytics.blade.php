@@ -32,7 +32,7 @@
             </div>
 
             <div class="stat-card">
-                <div class="stat-label">Approved</div>
+                <div class="stat-label">Compliant</div>
                 <div class="stat-value">{{ $this->approved() }}</div>
                 <div class="stat-sub">Signed off</div>
             </div>

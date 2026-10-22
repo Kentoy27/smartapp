@@ -103,7 +103,7 @@ class OpcrfSubmission extends Model
             self::STATUS_FOR_COMPLIANCE => 'For Compliance',
             self::STATUS_RETURNED => 'Returned for Revision',
             self::STATUS_RESUBMITTED => 'Resubmitted for Review',
-            self::STATUS_APPROVED => 'Approved',
+            self::STATUS_APPROVED => 'Compliant',
             default => ucfirst($status),
         };
     }
@@ -131,12 +131,13 @@ class OpcrfSubmission extends Model
                 : self::statusLabel(self::STATUS_FORWARDED);
         }
 
-        if (
-            $this->status === self::STATUS_FOR_COMPLIANCE
-            && $this->approved_at !== null
-            && $this->assigned_to === null
-        ) {
-            return self::statusLabel(self::STATUS_APPROVED);
+        if ($this->status === self::STATUS_FOR_COMPLIANCE && $this->approved_at !== null) {
+            $approver = $this->approvedBy;
+            $approverName = trim((string) ($approver?->name ?: $approver?->username));
+
+            return $approverName !== ''
+                ? 'Approved by '.$approverName
+                : self::statusLabel(self::STATUS_APPROVED);
         }
 
         return self::statusLabel((string) $this->status);
