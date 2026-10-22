@@ -63,6 +63,7 @@ class OpcrfSubmission extends Model
         'assigned_to',
         'status',
         'submitted_at',
+        'archived_at',
     ];
 
     protected $casts = [
@@ -70,6 +71,7 @@ class OpcrfSubmission extends Model
         'submitted_at' => 'datetime',
         'file_updated_at' => 'datetime',
         'approved_at' => 'datetime',
+        'archived_at' => 'datetime',
         'self_rating' => 'float',
     ];
 

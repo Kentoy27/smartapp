@@ -1676,7 +1676,7 @@
    the point is that the user can see it exists and when it opens — so the
    tone colours the card and the badge rather than removing anything. */
         .opcrf-parts {
-            margin-bottom: 22px;
+            margin-bottom: 14px;
         }
 
         .opcrf-parts-head {
@@ -1697,15 +1697,15 @@
 
         .opcrf-parts-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 14px;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 10px;
         }
 
         .opcrf-part-card {
             display: flex;
             flex-direction: column;
-            gap: 8px;
-            padding: 16px;
+            gap: 6px;
+            padding: 12px;
             border: 1px solid var(--border);
             border-left-width: 4px;
             border-radius: 10px;
@@ -2052,9 +2052,9 @@
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            padding: 3px 10px;
+            padding: 2px 8px;
             border-radius: 999px;
-            font-size: 0.71875rem;
+            font-size: 0.6875rem;
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.04em;
@@ -2089,17 +2089,17 @@
         }
 
         .opcrf-part-message {
-            font-size: 0.9375rem;
+            font-size: 0.8125rem;
             font-weight: 600;
             color: var(--text-strong);
-            line-height: 1.5;
+            line-height: 1.4;
         }
 
         .opcrf-part-detail,
         .opcrf-part-instructions {
-            font-size: 0.8125rem;
+            font-size: 0.75rem;
             color: var(--text-muted);
-            line-height: 1.55;
+            line-height: 1.4;
         }
 
         .opcrf-part-countdown {
@@ -2125,12 +2125,12 @@
             justify-content: center;
             gap: 8px;
             margin-top: auto;
-            padding: 9px 16px;
+            padding: 7px 12px;
             border-radius: 8px;
             border: 1px solid var(--primary);
             background: var(--primary);
             color: #fff;
-            font-size: 0.875rem;
+            font-size: 0.8125rem;
             font-weight: 600;
             text-decoration: none;
             transition: background 0.15s ease;
@@ -2144,7 +2144,7 @@
             width: 100%;
             cursor: pointer;
             font: inherit;
-            font-size: 0.875rem;
+            font-size: 0.8125rem;
         }
 
         .opcrf-parts-menu {
@@ -2194,7 +2194,7 @@
         .opcrf-parts-group-actions .opcrf-part-action {
             flex: 1 1 120px;
             margin-top: 0;
-            padding: 9px 12px;
+            padding: 7px 10px;
         }
 
         .opcrf-part-progress-label {

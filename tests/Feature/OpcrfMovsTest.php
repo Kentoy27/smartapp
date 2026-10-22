@@ -95,6 +95,80 @@ class OpcrfMovsTest extends TestCase
             ->assertDontSee('Teacher I');
     }
 
+    public function test_a_submission_can_be_archived_and_restored_from_the_archived_list(): void
+    {
+        $user = $this->staffUser();
+        $submission = $this->createSubmission($user);
+        $submission->update(['status' => OpcrfSubmission::STATUS_RETURNED]);
+
+        $component = Livewire::actingAs($user)
+            ->test(OpcrfMovs::class)
+            ->assertSee('Your OPCRF submissions')
+            ->assertSee('Archive')
+            ->call('openArchive', $submission->id)
+            ->assertSee('Archive OPCRF submission?')
+            ->assertSee('It will not be deleted');
+
+        $component->call('confirmArchive')
+            ->assertDontSee('Teacher I');
+        $this->assertDatabaseHas('opcrf_submissions', [
+            'id' => $submission->id,
+            'user_id' => $user->id,
+        ]);
+        $this->assertNotNull($submission->fresh()->archived_at);
+
+        $component->call('toggleArchived')
+            ->assertSee('Archived OPCRF submissions')
+            ->assertSee('Teacher I')
+            ->assertSee('Restore');
+
+        $component->call('restoreArchive', $submission->id)
+            ->assertSee('Archived OPCRF submissions')
+            ->assertDontSee('Teacher I')
+            ->call('toggleArchived')
+            ->assertSee('Your OPCRF submissions')
+            ->assertSee('Teacher I');
+        $this->assertNull($submission->fresh()->archived_at);
+    }
+
+    public function test_pending_submissions_cannot_be_archived(): void
+    {
+        $user = $this->staffUser();
+        $submission = $this->createSubmission($user);
+
+        Livewire::actingAs($user)
+            ->test(OpcrfMovs::class)
+            ->assertSee('Pending Review')
+            ->assertDontSee('Archive this OPCRF submission')
+            ->call('openArchive', $submission->id)
+            ->assertNotFound();
+
+        $this->assertNull($submission->fresh()->archived_at);
+    }
+
+    public function test_a_user_cannot_archive_another_users_submission(): void
+    {
+        $owner = $this->staffUser();
+        $other = $this->otherStaffUser();
+        $submission = $this->createSubmission($owner);
+
+        Livewire::actingAs($other)
+            ->test(OpcrfMovs::class)
+            ->call('openArchive', $submission->id)
+            ->assertNotFound();
+
+        $this->assertNull($submission->fresh()->archived_at);
+
+        $submission->update(['archived_at' => now()]);
+
+        Livewire::actingAs($other)
+            ->test(OpcrfMovs::class)
+            ->call('restoreArchive', $submission->id)
+            ->assertNotFound();
+
+        $this->assertNotNull($submission->fresh()->archived_at);
+    }
+
     public function test_an_approved_submission_offers_the_official_download(): void
     {
         Storage::fake('local');

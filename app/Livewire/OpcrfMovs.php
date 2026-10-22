@@ -50,6 +50,10 @@ class OpcrfMovs extends Component
      */
     public ?int $resubmittingId = null;
 
+    public ?int $archivingId = null;
+
+    public bool $showArchived = false;
+
     /**
      * The staff member's revised workbook (.xlsx), replacing the returned
      * one. Optional: resubmitting without a new file keeps the current
@@ -95,10 +99,75 @@ class OpcrfMovs extends Component
     public function submissions()
     {
         return OpcrfSubmission::where('user_id', Auth::id())
+            ->when(
+                $this->showArchived,
+                fn ($query) => $query->whereNotNull('archived_at'),
+                fn ($query) => $query->whereNull('archived_at')
+            )
             ->with('latestReview.reviewer')
             ->orderByDesc('submitted_at')
             ->orderByDesc('id')
             ->paginate($this->perPage);
+    }
+
+    public function toggleArchived(): void
+    {
+        $this->showArchived = ! $this->showArchived;
+        $this->resetPage();
+        $this->archivingId = null;
+    }
+
+    #[Computed]
+    public function archivingSubmission(): ?OpcrfSubmission
+    {
+        if ($this->archivingId === null) {
+            return null;
+        }
+
+        return OpcrfSubmission::where('user_id', Auth::id())
+            ->whereNull('archived_at')
+            ->where('status', '!=', OpcrfSubmission::STATUS_PENDING)
+            ->find($this->archivingId);
+    }
+
+    public function openArchive(int $submissionId): void
+    {
+        abort_unless(
+            OpcrfSubmission::where('user_id', Auth::id())
+                ->whereNull('archived_at')
+                ->where('status', '!=', OpcrfSubmission::STATUS_PENDING)
+                ->whereKey($submissionId)
+                ->exists(),
+            404
+        );
+
+        $this->archivingId = $submissionId;
+    }
+
+    public function closeArchive(): void
+    {
+        $this->archivingId = null;
+    }
+
+    public function confirmArchive(): void
+    {
+        $submission = $this->archivingSubmission();
+
+        abort_unless($submission !== null, 404);
+
+        $submission->update(['archived_at' => now()]);
+        $this->archivingId = null;
+        $this->resetPage();
+    }
+
+    public function restoreArchive(int $submissionId): void
+    {
+        $submission = OpcrfSubmission::where('user_id', Auth::id())
+            ->whereNotNull('archived_at')
+            ->findOrFail($submissionId);
+
+        $submission->update(['archived_at' => null]);
+        $this->resetPage();
     }
 
     /**

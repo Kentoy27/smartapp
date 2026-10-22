@@ -72,14 +72,27 @@
     {{-- SUBMISSIONS TABLE ----}}
     <div class="card">
         <div class="card-head">
-            <div class="card-title">Your OPCRF submissions</div>
+            <div class="card-title">{{ $showArchived ? 'Archived OPCRF submissions' : 'Your OPCRF submissions' }}</div>
+            <button
+                type="button"
+                class="btn-ghost"
+                wire:click="toggleArchived"
+                wire:loading.attr="disabled"
+            >
+                <x-icon name="{{ $showArchived ? 'arrow-left' : 'archive' }}" :size="14" />
+                <span>{{ $showArchived ? 'Back to submissions' : 'Archived' }}</span>
+            </button>
         </div>
         @if ($this->submissions->isEmpty())
             <p class="card-text">
-                Nothing submitted yet. Open the <strong>OPCRF Template</strong>
-                card on the <a href="{{ route('home') }}">Dashboard</a> and click
-                <strong>Upload your OPCR</strong> — your submissions will be
-                listed here.
+                @if ($showArchived)
+                    No archived OPCRF submissions. Archive a submission to move it here; you can restore it at any time.
+                @else
+                    Nothing submitted yet. Open the <strong>OPCRF Template</strong>
+                    card on the <a href="{{ route('home') }}">Dashboard</a> and click
+                    <strong>Upload your OPCR</strong> — your submissions will be
+                    listed here.
+                @endif
             </p>
         @else
             <div class="table-wrap">
@@ -128,33 +141,74 @@
                                     @endif
                                 </td>
                                 <td class="users-actions-col">
-                                    @if ($submission->status === \App\Models\OpcrfSubmission::STATUS_RETURNED)
+                                    @if ($showArchived)
+                                        @if ($submission->isApproved() && $submission->hasFile())
+                                            <a
+                                                class="users-action"
+                                                href="{{ route('opcrf.submission.download', $submission) }}"
+                                                title="Download the approved copy of your OPCRF"
+                                            >
+                                                <span class="users-action-inner">
+                                                    <x-icon name="download" :size="14" />
+                                                    <span>Download</span>
+                                                </span>
+                                            </a>
+                                        @endif
                                         <button
                                             type="button"
                                             class="users-action"
-                                            wire:click="openRevise({{ $submission->id }})"
+                                            wire:click="restoreArchive({{ $submission->id }})"
                                             wire:loading.attr="disabled"
-                                            wire:target="openRevise"
-                                            title="Revise and resubmit this OPCRF"
+                                            wire:target="restoreArchive"
+                                            title="Restore this OPCRF submission to the active list"
                                         >
                                             <span class="users-action-inner">
-                                                <x-icon name="pen-line" :size="14" />
-                                                <span>Revise &amp; Resubmit</span>
+                                                <x-icon name="archive-restore" :size="14" />
+                                                <span>Restore</span>
                                             </span>
                                         </button>
-                                    @elseif ($submission->isApproved() && $submission->hasFile())
-                                        <a
-                                            class="users-action"
-                                            href="{{ route('opcrf.submission.download', $submission) }}"
-                                            title="Download the approved copy of your OPCRF"
-                                        >
-                                            <span class="users-action-inner">
-                                                <x-icon name="download" :size="14" />
-                                                <span>Download</span>
-                                            </span>
-                                        </a>
                                     @else
-                                        <span class="opcrf-review-owner">—</span>
+                                        @if ($submission->status === \App\Models\OpcrfSubmission::STATUS_RETURNED)
+                                            <button
+                                                type="button"
+                                                class="users-action"
+                                                wire:click="openRevise({{ $submission->id }})"
+                                                wire:loading.attr="disabled"
+                                                wire:target="openRevise"
+                                                title="Revise and resubmit this OPCRF"
+                                            >
+                                                <span class="users-action-inner">
+                                                    <x-icon name="pen-line" :size="14" />
+                                                    <span>Revise &amp; Resubmit</span>
+                                                </span>
+                                            </button>
+                                        @elseif ($submission->isApproved() && $submission->hasFile())
+                                            <a
+                                                class="users-action"
+                                                href="{{ route('opcrf.submission.download', $submission) }}"
+                                                title="Download the approved copy of your OPCRF"
+                                            >
+                                                <span class="users-action-inner">
+                                                    <x-icon name="download" :size="14" />
+                                                    <span>Download</span>
+                                                </span>
+                                            </a>
+                                        @endif
+                                        @unless ($submission->status === \App\Models\OpcrfSubmission::STATUS_PENDING)
+                                            <button
+                                                type="button"
+                                                class="users-action"
+                                                wire:click="openArchive({{ $submission->id }})"
+                                                wire:loading.attr="disabled"
+                                                wire:target="openArchive"
+                                                title="Archive this OPCRF submission"
+                                            >
+                                                <span class="users-action-inner">
+                                                    <x-icon name="archive" :size="14" />
+                                                    <span>Archive</span>
+                                                </span>
+                                            </button>
+                                        @endunless
                                     @endif
                                 </td>
                             </tr>
@@ -251,6 +305,45 @@
                             <x-icon name="send" :size="14" />
                             <span wire:loading.remove wire:target="confirmResubmit">Resubmit for Review</span>
                             <span wire:loading wire:target="confirmResubmit">Resubmitting…</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    @endif
+
+    @if ($this->archivingSubmission !== null)
+        <div
+            class="modal-backdrop is-open"
+            x-data
+            @keydown.escape.window="$wire.closeArchive()"
+            @click.self="$wire.closeArchive()"
+            role="presentation"
+        >
+            <div class="modal" role="dialog" aria-modal="true" aria-labelledby="opcrfArchiveTitle" @click.stop>
+                <div class="modal-head">
+                    <h2 id="opcrfArchiveTitle">Archive OPCRF submission?</h2>
+                    <button type="button" class="modal-close" wire:click="closeArchive" aria-label="Close" title="Close">×</button>
+                </div>
+
+                <div class="modal-form">
+                    <p class="card-text">
+                        This will move <strong>{{ $this->archivingSubmission->partLabel() }}</strong>
+                        from your active submissions to Archived. It will not be deleted, and you can restore it later.
+                    </p>
+
+                    <div class="modal-actions">
+                        <button type="button" class="btn-ghost" wire:click="closeArchive">Cancel</button>
+                        <button
+                            type="button"
+                            class="btn-primary"
+                            wire:click="confirmArchive"
+                            wire:loading.attr="disabled"
+                            wire:target="confirmArchive"
+                        >
+                            <x-icon name="archive" :size="14" />
+                            <span wire:loading.remove wire:target="confirmArchive">Archive submission</span>
+                            <span wire:loading wire:target="confirmArchive">Archiving…</span>
                         </button>
                     </div>
                 </div>
