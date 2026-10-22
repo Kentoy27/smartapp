@@ -3,7 +3,6 @@
 namespace App\Livewire;
 
 use App\Models\OpcrfMov;
-use App\Models\OpcrfReview as OpcrfReviewEntry;
 use App\Models\OpcrfSubmission;
 use App\Models\OpcrfSubmissionVersion;
 use App\Models\User;
@@ -273,7 +272,7 @@ class OpcrfReview extends Component
     }
 
     /**
-     * Approve / Compliance: the submitted OPCRF is signed off as-is — the
+     * Approve: the submitted OPCRF is signed off as-is — the
      * original uploaded workbook is never replaced — and the same
      * submission auto-routes onward to the workflow's next superadmin (SY
      * by config): one row, one ID, complete history. Eve's records keep
@@ -297,16 +296,14 @@ class OpcrfReview extends Component
 
         $remarks = trim($this->reviewRemarks) !== '' ? trim($this->reviewRemarks) : null;
 
-        // Always auto-route: the workflow's next superadmin (SY), never the
-        // current holder themself (their compliance mark ends the chain).
+        // Route onward to the workflow's next superadmin. If there is no next
+        // reviewer, the current reviewer's approval ends the chain.
         $routeTo = $this->resolveNextReviewer($submission);
 
         $signatureStamped = $submission->stampReviewerSignature(Auth::user(), 'RATER');
         $submission->markCompliant(Auth::user(), $remarks, $routeTo);
 
-        // The staff member's bell now carries the decision, with the
-        // reviewer's own remarks — the wording does not claim the cycle is
-        // finished while the workflow may still route it onward.
+        // The staff member's bell carries the approval and reviewer's remarks.
         $submission->user?->notify(new OpcrfDecided(
             $submission,
             Auth::user(),
@@ -323,8 +320,8 @@ class OpcrfReview extends Component
         unset($this->submissions, $this->reviewSubmission, $this->reviewMovs, $this->reviewSheet, $this->reviewSheetRating, $this->reviewWorkbook, $this->reviewHistory);
 
         $this->successMessage = $routeTo !== null
-            ? 'OPCR marked compliant — routed to '.$routeTo->username.' for the next review step.'
-            : 'OPCR marked compliant/approved.';
+            ? 'OPCR approved — routed to '.$routeTo->username.' for the next review step.'
+            : 'OPCR approved.';
         if (! $signatureStamped) {
             $this->successMessage .= ' Your digital signature could not be added; check your profile signature and the workbook signer fields.';
         }
@@ -337,66 +334,6 @@ class OpcrfReview extends Component
         if ($routeTo !== null) {
             $this->dispatch('opcrf-submission-forwarded');
         }
-    }
-
-    /**
-     * Compliance: the reviewer's FINAL sign-off. The submitted OPCRF is
-     * marked compliant exactly like an approve, but the review chain ends
-     * with this reviewer — the submission is never routed onward to the
-     * next superadmin. The trail records it as its own action
-     * (ACTION_COMPLIANCE_FINAL) so the history distinguishes a final
-     * sign-off from an approve that passed the submission on.
-     */
-    public function complianceSubmission(): void
-    {
-        abort_unless(Auth::user()?->hasAdminAccess(), 404);
-
-        $submission = $this->reviewSubmission();
-
-        if ($submission === null) {
-            abort(403);
-        }
-
-        // Same act-guard as approve/return: only the superadmin currently
-        // holding the review step decides.
-        abort_unless($submission->isAssignedTo(Auth::user()), 403);
-
-        $remarks = trim($this->reviewRemarks) !== '' ? trim($this->reviewRemarks) : null;
-
-        $signatureStamped = $submission->stampReviewerSignature(Auth::user(), 'APPROVING AUTHORITY');
-
-        // No onward routing: the final sign-off deliberately passes null, so
-        // the chain ends with the signed-in reviewer.
-        $submission->markCompliant(
-            Auth::user(),
-            $remarks,
-            null,
-            OpcrfReviewEntry::ACTION_COMPLIANCE_FINAL,
-        );
-
-        // The staff member's bell carries the decision; "finished" is true
-        // here because a final sign-off never routes onward.
-        $submission->user?->notify(new OpcrfDecided(
-            $submission,
-            Auth::user(),
-            $remarks,
-            false,
-        ));
-
-        $this->showReview = false;
-        $this->reviewId = null;
-        $this->reviewRemarks = '';
-        $this->resetValidation();
-
-        unset($this->submissions, $this->reviewSubmission, $this->reviewMovs, $this->reviewSheet, $this->reviewSheetRating, $this->reviewWorkbook, $this->reviewHistory);
-
-        $this->successMessage = 'OPCR marked compliant — final sign-off recorded.';
-        if (! $signatureStamped) {
-            $this->successMessage .= ' Your digital signature could not be added; check your profile signature and the workbook signer fields.';
-        }
-
-        $this->dispatch('opcrf-submission-approved')->to(OpcrfMovs::class);
-        $this->dispatch('opcrf-submission-approved');
     }
 
     /**

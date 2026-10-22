@@ -142,10 +142,10 @@ class NotificationsMenu extends Component
             OpcrfDecided::class => [
                 'icon' => 'check-check',
                 'tone' => 'ok',
-                'title' => 'OPCRF marked compliant',
+                'title' => 'Approved by '.$this->decider($data),
                 'detail' => $this->remarks(
                     $data,
-                    ($data['decided_by'] ?? 'Your reviewer').' marked it compliant'
+                    $this->decider($data).' approved the OPCRF'
                         .(($data['forwarded_onward'] ?? false) === true ? ' and routed it to the next reviewer.' : '.')
                 ),
                 'link' => route('opcrf.index'),
@@ -186,6 +186,27 @@ class NotificationsMenu extends Component
         $name = trim((string) ($data['employee'] ?? ''));
 
         return $name !== '' ? $name : 'A staff member';
+    }
+
+    /**
+     * The name shown on the OPCRF approval notification. Older notifications
+     * only stored the reviewer's username, so keep that as the fallback.
+     */
+    private function decider(array $data): string
+    {
+        $name = trim((string) ($data['decided_by_name'] ?? ''));
+
+        if ($name !== '') {
+            return $name;
+        }
+
+        $username = trim((string) ($data['decided_by'] ?? ''));
+
+        if ($username === '') {
+            return 'Your superadmin';
+        }
+
+        return $username === strtoupper($username) ? $username : ucfirst($username);
     }
 
     /**

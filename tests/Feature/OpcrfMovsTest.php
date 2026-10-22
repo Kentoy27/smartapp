@@ -118,14 +118,17 @@ class OpcrfMovsTest extends TestCase
         $this->assertNotNull($submission->fresh()->archived_at);
 
         $component->call('toggleArchived')
+            ->assertSee('Your OPCRF submissions')
             ->assertSee('Archived OPCRF submissions')
-            ->assertSee('Teacher I')
-            ->assertSee('Restore');
+            ->assertSee('January to December 2026')
+            ->assertSee('Restore')
+            ->assertSee('aria-modal="true"', false);
 
         $component->call('restoreArchive', $submission->id)
             ->assertSee('Archived OPCRF submissions')
-            ->assertDontSee('Teacher I')
-            ->call('toggleArchived')
+            ->assertSee('No archived OPCRF submissions');
+        $component->call('closeArchived')
+            ->assertDontSee('Archived OPCRF submissions')
             ->assertSee('Your OPCRF submissions')
             ->assertSee('Teacher I');
         $this->assertNull($submission->fresh()->archived_at);

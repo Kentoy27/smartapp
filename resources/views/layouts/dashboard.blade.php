@@ -4441,6 +4441,10 @@
             overflow-y: auto;
         }
 
+        .modal--opcrf-archive {
+            max-width: min(960px, 96vw);
+        }
+
         .district-add-form {
             display: flex;
             gap: 10px;

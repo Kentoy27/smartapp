@@ -8,11 +8,7 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Notifications\Notification;
 
 /**
- * "OPCRF Approved" — sent to the staff member when a reviewer marks their
- * submission compliant. The workflow may then route it onward to the next
- * superadmin for final approval, so the wording says "marked compliant"
- * rather than promising the cycle is finished; the staff table still shows
- * the live status.
+ * Sent to the staff member when a superadmin approves their OPCRF submission.
  */
 class OpcrfDecided extends Notification
 {
@@ -37,14 +33,17 @@ class OpcrfDecided extends Notification
     }
 
     /**
-     * @return array{submission_id: int, review_period: string, decided_by: string, remarks: ?string, forwarded_onward: bool, decided_at: string}
+     * @return array{submission_id: int, review_period: string, decided_by: string, decided_by_name: string, remarks: ?string, forwarded_onward: bool, decided_at: string}
      */
     public function toArray(object $notifiable): array
     {
+        $reviewerName = trim((string) $this->reviewer->name);
+
         return [
             'submission_id' => $this->submission->id,
             'review_period' => (string) $this->submission->review_period,
             'decided_by' => $this->reviewer->username,
+            'decided_by_name' => $reviewerName !== '' ? $reviewerName : $this->reviewer->username,
             'remarks' => $this->remarks,
             'forwarded_onward' => $this->forwardedOnward,
             'decided_at' => now()->toIso8601String(),

@@ -142,11 +142,11 @@ class OpcrfReviewTest extends TestCase
             ->assertSee('Teacher I')
             ->assertSee('Schools Division Office')
             // The review's write steps are right there in the modal —
-            // remarks, compliance, return — and no upload anywhere. Routing
+            // remarks, approve, return — and no upload anywhere. Routing
             // is automatic: there is no manual forwarding step.
             ->assertSee('Review Decision')
             ->assertSee('>Approve</span>', false)
-            ->assertSee('>Compliance</span>', false)
+            ->assertDontSee('>Compliance</span>', false)
             ->assertSee('Return for Revision')
             ->assertSee('Review History')
             ->assertSee('No review activity yet')
@@ -697,58 +697,6 @@ class OpcrfReviewTest extends TestCase
             'from_id' => null,
             'to_id' => null,
         ]);
-    }
-
-    public function test_compliance_is_a_final_sign_off_that_does_not_route_onward(): void
-    {
-        $admin = $this->superadmin();
-        $next = $this->otherSuperadmin();
-        $staff = $this->staffUser();
-        $submission = $this->createSubmission($staff, ['reviewer_id' => $admin->id]);
-
-        // The onward hop IS configured, so an Approve here would route the
-        // submission to $next — proving the Compliance action deliberately
-        // ignores it and ends the chain with the signing reviewer.
-        config(['opcrf.next_reviewer' => $next->username]);
-
-        Livewire::actingAs($admin)
-            ->test(OpcrfReview::class)
-            ->call('openReview', $submission->id)
-            ->set('reviewRemarks', 'Signed off — final.')
-            ->call('complianceSubmission')
-            ->assertSet('showReview', false);
-
-        $submission->refresh();
-
-        $this->assertTrue($submission->isApproved());
-        $this->assertSame(OpcrfSubmission::STATUS_FOR_COMPLIANCE, $submission->status);
-        $this->assertSame($admin->id, $submission->approved_by);
-
-        // Nobody else was handed the review step: the chain ends here.
-        $this->assertNull($submission->assigned_to);
-        $this->assertSame($admin->id, $submission->reviewer_id);
-
-        // One trail entry — the final sign-off — and no forward row, because
-        // there was no routing step to record.
-        $this->assertDatabaseCount('opcrf_reviews', 1);
-        $this->assertDatabaseHas('opcrf_reviews', [
-            'opcrf_submission_id' => $submission->id,
-            'reviewer_id' => $admin->id,
-            'action' => 'compliance_final',
-            'remarks' => 'Signed off — final.',
-            'to_id' => null,
-            'new_status' => OpcrfSubmission::STATUS_FOR_COMPLIANCE,
-        ]);
-
-        // The modal's Review History shows the action under its own label.
-        Livewire::actingAs($admin)
-            ->test(OpcrfReview::class)
-            ->call('openReview', $submission->id)
-            ->assertSee('Approved by '.$admin->name)
-            ->assertSee('Compliant')
-            ->assertSee('Status: Compliant')
-            ->assertDontSee('Compliance — Final Sign-off')
-            ->assertDontSee('For Compliance → For Compliance');
     }
 
     public function test_compliance_routes_onward_to_the_next_superadmin(): void
@@ -1430,7 +1378,7 @@ class OpcrfReviewTest extends TestCase
             ->assertSee('Jane D. Doe')
             ->assertSee('Pending Review')
             ->call('openReview', $submission->id)
-            ->assertSee('Approved')
+            ->assertSee('Compliant')
             ->assertSee('Compliant — on to the next review.')
             ->assertSee('Forwarded to: <strong>'.$next->username.'</strong>', false);
     }

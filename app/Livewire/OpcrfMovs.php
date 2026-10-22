@@ -99,22 +99,33 @@ class OpcrfMovs extends Component
     public function submissions()
     {
         return OpcrfSubmission::where('user_id', Auth::id())
-            ->when(
-                $this->showArchived,
-                fn ($query) => $query->whereNotNull('archived_at'),
-                fn ($query) => $query->whereNull('archived_at')
-            )
+            ->whereNull('archived_at')
             ->with('latestReview.reviewer')
             ->orderByDesc('submitted_at')
             ->orderByDesc('id')
             ->paginate($this->perPage);
     }
 
+    #[Computed]
+    public function archivedSubmissions()
+    {
+        return OpcrfSubmission::where('user_id', Auth::id())
+            ->whereNotNull('archived_at')
+            ->with('latestReview.reviewer')
+            ->orderByDesc('archived_at')
+            ->orderByDesc('id')
+            ->paginate($this->perPage, ['*'], 'archivedPage');
+    }
+
     public function toggleArchived(): void
     {
-        $this->showArchived = ! $this->showArchived;
-        $this->resetPage();
-        $this->archivingId = null;
+        $this->showArchived = true;
+        $this->resetPage('archivedPage');
+    }
+
+    public function closeArchived(): void
+    {
+        $this->showArchived = false;
     }
 
     #[Computed]
@@ -167,7 +178,7 @@ class OpcrfMovs extends Component
             ->findOrFail($submissionId);
 
         $submission->update(['archived_at' => null]);
-        $this->resetPage();
+        $this->resetPage('archivedPage');
     }
 
     /**

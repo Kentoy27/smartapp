@@ -8,8 +8,8 @@ use App\Models\User;
 use App\Notifications\OpcrfDecided;
 use App\Notifications\OpcrfSubmitted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Notifications\Notification;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Notifications\Notification;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -134,9 +134,29 @@ class NotificationsMenuTest extends TestCase
         Livewire::actingAs($staff)
             ->test(NotificationsMenu::class)
             ->assertOk()
-            ->assertSee('OPCRF marked compliant')
+            ->assertSee('Approved by Eve')
             ->assertSee('Well done.')
+            ->assertDontSee('compliant')
             ->assertSee(route('opcrf.index'), false);
+    }
+
+    public function test_older_approval_notifications_use_the_stored_superadmin_username(): void
+    {
+        $staff = $this->user();
+        $reviewer = $this->user('SY', true);
+        $submission = $this->submission($staff, $reviewer);
+
+        $staff->notify(new OpcrfDecided($submission, $reviewer, null, false));
+        $notification = $staff->notifications()->firstOrFail();
+        $data = $notification->data;
+        unset($data['decided_by_name']);
+        $notification->update(['data' => $data]);
+
+        Livewire::actingAs($staff)
+            ->test(NotificationsMenu::class)
+            ->assertSee('Approved by SY')
+            ->assertSee('SY approved the OPCRF.')
+            ->assertDontSee('compliant');
     }
 
     public function test_marking_one_notification_read_clears_only_that_one(): void

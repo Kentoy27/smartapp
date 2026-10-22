@@ -299,10 +299,9 @@
                             @if ($this->reviewSubmission()->isAssignedTo(auth()->user()))
                                 <p class="opcrf-review-card-desc">
                                     Review the submission and choose an appropriate action.
-                                    Add remarks when necessary. <strong>Approve</strong> marks it
-                                    compliant and routes it onward to the next reviewer;
-                                    <strong>Compliance</strong> is a final sign-off that ends the
-                                    chain with you.
+                                    Add remarks when necessary. <strong>Approve</strong> records your
+                                    approval and routes it to the next reviewer when one is configured.
+                                    The final reviewer’s approval ends the review chain.
                                 </p>
 
                                 <label for="opcrfReviewRemarks">Remarks / Comments</label>
@@ -311,7 +310,7 @@
                                     class="opcrf-remarks-textarea"
                                     wire:model="reviewRemarks"
                                     rows="6"
-                                    placeholder="Enter remarks, compliance notes, or instructions for the next reviewer..."
+                                    placeholder="Enter remarks or instructions for the next reviewer..."
                                     @class(['error' => $errors->has('reviewRemarks')])
                                 ></textarea>
                                 @error('reviewRemarks') <div class="error-text">{{ $message }}</div> @enderror
@@ -331,23 +330,11 @@
                                     </button>
                                     <button
                                         type="button"
-                                        class="btn-ghost"
-                                        wire:click="complianceSubmission"
-                                        wire:loading.attr="disabled"
-                                        wire:target="complianceSubmission"
-                                        title="Final sign-off: mark compliant and end the review chain here (no onward routing)"
-                                    >
-                                        <x-icon name="check-circle" :size="14" />
-                                        <span wire:loading.remove wire:target="complianceSubmission">Compliance</span>
-                                        <span wire:loading wire:target="complianceSubmission">Saving…</span>
-                                    </button>
-                                    <button
-                                        type="button"
                                         class="btn-primary"
                                         wire:click="approveSubmission"
                                         wire:loading.attr="disabled"
                                         wire:target="approveSubmission"
-                                        title="Mark compliant and route onward to the next reviewer"
+                                        title="Approve and route to the next reviewer, when configured"
                                     >
                                         <x-icon name="shield" :size="14" />
                                         <span wire:loading.remove wire:target="approveSubmission">Approve</span>
