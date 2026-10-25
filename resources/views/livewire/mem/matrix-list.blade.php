@@ -1,14 +1,18 @@
 <div class="mem-component">
     {{-- On load, make sure the selected year's twelve months exist. A POST via
          x-init (never a side effect of the GET page render); the stable
-         wire:key keeps Alpine from re-running it on every morph. --}}
-    <div
-        wire:key="mem-year-init"
-        x-data
-        x-init="$wire.initializeYear()"
-        class="mem-init-sentinel"
-        aria-hidden="true"
-    ></div>
+         wire:key keeps Alpine from re-running it on every morph. Creating
+         months is a write, so a read-only reader (the Bookkeeper) does not
+         fire it — the action would be a no-op for them anyway. --}}
+    @if ($this->canEdit())
+        <div
+            wire:key="mem-year-init"
+            x-data
+            x-init="$wire.initializeYear()"
+            class="mem-init-sentinel"
+            aria-hidden="true"
+        ></div>
+    @endif
 
     @if ($successMessage)
         <div
@@ -72,7 +76,7 @@
             </label>
 
             <div class="ac-toolbar-actions">
-                @if ($this->canCreate())
+                @if ($this->canCreate() && $this->canEdit())
                     <label class="users-per-page mem-add-year">
                         <span>Add year</span>
                         <input
@@ -130,6 +134,13 @@
             <div class="ac-import-error mem-banner mem-banner--notice" role="status">
                 Your account has no school assigned, so it cannot own a Monthly Expenditure Matrix.
                 Ask an administrator to set your school first.
+            </div>
+        @endunless
+
+        @unless ($this->canEdit())
+            <div class="ac-import-error mem-banner mem-banner--notice" role="status">
+                Read-only — the School Head edits the school’s matrices. Open a month
+                to read its lines and check their account titles and codes.
             </div>
         @endunless
 
@@ -191,16 +202,20 @@
                                         <span>Export XLSX</span>
                                     </x-row-menu-item>
 
-                                    <x-row-menu-item
-                                        wire:click="openConfirmDelete({{ $matrix->id }})"
-                                        wire:loading.attr="disabled"
-                                        wire:target="openConfirmDelete"
-                                        title="Delete {{ $matrix->periodLabel() }}"
-                                        danger
-                                    >
-                                        <x-icon name="trash" :size="15" />
-                                        <span>Delete</span>
-                                    </x-row-menu-item>
+                                    {{-- Deleting is a write: read-only readers
+                                         never see it (the action refuses too). --}}
+                                    @if ($this->canEdit())
+                                        <x-row-menu-item
+                                            wire:click="openConfirmDelete({{ $matrix->id }})"
+                                            wire:loading.attr="disabled"
+                                            wire:target="openConfirmDelete"
+                                            title="Delete {{ $matrix->periodLabel() }}"
+                                            danger
+                                        >
+                                            <x-icon name="trash" :size="15" />
+                                            <span>Delete</span>
+                                        </x-row-menu-item>
+                                    @endif
                                 </x-row-menu>
                             </td>
                         </tr>

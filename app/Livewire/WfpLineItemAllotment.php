@@ -5,6 +5,7 @@ namespace App\Livewire;
 use App\Models\School;
 use App\Models\User;
 use App\Support\WfpAllotment;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
@@ -25,8 +26,11 @@ use Livewire\Component;
  *
  * Scope is the signed-in School Head's own school — every query is filtered by
  * `school_id`, so no other school's expenditure can be read here. The page is
- * reachable by nobody else: the route guard and this component both refuse a
- * non-SH account with a 404.
+ * reachable by the School Head alone: the route guard and this component both
+ * refuse every other account with a 404. (The Bookkeeper reads and signs the
+ * report on its division-wide copy instead —
+ * {@see BudgetLineItemAllotment} — and the check prints here like the
+ * certification does.)
  */
 #[Title('Per Line Item Expenditure — SmartApp')]
 class WfpLineItemAllotment extends Component
@@ -68,7 +72,7 @@ class WfpLineItemAllotment extends Component
 
         // The figures are computed properties keyed off this year; forgetting
         // them is what makes the page re-read for the year that was picked.
-        unset($this->months, $this->lineItems, $this->grandTotal);
+        unset($this->months, $this->lineItems, $this->grandTotal, $this->allocation, $this->certification, $this->checking);
     }
 
     /* ----------------------------------------------------------- computed */
@@ -132,12 +136,75 @@ class WfpLineItemAllotment extends Component
         return WfpAllotment::total($this->lineItems);
     }
 
+    /**
+     * The stored allotment budget read against the year's own consumption —
+     * the Monthly Expenditure Matrices this page already rolls up.
+     *
+     * A null allotted amount means the Budget office has not set one for this
+     * year; that is different from an allotment of 0.00, which is a budget
+     * decision. Either way, consumption is reported: it happened whether or
+     * not a ceiling was set for it.
+     *
+     * @return array{allotted: ?float, consumed: float, remaining: float, percent: float, is_over: bool}
+     */
+    #[Computed]
+    public function allocation(): array
+    {
+        // The same helper the matrix editor reads, so the annual report and
+        // the editor always put the same number on the remaining balance.
+        return WfpAllotment::balance(
+            WfpAllotment::allotment($this->school?->id, (int) $this->year),
+            $this->grandTotal,
+        );
+    }
+
+    /**
+     * The Budget office's certification for this school and year, or null
+     * while the amount is still awaiting one.
+     *
+     * It is shown in the report's "Certifying Availability of Allotment"
+     * block, and read from the same helper the .xlsx export uses so the page
+     * and the download name the same officer.
+     *
+     * @return array{name: string, position: string, certified_at: CarbonInterface}|null
+     */
+    #[Computed]
+    public function certification(): ?array
+    {
+        return WfpAllotment::certification(
+            Auth::user()?->school_id,
+            (int) $this->year,
+        );
+    }
+
+    /**
+     * The Bookkeeper's check for this school and year, or null while the
+     * report is still unchecked. Read from the same helper the .xlsx export
+     * uses, so the page and the download name the same checker. The SH only
+     * reads it: the check is signed on the Bookkeeper's copy of the report
+     * (BudgetLineItemAllotment).
+     *
+     * @return array{name: string, position: string, checked_at: CarbonInterface}|null
+     */
+    #[Computed]
+    public function checking(): ?array
+    {
+        return WfpAllotment::checking(
+            Auth::user()?->school_id,
+            (int) $this->year,
+        );
+    }
+
     public function render()
     {
         $this->user();
 
         return view('livewire.wfp.line-items', [
             'preparedBy' => Auth::user(),
+            'checking' => $this->checking,
+            // The SH reads the block, never signs it: the check is the
+            // Bookkeeper's statement, given on their own copy of the report.
+            'canCheck' => false,
         ]);
     }
 }

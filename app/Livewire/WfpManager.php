@@ -2,8 +2,6 @@
 
 namespace App\Livewire;
 
-use App\Support\WfpAccountCodeGenerator;
-use App\Support\WfpPlanExporter;
 use App\Support\WfpTemplate;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Title;
@@ -14,11 +12,11 @@ use Livewire\Component;
  *
  * The workbook comes from the school's Monthly Expenditure Matrices once they
  * carry lines; until then it is the official template pre-filled from the
- * account-code master list. The card says which of the two this school gets
- * (see WfpPlanExporter).
+ * account-code master list. The generate button (WfpGenerateButton) says which
+ * of the two the school gets, and for which year.
  *
- * Only the School Head (SH) role may reach this component — enforced in
- * mount(). The work itself is a one-click generate-and-download, handled by
+ * Only the School Head (SH) may reach this component — enforced in mount()
+ * via canAccessWfp(). The work itself is a generate-and-download, handled by
  * the nested WfpGenerateButton.
  */
 #[Title('Work and Financial Plan — SmartApp')]
@@ -34,8 +32,6 @@ class WfpManager extends Component
         return view('livewire.wfp.manager', [
             'fileName' => WfpTemplate::fileName(),
             'templateDescription' => WfpTemplate::description(),
-            'accountCount' => WfpAccountCodeGenerator::activeCount(),
-            'planYear' => WfpPlanExporter::dataYearFor(Auth::user()),
         ]);
     }
 }

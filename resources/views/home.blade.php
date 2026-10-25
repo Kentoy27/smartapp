@@ -11,6 +11,7 @@
                     : ($isBudgetReviewer
                         ? 'BUDGET REVIEW WORKSPACE'
                         : ($user->canAccessOpcrfTemplate() ? 'STAFF WORKSPACE' : 'VIEWER WORKSPACE')) }}
+                        : ($isBookkeeper ? 'WFP CHECKING WORKSPACE' : 'STAFF WORKSPACE')) }}
             </span>
             <h1>Welcome back, {{ $user->username }}</h1>
             <p>
@@ -25,8 +26,22 @@
         </div>
         @if ($user->canAccessOpcrfTemplate())
             <a href="{{ route('mov.index') }}" class="dashboard-welcome__link" wire:navigate.hover>
+                        ? 'Review submitted plans and keep the schools’ allotments certified.'
+                        : ($isBookkeeper
+                            ? 'Read the schools’ expenditure lines and check their account titles and codes.'
+                            : 'Your performance plan and financial plan, together in one place.')) }}
+            </p>
+        </div>
+        @if (! $user->hasAdminAccess() && ! $isBudgetReviewer && ! $isBookkeeper)
+            <a href="{{ route('mov.index') }}" class="dashboard-welcome__link" wire:navigate>
                 <x-icon name="upload" :size="16" />
                 <span>Open MOV checklist</span>
+                <span aria-hidden="true">→</span>
+            </a>
+        @elseif ($isBookkeeper)
+            <a href="{{ route('budget.per-line-item.index') }}" class="dashboard-welcome__link" wire:navigate>
+                <x-icon name="check-check" :size="16" />
+                <span>Check the annual report</span>
                 <span aria-hidden="true">→</span>
             </a>
         @endif
@@ -47,13 +62,64 @@
                     <span class="staff-dashboard-panel__step">01</span>
                     <div>
                         <h2 id="dashboard-budget-heading">Budget review</h2>
-                        <p>Review submitted financial plans. This role cannot edit or submit school plans.</p>
+                        <p>Review submitted financial plans and certify each school’s allotment. This role cannot edit or submit school plans.</p>
                     </div>
                 </div>
                 <livewire:wfp-uploads-list />
                 <a href="{{ route('aip.review') }}" class="dashboard-plan-card__link" wire:navigate.hover>
                     <x-icon name="eye" :size="14" />
                     Review submitted AIP plans <span aria-hidden="true">→</span>
+                </a>
+
+                {{-- The per-line list the budget is checked against: every
+                     school's expenditure lines, read-only. It lives beside the
+                     plans the Budget office already reviews because it is the
+                     detail behind the same money. --}}
+                <a href="{{ route('budget.lineitems.index') }}" class="dashboard-plan-card__link" wire:navigate>
+                    <x-icon name="check-check" :size="14" />
+                    Check expenditure line items <span aria-hidden="true">→</span>
+                </a>
+
+                {{-- The printed annual report those lines add up to: the same
+                     form the School Head reads, per school. --}}
+                <a href="{{ route('budget.per-line-item.index') }}" class="dashboard-plan-card__link" wire:navigate>
+                    <x-icon name="file-spreadsheet" :size="14" />
+                    Per line item expenditure <span aria-hidden="true">→</span>
+                </a>
+            </section>
+
+            {{-- Allotments are the other half of the Budget office's work:
+                 monitoring the year's ceilings and certifying the amount each
+                 school may actually consume. --}}
+            <livewire:budget-allotment-monitor />
+        </div>
+    @elseif ($isBookkeeper)
+        {{-- The Bookkeeper's dashboard: the same division-wide checking
+             surfaces the Budget office works — the lines whose account
+             titles and codes are checked, and the annual report the check
+             is signed on. No OPCRF or MOV panel exists here: this role's
+             module is the checking alone. --}}
+        <div class="staff-dashboard-grid">
+            <section class="staff-dashboard-panel staff-dashboard-panel--wfp" aria-labelledby="dashboard-bookkeeper-heading">
+                <div class="staff-dashboard-panel__intro">
+                    <span class="staff-dashboard-panel__step">01</span>
+                    <div>
+                        <h2 id="dashboard-bookkeeper-heading">Financial plan</h2>
+                        <p>
+                            The schools’ Monthly Expenditure lines and annual reports, read-only.
+                            The School Head owns the lines; you check their account titles and codes.
+                        </p>
+                    </div>
+                </div>
+
+                <a href="{{ route('budget.lineitems.index') }}" class="dashboard-plan-card__link" wire:navigate>
+                    <x-icon name="file-spreadsheet" :size="14" />
+                    Monthly Expenditure <span aria-hidden="true">→</span>
+                </a>
+
+                <a href="{{ route('budget.per-line-item.index') }}" class="dashboard-plan-card__link" wire:navigate>
+                    <x-icon name="check-check" :size="14" />
+                    Per Line Item Expenditure <span aria-hidden="true">→</span>
                 </a>
             </section>
         </div>

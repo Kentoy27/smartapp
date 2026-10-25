@@ -18,14 +18,16 @@ class DashboardController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
-        $hasAdminAccess = (bool) $user?->hasAdminAccess();
 
         return view('home', [
             'user' => $user,
             'isBudgetReviewer' => $user?->isBudgetRole() ?? false,
-            // The WFP Template card is for the School Head (SH) role only —
-            // no card for superadmins, SDS viewers, or anyone else.
-            'wfpTemplate' => (! $hasAdminAccess && $user?->canAccessWfp())
+            'isBookkeeper' => $user?->isBookkeeperRole() ?? false,
+            // The WFP Template card (generate + upload) is for the School
+            // Head (SH) role only — no card for superadmins, SDS viewers, the
+            // Bookkeeper (who works the division-wide checking pages), or
+            // anyone else.
+            'wfpTemplate' => $user?->canManageWfp()
                 ? ['name' => WfpTemplate::fileName(), 'description' => WfpTemplate::description()]
                 : null,
         ]);

@@ -101,17 +101,26 @@
 
     <div class="mem-actions mem-actions--top">
         <div class="mem-actions__group">
-            <button type="button" class="btn-ghost" wire:click="save" wire:loading.attr="disabled" wire:target="save">
-                <span wire:loading.remove wire:target="save">Save changes</span>
-                <span wire:loading wire:target="save">Saving…</span>
-            </button>
-            <button type="button" class="ac-import-btn" wire:click="regenerate" wire:loading.attr="disabled" wire:target="regenerate">
-                <span wire:loading.remove wire:target="regenerate">Regenerate from MEM</span>
-                <span wire:loading wire:target="regenerate">Regenerating…</span>
-            </button>
-            <button type="button" class="ac-import-btn" wire:click="approve" wire:loading.attr="disabled" wire:target="approve">
-                Approve
-            </button>
+            @if ($this->canEdit())
+                <button type="button" class="btn-ghost" wire:click="save" wire:loading.attr="disabled" wire:target="save">
+                    <span wire:loading.remove wire:target="save">Save changes</span>
+                    <span wire:loading wire:target="save">Saving…</span>
+                </button>
+                <button type="button" class="ac-import-btn" wire:click="regenerate" wire:loading.attr="disabled" wire:target="regenerate">
+                    <span wire:loading.remove wire:target="regenerate">Regenerate from MEM</span>
+                    <span wire:loading wire:target="regenerate">Regenerating…</span>
+                </button>
+                <button type="button" class="ac-import-btn" wire:click="approve" wire:loading.attr="disabled" wire:target="approve">
+                    Approve
+                </button>
+            @else
+                {{-- Read-only (the school's Bookkeeper): saving, regenerating
+                     and approving are the School Head's; the download follows
+                     the same view gate as this page. --}}
+                <span class="mem-actions__hint">
+                    Read-only — the enrichment fields are the School Head’s to fill in.
+                </span>
+            @endif
         </div>
 
         <a
@@ -168,21 +177,21 @@
                                 </td>
                                 <td class="mem-linetotal">{{ number_format((float) $item->financial_target, 2) }}</td>
                                 <td>
-                                    <textarea rows="2" wire:model="items.{{ $item->id }}.major_output" aria-label="Major output"></textarea>
+                                    <textarea rows="2" wire:model="items.{{ $item->id }}.major_output" aria-label="Major output" @disabled(! $this->canEdit())></textarea>
                                     @error("items.{$item->id}.major_output") <div class="error-text">{{ $message }}</div> @enderror
                                 </td>
                                 <td>
-                                    <textarea rows="2" wire:model="items.{{ $item->id }}.performance_indicator" aria-label="Performance indicator"></textarea>
+                                    <textarea rows="2" wire:model="items.{{ $item->id }}.performance_indicator" aria-label="Performance indicator" @disabled(! $this->canEdit())></textarea>
                                     @error("items.{$item->id}.performance_indicator") <div class="error-text">{{ $message }}</div> @enderror
                                 </td>
                                 <td>
-                                    <input type="text" wire:model="items.{{ $item->id }}.funding_source" aria-label="Funding source">
+                                    <input type="text" wire:model="items.{{ $item->id }}.funding_source" aria-label="Funding source" @disabled(! $this->canEdit())>
                                 </td>
                                 <td>
-                                    <input type="text" wire:model="items.{{ $item->id }}.organizational_classification" aria-label="Organizational classification">
+                                    <input type="text" wire:model="items.{{ $item->id }}.organizational_classification" aria-label="Organizational classification" @disabled(! $this->canEdit())>
                                 </td>
                                 <td>
-                                    <textarea rows="2" wire:model="items.{{ $item->id }}.activity_movs" aria-label="Activity MOVs"></textarea>
+                                    <textarea rows="2" wire:model="items.{{ $item->id }}.activity_movs" aria-label="Activity MOVs" @disabled(! $this->canEdit())></textarea>
                                 </td>
                             </tr>
                         @endforeach

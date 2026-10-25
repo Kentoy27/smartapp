@@ -118,6 +118,21 @@ class MonthlyExpenditureMatrix extends Model
     public function managedBy(?User $user): bool
     {
         return $user !== null
+            && $user->canManageWfp()
+            && $this->school_id !== null
+            && (int) $this->school_id === (int) $user->school_id;
+    }
+
+    /**
+     * May this user open the matrix at all? Currently the owning School Head
+     * — the same account set as {@see managedBy()}, kept as its own gate so
+     * the page routes and every write can diverge without touching each
+     * other (the Bookkeeper checks lines on the division-wide Monthly
+     * Expenditure page instead, never here).
+     */
+    public function canBeViewedBy(?User $user): bool
+    {
+        return $user !== null
             && $user->canAccessWfp()
             && $this->school_id !== null
             && (int) $this->school_id === (int) $user->school_id;

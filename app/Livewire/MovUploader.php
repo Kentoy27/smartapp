@@ -927,10 +927,13 @@ class MovUploader extends Component
     /**
      * The upload is the staff member's own page: the OPCRF route is
      * staff-only too, and the same guard covers a crafted Livewire call.
+     * The Bookkeeper is not a staff-page role (its module is the
+     * division-wide checking pages), so it is refused here like the
+     * administrative side is.
      */
     private function assertStaffMember(): void
     {
-        abort_if(Auth::user()?->hasAdminAccess(), 404);
+        abort_if(! Auth::user()?->canAccessStaffPages(), 404);
     }
 
     /**

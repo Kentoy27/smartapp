@@ -23,7 +23,9 @@ use Symfony\Component\HttpFoundation\Response;
  * locking a user out of the form they already handed in.
  *
  * An administrator has no Parts of their own to fill in, so they are refused
- * here too rather than being quietly given a staff page.
+ * here too rather than being quietly given a staff page — the same goes for
+ * the Bookkeeper, whose module is the division-wide checking pages alone
+ * (see User::canAccessStaffPages()).
  */
 class EnsureOpcrfPartIsOpen
 {
@@ -33,6 +35,7 @@ class EnsureOpcrfPartIsOpen
 
         abort_if($user === null, 403);
         abort_unless($user->canAccessOpcrfTemplate(), 404);
+        abort_if(!$user->canAccessStaffPages(), 404);
 
         // Read off the route rather than taking it as a middleware argument:
         // only the guard itself decides which Part is on trial, and a
@@ -45,7 +48,7 @@ class EnsureOpcrfPartIsOpen
         // class is the actual boundary.
         abort_unless(in_array($partNumber, OpcrfSchedule::parts(), true), 404);
 
-        if (! OpcrfAccess::canAccess($user, $partNumber)) {
+        if (!OpcrfAccess::canAccess($user, $partNumber)) {
             $state = OpcrfAccess::partState($user, $partNumber);
 
             // Redirect rather than a bare 403: the reason belongs on the

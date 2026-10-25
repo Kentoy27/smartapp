@@ -9,7 +9,10 @@ use App\Models\OpcrfMov;
 use App\Models\OpcrfSchedule;
 use App\Models\OpcrfSubmission;
 use App\Models\OpcrfTemplate;
+use App\Models\School;
 use App\Models\User;
+use App\Models\UserMov;
+use App\Models\WfpImportLog;
 use App\Models\WfpPlan;
 use App\Models\WfpSubmission;
 use App\Support\AipXlsxExporter;
@@ -22,6 +25,7 @@ use App\Support\OpcrfWorkbookTrim;
 use App\Support\WfpAllotment;
 use App\Support\WfpAllotmentXlsxExporter;
 use App\Support\WfpPlanExporter;
+use App\Support\WfpSetupExporter;
 use App\Support\WfpTemplate;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Facades\Auth;
@@ -137,7 +141,7 @@ Route::middleware('auth')->group(function () {
         return response($bytes)
             ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             ->header('Content-Length', (string) strlen($bytes))
-            ->header('Content-Disposition', 'attachment; filename="'.AipXlsxExporter::downloadName($plan).'"');
+            ->header('Content-Disposition', 'attachment; filename="' . AipXlsxExporter::downloadName($plan) . '"');
     })->name('aip.plans.export')->where('plan', '[0-9]+');
 
     Route::get('/users', function () {
@@ -181,20 +185,121 @@ Route::middleware('auth')->group(function () {
         $csv = implode("\n", [
             'Account Title,RCA Code,UACS Sub-Object Code,UACS Object Code,Covering PPAS',
             'Office Supplies Expenses,50203010,00,5020301000,PPAS 1',
-        ])."\n";
+        ]) . "\n";
 
         return response($csv)
             ->header('Content-Type', 'text/csv; charset=UTF-8')
             ->header('Content-Disposition', 'attachment; filename="account-classifications-template.csv"');
     })->name('account-classifications.template');
 
+    /* ------------------------------------------------------------------
+     * WFP Setup — the administrator's lookup library and activity
+     * templates for the Work and Financial Plan.
+     *
+     * Administrator-only: the same gate as Account Classifications — a
+     * superadmin gets the same 404. Every route re-checks the gate, so
+     * hiding the menu item is never the boundary.
+     * ----------------------------------------------------------------- */
+
+    Route::get('/admin/wfp-setup', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canManageUsersAndSchools(), 404);
+
+        return view('wfp.setup.index');
+    })->name('wfp.setup.index');
+
+    Route::get('/admin/wfp-setup/lookups/{category}', function (string $category) {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canManageUsersAndSchools(), 404);
+        abort_unless(is_array(config('wfp_lookups.categories.' . $category)), 404);
+
+        $spec = config('wfp_lookups.categories.' . $category);
+
+        return view('wfp.setup.lookups', [
+            'category' => $category,
+            'spec' => $spec,
+        ]);
+    })->name('wfp.setup.lookups');
+
+    // Blank import template for one lookup category: the header row plus a
+    // worked example the administrator deletes before filling their own.
+    Route::get('/admin/wfp-setup/lookups/{category}/template', function (string $category) {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canManageUsersAndSchools(), 404);
+
+        $csv = WfpSetupExporter::lookupTemplateCsv($category);
+
+        return response($csv)
+            ->header('Content-Type', 'text/csv; charset=UTF-8')
+            ->header('Content-Disposition', 'attachment; filename="wfp-' . $category . '-template.csv"');
+    })->name('wfp.setup.lookups.template');
+
+    // Every row of one lookup category, active and retired, so an
+    // administrator can keep a working copy and re-import it.
+    Route::get('/admin/wfp-setup/lookups/{category}/export', function (string $category) {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canManageUsersAndSchools(), 404);
+
+        $csv = WfpSetupExporter::lookupCsv($category);
+
+        return response($csv)
+            ->header('Content-Type', 'text/csv; charset=UTF-8')
+            ->header('Content-Disposition', 'attachment; filename="wfp-' . $category . '.csv"');
+    })->name('wfp.setup.lookups.export');
+
+    Route::get('/admin/wfp-setup/templates', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canManageUsersAndSchools(), 404);
+
+        return view('wfp.setup.templates');
+    })->name('wfp.setup.templates');
+
+    // Blank import template for activity templates.
+    Route::get('/admin/wfp-setup/templates/template', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canManageUsersAndSchools(), 404);
+
+        $csv = WfpSetupExporter::templateTemplateCsv();
+
+        return response($csv)
+            ->header('Content-Type', 'text/csv; charset=UTF-8')
+            ->header('Content-Disposition', 'attachment; filename="wfp-activity-templates-template.csv"');
+    })->name('wfp.setup.templates.template');
+
+    // Every activity template, exported so it can be re-imported.
+    Route::get('/admin/wfp-setup/templates/export', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canManageUsersAndSchools(), 404);
+
+        $csv = WfpSetupExporter::templateCsv();
+
+        return response($csv)
+            ->header('Content-Type', 'text/csv; charset=UTF-8')
+            ->header('Content-Disposition', 'attachment; filename="wfp-activity-templates.csv"');
+    })->name('wfp.setup.templates.export');
+
+    // Row-level error report for a committed import.
+    Route::get('/admin/wfp-setup/imports/{log}/errors', function (int $log) {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canManageUsersAndSchools(), 404);
+
+        $record = WfpImportLog::query()->findOrFail($log);
+        $csv = WfpSetupExporter::errorReportCsv((array) ($record->errors ?? []));
+
+        return response($csv)
+            ->header('Content-Type', 'text/csv; charset=UTF-8')
+            ->header('Content-Disposition', 'attachment; filename="wfp-import-' . $record->category . '-errors.csv"');
+    })->name('wfp.setup.imports.errors');
+
     // Opcrf: a staff-facing page, reachable by regular users only —
-    // superadmins have their own tooling, so the item is hidden from them.
-    // This is the parts grid: every Part is listed with the state the
-    // superadmin's schedule puts it in, open or locked.
+    // superadmins have their own tooling, and the Bookkeeper's module is the
+    // WFP alone, so the item is hidden from both. This is the parts grid:
+    // every Part is listed with the state the superadmin's schedule puts it
+    // in, open or locked.
     Route::get('/opcrf', function () {
         $user = Auth::user();
         abort_unless($user instanceof User && $user->canViewOpcrfParts(), 404);
+        abort_if($user instanceof User && !$user->canAccessStaffPages(), 404);
 
         return view('opcrf.parts');
     })->name('opcrf.index');
@@ -218,7 +323,7 @@ Route::middleware('auth')->group(function () {
 
         return view('opcrf.part', [
             'part' => $part,
-            'partLabel' => 'Part '.$part,
+            'partLabel' => 'Part ' . $part,
             'partBlurb' => $blurbs[$part] ?? 'This Part of the OPCRF.',
             'schedule' => OpcrfAccess::scheduleFor(
                 OpcrfAccess::currentYear(),
@@ -262,14 +367,16 @@ Route::middleware('auth')->group(function () {
     //
     // Staff only: a superadmin has no OPCRF of their own to fill in, and
     // their review downloads serve a submission's archived workbook instead.
+    // The Bookkeeper has no OPCRF of their own either.
     Route::get('/download/opcrf-template', function () {
         $user = Auth::user();
 
-        if (! $user instanceof User) {
+        if (!$user instanceof User) {
             abort(404);
         }
 
         abort_unless($user->canAccessOpcrfTemplate(), 404);
+        abort_if(!$user->canAccessStaffPages(), 404);
         abort_unless(is_file(OpcrfPartOne::templatePath()), 404);
 
         // The full workbook is also needed during the shared Parts 2–4 term.
@@ -278,7 +385,7 @@ Route::middleware('auth')->group(function () {
         $partOneAccessible = OpcrfAccess::canAccess($user, OpcrfSchedule::PART_ONE);
         $includeAllParts = OpcrfPartOne::fullTemplateAvailable();
 
-        if (! $partOneAccessible && ! $includeAllParts) {
+        if (!$partOneAccessible && !$includeAllParts) {
             $state = OpcrfAccess::partState($user, OpcrfSchedule::PART_ONE);
 
             return redirect()
@@ -333,7 +440,7 @@ Route::middleware('auth')->group(function () {
                         'accomplishments' => $savedPartOne->accomplishments,
                         'self_rating' => $savedPartOne->self_rating,
                     ],
-                    ! $hasSavedWorkbook
+                    !$hasSavedWorkbook
                 );
             }
         } catch (RuntimeException $e) {
@@ -352,7 +459,7 @@ Route::middleware('auth')->group(function () {
         return response($bytes)
             ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             ->header('Content-Length', (string) strlen($bytes))
-            ->header('Content-Disposition', 'attachment; filename="'.$filename.'"');
+            ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
     })->name('opcrf.template');
 
     // A submission's workbook. The superadmin may fetch any submission
@@ -372,7 +479,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/opcrf-submissions/{submission}/download', function (OpcrfSubmission $submission) {
         $user = Auth::user();
 
-        if (! $user instanceof User) {
+        if (!$user instanceof User) {
             abort(404);
         }
 
@@ -386,7 +493,7 @@ Route::middleware('auth')->group(function () {
         // downloads always receive the archived file as stored.
         $bytes = null;
 
-        if (! $user->hasAdminAccess() && ! OpcrfPartOne::windowOpen()) {
+        if (!$user->hasAdminAccess() && !OpcrfPartOne::windowOpen()) {
             try {
                 $bytes = OpcrfWorkbookTrim::keepPart(
                     $storedPath,
@@ -404,7 +511,7 @@ Route::middleware('auth')->group(function () {
         return response($bytes)
             ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             ->header('Content-Length', (string) strlen($bytes))
-            ->header('Content-Disposition', 'attachment; filename="'.$submission->fileDownloadName().'"');
+            ->header('Content-Disposition', 'attachment; filename="' . $submission->fileDownloadName() . '"');
     })->name('opcrf.submission.download')->where('submission', '[0-9]+');
 
     // The ratee's digital signature, for the signer block the review modal
@@ -434,10 +541,7 @@ Route::middleware('auth')->group(function () {
 
     // A reviewer signature can only be fetched for a compliance action on
     // this submission, by an administrator allowed to review the workbook.
-    Route::get('/opcrf-submissions/{submission}/review-signature/{review}', function (
-        OpcrfSubmission $submission,
-        \App\Models\OpcrfReview $review
-    ) {
+    Route::get('/opcrf-submissions/{submission}/review-signature/{review}', function (OpcrfSubmission $submission, \App\Models\OpcrfReview $review) {
         $viewer = Auth::user();
 
         abort_unless($viewer instanceof User && $viewer->hasAdminAccess(), 404);
@@ -461,7 +565,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/opcrf-movs/{mov}/download', function (OpcrfMov $mov) {
         $user = Auth::user();
 
-        abort_if(! $mov->submission->canBeReviewedBy($user), 403);
+        abort_if(!$mov->submission->canBeReviewedBy($user), 403);
 
         /** @var FilesystemAdapter $disk */
         $disk = Storage::disk('local');
@@ -472,14 +576,18 @@ Route::middleware('auth')->group(function () {
     })->name('opcrf.movs.download')->where('mov', '[0-9]+');
 
     /* ------------------------------------------------------------------
-     * WFP (Work and Financial Plan) — School Head (SH) only.
+     * WFP (Work and Financial Plan) — the School Head (SH) writes it, the
+     * school's Bookkeeper reads it.
      *
      * The /wfp page's action is "Generate and Download WFP": the workbook is
      * produced server-side from the account-code master list (no upload), so
      * there is no template/download route. Every WFP route re-checks
      * Auth::user()->canAccessWfp(): the module is unreachable for the SDS
      * Viewer and the Super Admin even by typing the URL directly (they get a
-     * 404). The Livewire components re-check the same gate on every action.
+     * 404). The Bookkeeper reaches the module's pages read-only; every write
+     * re-checks canManageWfp() (or the model's own managedBy()), so a
+     * Bookkeeper can never edit a school's plan. The Livewire components
+     * re-check the same gates on every action.
      * ----------------------------------------------------------------- */
 
     Route::get('/wfp', function () {
@@ -507,6 +615,97 @@ Route::middleware('auth')->group(function () {
     })->name('wfp.submissions.index');
 
     /* ------------------------------------------------------------------
+     * School Allotments — the Budget office sets the annual allotment
+     * budget each School Head may consume through the school's Monthly
+     * Expenditure Matrices. The ceiling is stored per school and year; the
+     * consumption is derived from the matrices, never posted here.
+     *
+     * Budget-role and administrative accounts only. A School Head reads
+     * their ceiling on the Per Line Item Expenditure report instead; they
+     * never set it. The component re-checks the same gate on every action.
+     * ----------------------------------------------------------------- */
+    Route::get('/budget/allotments', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canManageAllotments(), 404);
+
+        return view('budget.allotments');
+    })->name('budget.allotments.index');
+
+    /* ------------------------------------------------------------------
+     * Monthly Expenditure — the Budget office reads every school's Monthly
+     * Expenditure Matrix line by line: the objective, the activity, what it
+     * consumes and the account title/code it is charged to.
+     *
+     * The page is READ-ONLY. The School Head owns the lines in the matrix
+     * editor; the Budget office and the school Bookkeeper check them against
+     * the plan and the allotment, and never edit a school's plan. Scope is
+     * the Budget role and the Bookkeeper (canCheckLineItems()) — an SH,
+     * administrator or superadmin gets the same 404. The component re-checks
+     * the gate on mount.
+     * ----------------------------------------------------------------- */
+    Route::get('/budget/line-items', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canCheckLineItems(), 404);
+
+        return view('budget.line-items');
+    })->name('budget.lineitems.index');
+
+    /* ------------------------------------------------------------------
+     * Per Line Item Expenditure — the Budget office's copy of one school's
+     * annual MOOE allotment report.
+     *
+     * It is the same printed form the School Head reads on /wfp/line-items,
+     * with a school picker because the Budget office and the school
+     * Bookkeeper oversee every school. The page is READ-ONLY and derived on
+     * every load from the school's Monthly Expenditure Matrices
+     * (WfpAllotment); nothing here edits a school's plan. The Bookkeeper's
+     * copy also carries the "Checked as to the Correctness of Account Titles
+     * and Codes" sign-off (a component action). Scope is the Budget role and
+     * the Bookkeeper — the route guard and the component both enforce
+     * canCheckLineItems().
+     * ----------------------------------------------------------------- */
+
+    Route::get('/budget/per-line-item', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canCheckLineItems(), 404);
+
+        return view('budget.per-line-item');
+    })->name('budget.per-line-item.index');
+
+    // The same report as an .xlsx for the school in ?school=. The year is
+    // resolved against that school's own matrices, so a crafted ?year= can
+    // never report on a year the school has nothing in. No school, or one
+    // that no longer exists, has no report to export: it is a 404.
+    Route::get('/budget/per-line-item/export', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canCheckLineItems(), 404);
+
+        $schoolId = (int) request()->query('school');
+        $school = $schoolId > 0 ? School::query()->find($schoolId) : null;
+        abort_if($school === null, 404);
+
+        $year = WfpAllotment::resolveYear($school->id, (int) request()->query('year'));
+
+        // The form's "Prepared by" is the school's School Head, not the
+        // Budget officer reading this copy.
+        $preparedBy = User::query()
+            ->where('school_id', $school->id)
+            ->where('role', 'user')
+            ->orderBy('name')
+            ->orderBy('username')
+            ->first();
+
+        $bytes = WfpAllotmentXlsxExporter::bytes($school->id, $year, $preparedBy);
+
+        // Bytes are built BEFORE the response (a streamed callback's return
+        // value is discarded and would risk a 0-byte download).
+        return response($bytes)
+            ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            ->header('Content-Length', (string) strlen($bytes))
+            ->header('Content-Disposition', 'attachment; filename="' . WfpAllotmentXlsxExporter::downloadName($year, $school->name) . '"');
+    })->name('budget.per-line-item.export');
+
+    /* ------------------------------------------------------------------
      * An uploaded WFP workbook — the archived file behind the superadmin's
      * "WFP Uploads" dashboard list.
      *
@@ -529,14 +728,17 @@ Route::middleware('auth')->group(function () {
     })->name('wfp.submission.download')->where('submission', '[0-9]+');
 
     /* ------------------------------------------------------------------
-     * MEM → WFP generation — School Head (SH) only, scoped to their school.
+     * MEM → WFP generation — the School Head (SH) works here, scoped to
+     * their school; the school's Bookkeeper reads the same pages.
      *
      * The Monthly Expenditure Matrix is the source of truth; the WFP is
-     * generated from it. Every route re-checks canAccessWfp() AND that the
-     * model belongs to the caller's own school — an SH of another school
-     * gets a 404 even with a crafted id. `/template` is declared before
-     * `{matrix}` so "template" is never read as an id (it would not match
-     * `[0-9]+` anyway, but the order makes the intent explicit).
+     * generated from it. Every route re-checks the WFP gate AND that the
+     * model belongs to the caller's own school — an account of another
+     * school gets a 404 even with a crafted id. Reading a matrix uses
+     * canBeViewedBy(); writing (the component's own actions) uses
+     * managedBy(). `/template` is declared before `{matrix}` so "template"
+     * is never read as an id (it would not match `[0-9]+` anyway, but the
+     * order makes the intent explicit).
      * ----------------------------------------------------------------- */
 
     Route::get('/wfp/matrices', function () {
@@ -546,14 +748,16 @@ Route::middleware('auth')->group(function () {
         return view('wfp.matrices.index');
     })->name('wfp.matrices.index');
 
+    // The CSV template is an authoring aid — it exists to bring new lines
+    // into a matrix — so it follows the write gate, not the read one.
     Route::get('/wfp/matrices/template', function () {
         $user = Auth::user();
-        abort_unless($user instanceof User && $user->canAccessWfp(), 404);
+        abort_unless($user instanceof User && $user->canManageWfp(), 404);
 
         $csv = implode("\n", [
             'Section,Objective,Activity Description,Resource Kind,Quantity,Unit,Unit Cost,Account Title,Account Code,Funding Source,Organizational Classification,Activity MOVs',
             'operations,Improved learner outcomes,Procure office supplies,MOOE,10,ream,250.00,Office Supplies Expenses,5020301000,MOOE,School,PO and RIS',
-        ])."\n";
+        ]) . "\n";
 
         return response($csv)
             ->header('Content-Type', 'text/csv; charset=UTF-8')
@@ -562,36 +766,43 @@ Route::middleware('auth')->group(function () {
 
     // The matrix as the printed DepEd form — a .xlsx BUILT from the lines as
     // they stand (a MEM has no archived file to serve). Declared before
-    // {matrix} for the same reason /template is.
+    // {matrix} for the same reason /template is. Reading the form is reading
+    // the plan, so the view gate (canBeViewedBy) applies, not the write one.
     Route::get('/wfp/matrices/{matrix}/export', function (MonthlyExpenditureMatrix $matrix) {
         $user = Auth::user();
-        abort_unless($user instanceof User && $matrix->managedBy($user), 404);
+        abort_unless($user instanceof User && $matrix->canBeViewedBy($user), 404);
 
         $bytes = MemXlsxExporter::bytes($matrix, $user);
 
         return response($bytes)
             ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             ->header('Content-Length', (string) strlen($bytes))
-            ->header('Content-Disposition', 'attachment; filename="'.MemXlsxExporter::downloadName($matrix).'"');
+            ->header('Content-Disposition', 'attachment; filename="' . MemXlsxExporter::downloadName($matrix) . '"');
     })->name('wfp.matrices.export')->where('matrix', '[0-9]+');
 
+    // The editor page: the School Head's write surface, opened read-only by
+    // the school's Bookkeeper. The write gate lives inside the component —
+    // mount() only opens it (canBeViewedBy), and every mutating action
+    // re-checks managedBy().
     Route::get('/wfp/matrices/{matrix}', function (MonthlyExpenditureMatrix $matrix) {
         $user = Auth::user();
-        abort_unless($user instanceof User && $matrix->managedBy($user), 404);
+        abort_unless($user instanceof User && $matrix->canBeViewedBy($user), 404);
 
         return view('wfp.matrices.edit', ['matrix' => $matrix]);
     })->name('wfp.matrices.edit')->where('matrix', '[0-9]+');
 
     /* ------------------------------------------------------------------
-     * Per Line Item Expenditure — School Head (SH) only.
+     * Per Line Item Expenditure — the School Head reads their own school's
+     * copy; the school's Bookkeeper reads the same copy (and signs the
+     * check on it — a component action, not a route).
      *
      * The annual MOOE allotment the school's Monthly Expenditure Matrices
      * add up to, read as the printed form: a month-by-month budget column
      * beside the year's lines rolled up per account code, with each line's
      * share of the grand total. It is DERIVED on every load — there is no
      * report to generate and nothing to go stale. Scope is the signed-in
-     * SH's own school, and the guard is the same canAccessWfp() gate every
-     * other WFP route uses.
+     * account's own school, and the guard is the same canAccessWfp() gate
+     * every other WFP route uses.
      * ----------------------------------------------------------------- */
 
     Route::get('/wfp/line-items', function () {
@@ -620,12 +831,15 @@ Route::middleware('auth')->group(function () {
         return response($bytes)
             ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             ->header('Content-Length', (string) strlen($bytes))
-            ->header('Content-Disposition', 'attachment; filename="'.WfpAllotmentXlsxExporter::downloadName($year).'"');
+            ->header('Content-Disposition', 'attachment; filename="' . WfpAllotmentXlsxExporter::downloadName($year) . '"');
     })->name('wfp.lineitems.export');
 
+    // The generated-plan page: the School Head's editor, opened read-only by
+    // the school's Bookkeeper. Like the matrix page, mount() uses the view
+    // gate and every mutating action re-checks managedBy().
     Route::get('/wfp/plans/{plan}', function (WfpPlan $plan) {
         $user = Auth::user();
-        abort_unless($user instanceof User && $plan->managedBy($user), 404);
+        abort_unless($user instanceof User && $plan->canBeViewedBy($user), 404);
 
         return view('wfp.plan', ['plan' => $plan]);
     })->name('wfp.plans.edit')->where('plan', '[0-9]+');
@@ -637,7 +851,7 @@ Route::middleware('auth')->group(function () {
     // is discarded and would risk a 0-byte download).
     Route::get('/wfp/plans/{plan}/export', function (WfpPlan $plan) {
         $user = Auth::user();
-        abort_unless($user instanceof User && $plan->managedBy($user), 404);
+        abort_unless($user instanceof User && $plan->canBeViewedBy($user), 404);
         abort_unless(WfpTemplate::exists(), 404);
 
         try {
@@ -648,12 +862,12 @@ Route::middleware('auth')->group(function () {
             abort(404, $e->getMessage());
         }
 
-        $filename = 'WFP-'.$plan->year.'.xlsx';
+        $filename = 'WFP-' . $plan->year . '.xlsx';
 
         return response($bytes)
             ->header('Content-Type', WfpPlanExporter::CONTENT_TYPE)
             ->header('Content-Length', (string) strlen($bytes))
-            ->header('Content-Disposition', 'attachment; filename="'.$filename.'"');
+            ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
     })->name('wfp.plans.export')->where('plan', '[0-9]+');
 
     // MOV uploads: the staff member's Means of Verification checklist —
@@ -662,7 +876,7 @@ Route::middleware('auth')->group(function () {
     // set, not the cycle's form.
     Route::get('/movs', function () {
         $user = Auth::user();
-        abort_if($user instanceof User && $user->hasAdminAccess(), 404);
+        abort_if($user instanceof User && !$user->canAccessStaffPages(), 404);
 
         return view('mov.index');
     })->name('mov.index');

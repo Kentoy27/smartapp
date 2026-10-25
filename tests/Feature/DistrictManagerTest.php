@@ -15,14 +15,21 @@ class DistrictManagerTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function superadmin(): User
+    /**
+     * The account that manages districts and schools: an Administrator. The
+     * Districts & Schools module is the administrator-only side of the app
+     * (a superadmin is refused there — see DistrictsPageTest), so this is
+     * the role the manager is built for.
+     */
+    private function administrator(): User
     {
         return User::create([
             'name' => 'Admin User',
             'username' => 'adminuser',
             'email' => 'adminuser@example.com',
             'password' => Hash::make('password123'),
-            'is_superadmin' => true,
+            'role' => 'administrator',
+            'is_superadmin' => false,
         ]);
     }
 
@@ -37,9 +44,9 @@ class DistrictManagerTest extends TestCase
         ]);
     }
 
-    public function test_superadmin_can_add_a_district(): void
+    public function test_administrator_can_add_a_district(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
 
         Livewire::actingAs($admin)
             ->test(DistrictManager::class)
@@ -52,7 +59,7 @@ class DistrictManagerTest extends TestCase
 
     public function test_district_names_must_be_unique(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         District::create(['name' => 'District 1']);
 
         Livewire::actingAs($admin)
@@ -64,9 +71,9 @@ class DistrictManagerTest extends TestCase
         $this->assertSame(1, District::count());
     }
 
-    public function test_superadmin_can_add_a_school_under_a_district(): void
+    public function test_administrator_can_add_a_school_under_a_district(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         $district = District::create(['name' => 'District 1']);
 
         Livewire::actingAs($admin)
@@ -86,7 +93,7 @@ class DistrictManagerTest extends TestCase
 
     public function test_a_school_requires_its_school_id(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         $district = District::create(['name' => 'District 1']);
 
         Livewire::actingAs($admin)
@@ -102,7 +109,7 @@ class DistrictManagerTest extends TestCase
 
     public function test_school_ids_must_be_unique_across_the_system(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         $district = District::create(['name' => 'District 1']);
         $other = District::create(['name' => 'District 2']);
         School::create(['district_id' => $district->id, 'name' => 'First School', 'school_id' => '123456']);
@@ -120,7 +127,7 @@ class DistrictManagerTest extends TestCase
 
     public function test_a_school_with_users_cannot_be_deleted(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         $district = District::create(['name' => 'District 1']);
         $school = School::create(['district_id' => $district->id, 'name' => 'Full School', 'school_id' => '111111']);
 
@@ -151,7 +158,7 @@ class DistrictManagerTest extends TestCase
 
     public function test_selecting_a_district_lists_its_schools_with_ids(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         $district = District::create(['name' => 'District I']);
         School::create(['district_id' => $district->id, 'name' => 'ABC Elementary School', 'school_id' => '123456']);
         School::create(['district_id' => $district->id, 'name' => 'XYZ National High School', 'school_id' => '123457']);
@@ -173,7 +180,7 @@ class DistrictManagerTest extends TestCase
 
     public function test_the_school_search_filters_the_selected_district(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         $district = District::create(['name' => 'District I']);
         School::create(['district_id' => $district->id, 'name' => 'ABC Elementary School', 'school_id' => '123456']);
         School::create(['district_id' => $district->id, 'name' => 'XYZ National High School', 'school_id' => '123457']);
@@ -189,7 +196,7 @@ class DistrictManagerTest extends TestCase
 
     public function test_school_names_must_be_unique_within_a_district(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         $district = District::create(['name' => 'District 1']);
         School::create(['district_id' => $district->id, 'name' => 'San Isidro Elementary', 'school_id' => '123456']);
 
@@ -209,7 +216,7 @@ class DistrictManagerTest extends TestCase
 
     public function test_modal_lists_districts_with_their_schools(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         $district = District::create(['name' => 'District 1']);
         School::create(['district_id' => $district->id, 'name' => 'San Isidro Elementary', 'school_id' => '123456']);
 
@@ -221,9 +228,9 @@ class DistrictManagerTest extends TestCase
             ->assertSee('Manage Districts');
     }
 
-    public function test_superadmin_can_delete_a_district_and_its_schools_cascade(): void
+    public function test_administrator_can_delete_a_district_and_its_schools_cascade(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         $district = District::create(['name' => 'District 1']);
         School::create(['district_id' => $district->id, 'name' => 'San Isidro Elementary']);
 
@@ -235,9 +242,9 @@ class DistrictManagerTest extends TestCase
         $this->assertDatabaseMissing('schools', ['name' => 'San Isidro Elementary']);
     }
 
-    public function test_superadmin_can_delete_a_single_school(): void
+    public function test_administrator_can_delete_a_single_school(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         $district = District::create(['name' => 'District 1']);
         $school = School::create(['district_id' => $district->id, 'name' => 'San Isidro Elementary', 'school_id' => '123456']);
 
@@ -251,9 +258,9 @@ class DistrictManagerTest extends TestCase
         $this->assertDatabaseHas('districts', ['id' => $district->id]);
     }
 
-    public function test_superadmin_can_rename_a_district(): void
+    public function test_administrator_can_rename_a_district(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         $district = District::create(['name' => 'District 1']);
 
         Livewire::actingAs($admin)
@@ -268,7 +275,7 @@ class DistrictManagerTest extends TestCase
 
     public function test_rename_rejects_duplicate_district_names(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         District::create(['name' => 'District 1']);
         $other = District::create(['name' => 'District 2']);
 
@@ -284,7 +291,7 @@ class DistrictManagerTest extends TestCase
 
     public function test_the_school_forms_are_styled_fields_not_plain_textboxes(): void
     {
-        $admin = User::factory()->create(['is_superadmin' => true, 'role' => 'superadmin']);
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
         $district = District::create(['name' => 'Division A']);
         $school = School::create(['district_id' => $district->id, 'name' => 'A School', 'school_id' => '111111']);
 
@@ -313,7 +320,7 @@ class DistrictManagerTest extends TestCase
             ->assertSee('Save Changes', false);
     }
 
-    public function test_non_superadmins_cannot_use_the_district_manager(): void
+    public function test_non_administrators_cannot_use_the_district_manager(): void
     {
         $staff = $this->staffUser();
 
@@ -333,7 +340,7 @@ class DistrictManagerTest extends TestCase
             $thrown = $e;
         }
 
-        $this->assertNotNull($thrown, 'Expected the superadmin guard to reject a staff user.');
+        $this->assertNotNull($thrown, 'Expected the administrator guard to reject a staff user.');
         $this->assertDatabaseMissing('districts', ['name' => 'District 1']);
     }
 }

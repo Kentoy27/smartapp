@@ -26,9 +26,10 @@ class WfpMyUploadsList extends Component
 {
     public function mount(): void
     {
-        // The page is SH-only; the list is the caller's own uploads, so the
-        // same gate applies before anything renders.
-        abort_unless(Auth::user()?->canAccessWfp(), 404);
+        // The list is the School Head's own uploads, so only a writing
+        // account has one to read: the gate is canManageWfp(), and the
+        // Bookkeeper — who never uploads — never reaches it.
+        abort_unless(Auth::user()?->canManageWfp(), 404);
     }
 
     /**

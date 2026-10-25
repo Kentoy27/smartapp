@@ -20,8 +20,9 @@ use RuntimeException;
  * stored — a file that is not a WFP is rejected with a clear message and
  * nothing is saved.
  *
- * Access is restricted to the SH role: the component is mounted on pages an
- * SH alone can reach, and every action re-checks canAccessWfp() as well.
+ * Uploading is the SH's alone: mount() and every action re-check
+ * canManageWfp(), so a read-only reader never sees the trigger and cannot
+ * post through a crafted call.
  */
 #[Title('Dashboard — SmartApp')]
 class WfpUpload extends Component
@@ -45,7 +46,7 @@ class WfpUpload extends Component
 
     public function mount(): void
     {
-        abort_unless(Auth::user()?->canAccessWfp(), 404);
+        abort_unless(Auth::user()?->canManageWfp(), 404);
     }
 
     /**
@@ -53,7 +54,7 @@ class WfpUpload extends Component
      */
     public function openUpload(): void
     {
-        abort_unless(Auth::user()?->canAccessWfp(), 404);
+        abort_unless(Auth::user()?->canManageWfp(), 404);
 
         $this->resetValidation();
         $this->file = null;
@@ -75,7 +76,7 @@ class WfpUpload extends Component
      */
     public function updatedFile(): void
     {
-        abort_unless(Auth::user()?->canAccessWfp(), 404);
+        abort_unless(Auth::user()?->canManageWfp(), 404);
 
         $maxKb = (int) config('wfp.max_size_kb', 10240);
 

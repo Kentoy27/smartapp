@@ -362,11 +362,14 @@ class MemMatrixTest extends TestCase
         $matrix = $this->matrixFor($sh);
 
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            // The blank row the first addRow appends is discarded on save;
+            // the second addRow persists the filled line.
             ->call('addRow')
             ->set('items.0.activity_description', 'Procure supplies')
+            ->set('items.0.section', 'operations')
             ->set('items.0.quantity', '10')
             ->set('items.0.unit_cost', '250')
-            ->call('saveDraft')
+            ->call('addRow')
             ->assertHasNoErrors();
 
         $this->assertDatabaseHas('monthly_expenditure_items', [
@@ -375,8 +378,8 @@ class MemMatrixTest extends TestCase
         ]);
 
         $this->assertEquals(2500.0, (float) MonthlyExpenditureItem::firstOrFail()->calculated_total);
-        // The version advanced so a generated WFP now reads out of date.
-        $this->assertSame(2, (int) $matrix->fresh()->version);
+        // Two writes advanced the version, so a generated WFP now reads out of date.
+        $this->assertSame(3, (int) $matrix->fresh()->version);
     }
 
     public function test_saving_requires_an_activity_description(): void
@@ -386,10 +389,13 @@ class MemMatrixTest extends TestCase
 
         // The line is non-blank (it has a quantity), but has no activity.
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            // The blank row the first addRow appends is discarded on save;
+            // the second addRow persists and validates the filled line.
             ->call('addRow')
             ->set('items.0.quantity', '5')
+            ->set('items.0.section', 'operations')
             ->set('items.0.activity_description', '')
-            ->call('saveDraft')
+            ->call('addRow')
             ->assertHasErrors(['items.0.activity_description']);
 
         $this->assertSame(0, MonthlyExpenditureItem::count());
@@ -420,7 +426,8 @@ class MemMatrixTest extends TestCase
         $this->assertSame('Procure supplies', $items[0]['activity_description']);
         $this->assertSame(0, MonthlyExpenditureItem::count());
 
-        $component->call('saveDraft')->assertHasNoErrors();
+        // The modal row joined the grid unsaved; a structural mutation writes it.
+        $component->call('addRow')->assertHasNoErrors();
 
         $this->assertDatabaseHas('monthly_expenditure_items', [
             'matrix_id' => $matrix->id,
@@ -459,7 +466,8 @@ class MemMatrixTest extends TestCase
             ->set('lineForm.activity_movs', 'Attendance sheet, photos')
             ->call('saveLineFromModal')
             ->assertHasNoErrors()
-            ->call('saveDraft')
+            // The modal row joined the grid unsaved; a structural mutation writes it.
+            ->call('addRow')
             ->assertHasNoErrors();
 
         $item = MonthlyExpenditureItem::firstOrFail();
@@ -511,10 +519,15 @@ class MemMatrixTest extends TestCase
         $matrix = $this->matrixFor($sh);
 
         $component = Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            // The blank row the first addRow appends is discarded on save;
+            // the second addRow persists the filled line, which gives it a
+            // stable key the modal can address.
             ->call('addRow')
             ->set('items.0.activity_description', 'Old description')
+            ->set('items.0.section', 'operations')
             ->set('items.0.quantity', '1')
-            ->set('items.0.unit_cost', '10');
+            ->set('items.0.unit_cost', '10')
+            ->call('addRow');
 
         $key = $component->get('items.0._key');
 
@@ -526,14 +539,14 @@ class MemMatrixTest extends TestCase
             ->set('lineForm.activity_description', 'New description')
             ->set('lineForm.quantity', '4')
             ->set('lineForm.unit_cost', '25')
+            // Editing through the modal is a structural mutation: it
+            // auto-saves the edit.
             ->call('saveLineFromModal')
             ->assertSet('showLineModal', false)
             ->assertSet('editingKey', null)
             // Edited in place: still one line, not a new one appended.
             ->assertCount('items', 1)
-            ->assertSet('items.0.activity_description', 'New description')
-            ->call('saveDraft')
-            ->assertHasNoErrors();
+            ->assertSet('items.0.activity_description', 'New description');
 
         $this->assertSame(1, MonthlyExpenditureItem::count());
 
@@ -643,21 +656,23 @@ class MemMatrixTest extends TestCase
         $matrix = $this->matrixFor($sh);
 
         $component = Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            // The blank row the first addRow appends is discarded on save;
+            // the second addRow persists the filled line.
             ->call('addRow')
             ->set('items.0.activity_description', 'Procure supplies')
             ->set('items.0.section', 'project')
             ->set('items.0.quantity', '2')
-            ->set('items.0.unit_cost', '50');
+            ->set('items.0.unit_cost', '50')
+            ->call('addRow');
 
         $key = $component->get('items.0._key');
 
+        // Duplicating is a structural mutation: original and copy auto-save.
         $component->call('duplicateRow', $key)
             ->assertCount('items', 2)
             ->assertSet('items.1.section', 'project')
             ->assertSet('items.1.activity_description', 'Procure supplies')
-            ->assertSet('items.1.id', null);
-
-        $component->call('saveDraft')->assertHasNoErrors();
+            ->assertSet('items.1.id', fn ($value): bool => is_int($value));
 
         $this->assertSame(2, MonthlyExpenditureItem::count());
     }
@@ -668,18 +683,16 @@ class MemMatrixTest extends TestCase
         $matrix = $this->matrixFor($sh);
 
         $component = Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            // Describe the line before moving it: moveRow's single auto-save
+            // writes the section flip together with the activity.
+            ->set('items.0.activity_description', 'Build a fence')
+            ->set('items.0.section', 'operations')
             ->call('addRow');
 
         $key = $component->get('items.0._key');
 
         $component->call('moveRow', $key)
             ->assertSet('items.0.section', 'project');
-
-        // The grid groups by section but binds to the original index, so a
-        // moved line still writes to the same field.
-        $component->set('items.0.activity_description', 'Build a fence')
-            ->call('saveDraft')
-            ->assertHasNoErrors();
 
         $item = MonthlyExpenditureItem::firstOrFail();
 
@@ -760,6 +773,51 @@ class MemMatrixTest extends TestCase
             ->assertSee('Add project line');
     }
 
+    public function test_the_line_list_uses_the_printed_forms_columns(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        $matrix->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'objective' => 'Improved learner outcomes',
+            'activity_description' => 'Procure office supplies',
+            'resource_kind' => 'MOOE',
+            'quantity' => 10,
+            'unit' => 'ream',
+            'unit_cost' => 250,
+            'account_title' => 'Office Supplies Expenses',
+            'account_code' => '5020301000',
+        ]);
+
+        // The table is the printed matrix: its section banner on top, then the
+        // form's column headings, then each line's values under the heading.
+        // assertSeeTextInOrder, not assertSeeInOrder: the Project heading carries
+        // <wbr> break points so it wraps at the slashes instead of mid-word, and
+        // the text assertion reads through that markup.
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->assertSeeTextInOrder([
+                'Operations-Related Expenditures',
+                'Objectives',
+                'Project/Activity/Expenditure',
+                'Resources Needed',
+                'Total Estimated Cost',
+                'Account Title',
+                'Account Code',
+                'Kind',
+                'Quantity',
+                'Unit Cost',
+                'Improved learner outcomes',
+                'Procure office supplies',
+                'MOOE',
+                'ream',
+                'Office Supplies Expenses',
+                '5020301000',
+                '2,500.00',
+            ]);
+    }
+
     public function test_an_empty_matrix_shows_the_starting_state_not_an_empty_table(): void
     {
         $sh = $this->schoolHead();
@@ -771,35 +829,22 @@ class MemMatrixTest extends TestCase
             ->assertDontSee('Operations subtotal');
     }
 
-    public function test_validate_and_finalize_set_the_status(): void
-    {
-        $sh = $this->schoolHead();
-        $matrix = $this->matrixFor($sh);
-
-        $component = Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
-            ->call('addRow')
-            ->set('items.0.activity_description', 'Line one')
-            ->call('validateMatrix');
-
-        $this->assertSame('validated', $matrix->fresh()->status);
-
-        $component->call('finalizeMatrix');
-        $this->assertSame('finalized', $matrix->fresh()->status);
-    }
-
     public function test_a_stale_grid_is_refused_by_the_optimistic_lock(): void
     {
         $sh = $this->schoolHead();
         $matrix = $this->matrixFor($sh);
 
         $component = Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            // The first addRow auto-saves and bumps the matrix version.
             ->call('addRow')
-            ->set('items.0.activity_description', 'Line one');
+            ->set('items.0.activity_description', 'Line one')
+            ->set('items.0.section', 'operations');
 
         // Somebody else writes the matrix in the meantime.
         $matrix->bumpVersion();
 
-        $component->call('saveDraft')
+        $component->call('addRow')
+            // The lock check refuses the auto-save: the matrix changed elsewhere.
             ->assertSet('errorMessage', fn ($value) => $value !== null);
 
         $this->assertSame(0, MonthlyExpenditureItem::count());

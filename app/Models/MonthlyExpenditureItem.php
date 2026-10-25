@@ -36,6 +36,7 @@ class MonthlyExpenditureItem extends Model
         'activity_movs',
         'major_output',
         'performance_indicator',
+        'wfp_line_template_id',
     ];
 
     protected $casts = [

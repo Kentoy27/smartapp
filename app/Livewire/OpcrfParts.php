@@ -33,6 +33,7 @@ class OpcrfParts extends Component
         $user = Auth::user();
 
         abort_unless($user?->canViewOpcrfParts(), 404);
+        abort_if($user === null || !$user->canAccessStaffPages(), 404);
 
         $year = OpcrfAccess::currentYear();
         $readOnly = $user->role === 'viewer';
@@ -50,11 +51,11 @@ class OpcrfParts extends Component
         $parts = OpcrfAccess::allParts($user, $year, $now);
         $groupStates = array_values(array_filter(
             $parts,
-            fn (array $part): bool => in_array($part['part'], [2, 3, 4], true),
+            fn(array $part): bool => in_array($part['part'], [2, 3, 4], true),
         ));
         $displayParts = array_values(array_filter(
             $parts,
-            fn (array $part): bool => in_array($part['part'], [1, 2], true),
+            fn(array $part): bool => in_array($part['part'], [1, 2], true),
         ));
 
         foreach ($displayParts as &$part) {
@@ -62,7 +63,7 @@ class OpcrfParts extends Component
             $part['group_states'] = $part['is_grouped_term'] ? $groupStates : [];
             $part['all_group_parts_complete'] = $part['is_grouped_term']
                 && count($groupStates) === 3
-                && collect($groupStates)->every(fn (array $state): bool => $state['completed']);
+                && collect($groupStates)->every(fn(array $state): bool => $state['completed']);
             $part['card_tone'] = $part['all_group_parts_complete'] ? 'completed' : $part['tone'];
         }
         unset($part);
@@ -71,7 +72,7 @@ class OpcrfParts extends Component
             'year' => $year,
             'parts' => $displayParts,
             'now' => $now,
-            'openCount' => count(array_filter($parts, fn (array $p): bool => $p['open'])),
+            'openCount' => count(array_filter($parts, fn(array $p): bool => $p['open'])),
             'readOnly' => false,
         ]);
     }

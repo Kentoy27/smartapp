@@ -189,6 +189,8 @@ class OpcrfUpload extends Component
         // confirmSubmit() reads Auth::id() — so a guest is refused here
         // rather than half way through a submit.
         abort_unless(Auth::user()?->canAccessOpcrfTemplate(), 404);
+        abort_unless(Auth::check(), 404);
+        abort_if(!Auth::user()->canAccessStaffPages(), 404);
     }
 
     /**
@@ -197,6 +199,8 @@ class OpcrfUpload extends Component
     public function openUpload(): void
     {
         abort_unless(Auth::user()?->canAccessOpcrfTemplate(), 404);
+        abort_unless(Auth::check(), 404);
+        abort_if(!Auth::user()->canAccessStaffPages(), 404);
 
         $this->uploadMode = 'part_one';
         $submission = $this->latestSubmission(OpcrfSubmission::PART_ONE);
@@ -210,6 +214,8 @@ class OpcrfUpload extends Component
     public function openFullUpload(): void
     {
         abort_unless(Auth::user()?->canAccessOpcrfTemplate(), 404);
+        abort_unless(Auth::check(), 404);
+        abort_if(!Auth::user()->canAccessStaffPages(), 404);
 
         $this->uploadMode = 'full_workbook';
         $submission = $this->latestSubmission(OpcrfSubmission::FULL_WORKBOOK);
@@ -222,7 +228,7 @@ class OpcrfUpload extends Component
 
     public function canUploadNow(): bool
     {
-        if (! Auth::user()?->canAccessOpcrfTemplate()) {
+        if (!Auth::user()?->canAccessOpcrfTemplate()) {
             return false;
         }
 
@@ -233,7 +239,7 @@ class OpcrfUpload extends Component
 
     public function canUploadFullNow(): bool
     {
-        if (! Auth::user()?->canAccessOpcrfTemplate()) {
+        if (!Auth::user()?->canAccessOpcrfTemplate()) {
             return false;
         }
 
@@ -253,8 +259,8 @@ class OpcrfUpload extends Component
     {
         return $this->submissionId !== null || $this->latestSubmission(
             $this->isFullWorkbookUpload()
-                ? OpcrfSubmission::FULL_WORKBOOK
-                : OpcrfSubmission::PART_ONE
+            ? OpcrfSubmission::FULL_WORKBOOK
+            : OpcrfSubmission::PART_ONE
         ) !== null;
     }
 
@@ -271,7 +277,7 @@ class OpcrfUpload extends Component
 
     public function isUpdatingPartOneSubmission(): bool
     {
-        return (! $this->isFullWorkbookUpload() && $this->submissionId !== null)
+        return (!$this->isFullWorkbookUpload() && $this->submissionId !== null)
             || $this->latestSubmission(OpcrfSubmission::PART_ONE) !== null;
     }
 
@@ -309,9 +315,11 @@ class OpcrfUpload extends Component
 
     private function canUploadFullSubmission(?OpcrfSubmission $submission): bool
     {
-        if (! Auth::user()?->canAccessOpcrfTemplate()
-            || ! OpcrfPartOne::fullTemplateAvailable()
-            || $this->latestApprovedPartOne() === null) {
+        if (
+            !Auth::user()?->canAccessOpcrfTemplate()
+            || !OpcrfPartOne::fullTemplateAvailable()
+            || $this->latestApprovedPartOne() === null
+        ) {
             return false;
         }
 
@@ -337,6 +345,8 @@ class OpcrfUpload extends Component
     private function authorizedSubmissionForUpload(): ?OpcrfSubmission
     {
         abort_unless(Auth::user()?->canAccessOpcrfTemplate(), 404);
+        abort_unless(Auth::check(), 404);
+        abort_if(!Auth::user()->canAccessStaffPages(), 404);
 
         $part = $this->isFullWorkbookUpload()
             ? OpcrfSubmission::FULL_WORKBOOK
@@ -414,7 +424,7 @@ class OpcrfUpload extends Component
         $this->authorizedSubmissionForUpload();
 
         $this->validate([
-            'file' => ['required', 'file', 'max:'.(int) config('opcrf.template.max_kb', 10240), 'extensions:xlsx'],
+            'file' => ['required', 'file', 'max:' . (int) config('opcrf.template.max_kb', 10240), 'extensions:xlsx'],
         ], [
             'file.required' => 'Please upload your completed OPCRF template before submitting.',
             'file.extensions' => 'The OPCRF must be the .xlsx template file.',
@@ -446,8 +456,10 @@ class OpcrfUpload extends Component
                 $analysisBytes = $this->synchronizedFullWorkbookBytes($analysisPath);
                 $temporaryAnalysisPath = tempnam(sys_get_temp_dir(), 'opcrf-full-review-');
 
-                if ($temporaryAnalysisPath === false
-                    || file_put_contents($temporaryAnalysisPath, $analysisBytes) === false) {
+                if (
+                    $temporaryAnalysisPath === false
+                    || file_put_contents($temporaryAnalysisPath, $analysisBytes) === false
+                ) {
                     throw new RuntimeException('The synchronized full OPCRF could not be prepared for review.');
                 }
 
@@ -508,7 +520,7 @@ class OpcrfUpload extends Component
             'headers' => $spreadsheet->headerCells(),
             'evaluators' => $spreadsheet->evaluatorCells(),
             'parts' => array_map(
-                fn (array $part): array => [
+                fn(array $part): array => [
                     'key' => $part['key'],
                     'title' => mb_substr($part['title'], 0, 200),
                     'note' => mb_substr($part['note'], 0, 600),
@@ -530,14 +542,16 @@ class OpcrfUpload extends Component
     {
         $workbook = new OpcrfSpreadsheet($uploadedPath);
         $sheetNames = array_map(
-            static fn (array $sheet): string => mb_strtoupper(trim((string) ($sheet['name'] ?? ''))),
+            static fn(array $sheet): string => mb_strtoupper(trim((string) ($sheet['name'] ?? ''))),
             $workbook->sheetNames()
         );
 
         foreach (['PART I', 'PART II', 'PART III', 'PART IV'] as $requiredSheet) {
-            if (! collect($sheetNames)->contains(
-                static fn (string $name): bool => str_starts_with($name, $requiredSheet)
-            )) {
+            if (
+                !collect($sheetNames)->contains(
+                    static fn(string $name): bool => str_starts_with($name, $requiredSheet)
+                )
+            ) {
                 throw new RuntimeException(
                     'Upload the complete OPCRF workbook with its Part I, II, III, and IV sheets.'
                 );
@@ -605,7 +619,7 @@ class OpcrfUpload extends Component
         $existingSubmission = $this->authorizedSubmissionForUpload();
 
         $this->validate([
-            'file' => ['required', 'file', 'max:'.(int) config('opcrf.template.max_kb', 10240), 'extensions:xlsx'],
+            'file' => ['required', 'file', 'max:' . (int) config('opcrf.template.max_kb', 10240), 'extensions:xlsx'],
         ], [
             'file.required' => 'Please upload your completed OPCRF template before submitting.',
             'file.extensions' => 'The OPCRF must be the .xlsx template file.',
@@ -637,8 +651,8 @@ class OpcrfUpload extends Component
 
         if ($existingSubmission !== null) {
             $archivedPath = $this->file->storeAs(
-                'opcrf-submissions/'.Auth::id(),
-                uniqid().'-'.$this->file->getClientOriginalName(),
+                'opcrf-submissions/' . Auth::id(),
+                uniqid() . '-' . $this->file->getClientOriginalName(),
                 'local'
             );
 
@@ -680,8 +694,8 @@ class OpcrfUpload extends Component
         }
 
         $archivedPath = $this->file->storeAs(
-            'opcrf-submissions/'.Auth::id(),
-            uniqid().'-'.$this->file->getClientOriginalName(),
+            'opcrf-submissions/' . Auth::id(),
+            uniqid() . '-' . $this->file->getClientOriginalName(),
             'local'
         );
 
@@ -765,9 +779,9 @@ class OpcrfUpload extends Component
         }
 
         $originalName = $this->file->getClientOriginalName();
-        $archivedPath = 'opcrf-submissions/'.Auth::id().'/'.uniqid().'-'.$originalName;
+        $archivedPath = 'opcrf-submissions/' . Auth::id() . '/' . uniqid() . '-' . $originalName;
 
-        if (! Storage::disk('local')->put($archivedPath, $workbookBytes)) {
+        if (!Storage::disk('local')->put($archivedPath, $workbookBytes)) {
             $this->addError('file', 'The full OPCRF workbook could not be saved. Please try again.');
 
             return;

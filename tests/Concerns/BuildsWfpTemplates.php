@@ -180,11 +180,11 @@ trait BuildsWfpTemplates
         for ($r = $firstData; $r < $totalRow; $r++) {
             $cells = '';
             foreach ($bandCols as $col) {
-                // The last template row carries a row-total formula, exactly
-                // like the official template's per-line sums — the filler must
+                // The first template row carries a computed cell, exactly like
+                // the official template's per-line sums — the filler must
                 // preserve it rather than blank or overwrite the cell.
-                $cells .= ($r === $totalRow - 1 && $col === 'K')
-                    ? '<c r="K'.$r.'" s="6"><f>SUM(K'.$firstData.':K'.($r - 1).')</f><v>0</v></c>'
+                $cells .= ($r === $firstData && $col === 'K')
+                    ? '<c r="K'.$r.'" s="6"><f>SUM(G'.$r.':J'.$r.')</f><v>0</v></c>'
                     : '<c r="'.$col.$r.'" s="5"/>';
             }
             $rows .= '<row r="'.$r.'">'.$cells.'</row>';
@@ -314,7 +314,7 @@ trait BuildsWfpTemplates
      */
     private function wfpCellFormula(string $sheetXml, string $ref): ?string
     {
-        $pattern = '/<c\b(?=[^>]*\br="'.preg_quote($ref, '/').'")[^>]*>.*?<\/c>/s';
+        $pattern = '/<c\b(?=[^>]*\br="'.preg_quote($ref, '/').'")[^>]*\/>|<c\b(?=[^>]*\br="'.preg_quote($ref, '/').'")[^>]*>.*?<\/c>/s';
 
         if (preg_match($pattern, $sheetXml, $m) !== 1) {
             return null;

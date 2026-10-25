@@ -7,6 +7,7 @@ use App\Models\School;
 use App\Models\User;
 use App\Models\WfpItem;
 use App\Models\WfpPlan;
+use App\Models\WfpReportCheck;
 use App\Support\MemWorkbookImporter;
 use App\Support\MemYearInitializer;
 use Illuminate\Support\Facades\Auth;
@@ -118,6 +119,28 @@ class MemMatrixList extends Component
         return $user;
     }
 
+    /**
+     * The page's WRITE gate: creating a year, initialising its months,
+     * importing a workbook, deleting a matrix. The SH's alone.
+     */
+    private function manager(): User
+    {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canManageWfp(), 404);
+
+        return $user;
+    }
+
+    /**
+     * Whether the signed-in account may edit the school's work on this page.
+     * The Blade hides the write controls for a read-only reader; every
+     * action re-checks the same gate server-side.
+     */
+    public function canEdit(): bool
+    {
+        return Auth::user()?->canManageWfp() === true;
+    }
+
     /* ------------------------------------------------------------ the year */
 
     /**
@@ -128,6 +151,13 @@ class MemMatrixList extends Component
      */
     public function initializeYear(): void
     {
+        // A silent no-op for a read-only reader: the view does not call it
+        // for them, and a crafted call must not create months either — but
+        // it must not break the page they are on.
+        if (!$this->canEdit()) {
+            return;
+        }
+
         $year = $this->filterYear();
 
         if ($year !== null) {
@@ -142,7 +172,7 @@ class MemMatrixList extends Component
      */
     public function generateYear(): void
     {
-        $user = $this->user();
+        $user = $this->manager();
 
         if ($user->school_id === null) {
             $this->errorMessage = 'Your account has no school assigned, so it cannot own a matrix. Ask an administrator to set your school first.';
@@ -159,7 +189,7 @@ class MemMatrixList extends Component
         $this->resetPage();
 
         $this->successMessage = $created > 0
-            ? "{$created} missing ".($created === 1 ? 'month was' : 'months were')." created for CY {$year}. The rest were left as they were."
+            ? "{$created} missing " . ($created === 1 ? 'month was' : 'months were') . " created for CY {$year}. The rest were left as they were."
             : "All twelve months already exist for CY {$year}.";
     }
 
@@ -174,7 +204,7 @@ class MemMatrixList extends Component
      */
     public function addYear(): void
     {
-        $user = $this->user();
+        $user = $this->manager();
 
         if ($user->school_id === null) {
             $this->errorMessage = 'Your account has no school assigned, so it cannot own a matrix. Ask an administrator to set your school first.';
@@ -184,10 +214,12 @@ class MemMatrixList extends Component
 
         $raw = trim($this->newYear);
 
-        if (! ctype_digit($raw)
+        if (
+            !ctype_digit($raw)
             || (int) $raw < MemYearInitializer::MIN_YEAR
-            || (int) $raw > MemYearInitializer::MAX_YEAR) {
-            $this->errorMessage = 'Enter a planning year between '.MemYearInitializer::MIN_YEAR.' and '.MemYearInitializer::MAX_YEAR.' to add.';
+            || (int) $raw > MemYearInitializer::MAX_YEAR
+        ) {
+            $this->errorMessage = 'Enter a planning year between ' . MemYearInitializer::MIN_YEAR . ' and ' . MemYearInitializer::MAX_YEAR . ' to add.';
 
             return;
         }
@@ -202,7 +234,7 @@ class MemMatrixList extends Component
         unset($this->years, $this->rows);
 
         $this->successMessage = $created > 0
-            ? "{$created} missing ".($created === 1 ? 'month was' : 'months were')." created for CY {$year}. The rest were left as they were."
+            ? "{$created} missing " . ($created === 1 ? 'month was' : 'months were') . " created for CY {$year}. The rest were left as they were."
             : "All twelve months already exist for CY {$year}.";
     }
 
@@ -266,6 +298,15 @@ class MemMatrixList extends Component
         return $matrices->count() - $before;
     }
 
+    /* ---------------------------------------------------------------- open */
+
+    public function open(MonthlyExpenditureMatrix $matrix)
+    {
+        abort_unless($matrix->canBeViewedBy(Auth::user()), 404);
+
+        return $this->redirect(route('wfp.matrices.edit', ['matrix' => $matrix->id]), navigate: true);
+    }
+
     /* -------------------------------------------------------------- export */
 
     /**
@@ -275,7 +316,7 @@ class MemMatrixList extends Component
      */
     public function export(MonthlyExpenditureMatrix $matrix)
     {
-        abort_unless($matrix->managedBy(Auth::user()), 404);
+        abort_unless($matrix->canBeViewedBy(Auth::user()), 404);
 
         return $this->redirect(route('wfp.matrices.export', ['matrix' => $matrix->id]));
     }
@@ -312,14 +353,25 @@ class MemMatrixList extends Component
 
         $title = $matrix->periodLabel();
 
+        $checkCleared = WfpReportCheck::query()
+            ->where('school_id', $matrix->school_id)
+            ->where('year', $matrix->year)
+            ->exists();
+
         // The items cascade with the matrix (FK cascadeOnDelete). Any generated
         // WFP line keeps its (now dangling) source line id but loses its
         // source_matrix_id, so the next regeneration removes it.
         $matrix->delete();
 
+        // The deleted month's lines were part of the year's report the
+        // Bookkeeper may have checked; the check no longer describes what is
+        // left, so it is cleared.
+        WfpReportCheck::clearFor((int) $matrix->school_id, (int) $matrix->year);
+
         $this->closeConfirmDelete();
         $this->resetPage();
-        $this->successMessage = "Matrix deleted — “{$title}” and its lines were removed.";
+        $this->successMessage = "Matrix deleted — “{$title}” and its lines were removed."
+            . ($checkCleared ? " The Bookkeeper's check of account titles and codes was cleared because the lines changed." : '');
     }
 
     /**
@@ -330,7 +382,7 @@ class MemMatrixList extends Component
     {
         return WfpItem::query()
             ->where('source_matrix_id', $matrix->id)
-            ->whereHas('plan', fn ($query) => $query->where('status', WfpPlan::STATUS_FINALIZED))
+            ->whereHas('plan', fn($query) => $query->where('status', WfpPlan::STATUS_FINALIZED))
             ->exists();
     }
 
@@ -343,7 +395,7 @@ class MemMatrixList extends Component
      */
     public function openWorkbookImport(): void
     {
-        $this->user();
+        $this->manager();
 
         $this->resetWorkbookImport();
         $this->showWorkbookImport = true;
@@ -361,7 +413,7 @@ class MemMatrixList extends Component
      */
     public function updatedWorkbookFile(): void
     {
-        $user = $this->user();
+        $user = $this->manager();
 
         $this->resetWorkbookState();
 
@@ -374,11 +426,11 @@ class MemMatrixList extends Component
         $maxKb = (int) config('mem.workbook.max_size_kb', 10240);
 
         $this->validate([
-            'workbookFile' => ['required', 'file', 'max:'.$maxKb, 'extensions:'.(string) config('mem.workbook.extensions', 'xlsx')],
+            'workbookFile' => ['required', 'file', 'max:' . $maxKb, 'extensions:' . (string) config('mem.workbook.extensions', 'xlsx')],
         ], [
             'workbookFile.required' => 'Choose a workbook (.xlsx or .xlsm) to import.',
             'workbookFile.extensions' => 'The matrix workbook must be an Excel file (.xlsx or .xlsm).',
-            'workbookFile.max' => 'The file is too large ('.round($maxKb / 1024, 1).' MB maximum).',
+            'workbookFile.max' => 'The file is too large (' . round($maxKb / 1024, 1) . ' MB maximum).',
         ]);
 
         try {
@@ -399,7 +451,7 @@ class MemMatrixList extends Component
 
     public function commitWorkbookImport(): void
     {
-        $user = $this->user();
+        $user = $this->manager();
 
         if ($this->workbookFile === null) {
             $this->workbookError = 'Choose a .xlsx workbook to import.';
@@ -433,13 +485,23 @@ class MemMatrixList extends Component
 
         $year = $this->importYear();
 
+        $checkCleared = WfpReportCheck::query()
+            ->where('school_id', $user->school_id)
+            ->where('year', $year)
+            ->exists();
+
         $result = MemWorkbookImporter::commit($analysis['valid'], (int) $user->school_id, $year, $user);
+
+        // The import replaced lines the report's check signed off on, so the
+        // check no longer describes them: clear it (see WfpReportCheck).
+        WfpReportCheck::clearFor((int) $user->school_id, $year);
 
         $this->showWorkbookImport = false;
         $this->resetWorkbookImport();
         $this->resetPage();
 
-        $this->successMessage = "Imported {$result['imported']} line(s) across {$result['months']} month(s) for CY {$year}.";
+        $this->successMessage = "Imported {$result['imported']} line(s) across {$result['months']} month(s) for CY {$year}."
+            . ($checkCleared ? " The Bookkeeper's check of account titles and codes was cleared because the lines changed." : '');
     }
 
     /** The year the import targets: the filter's year, or the current one. */
@@ -584,18 +646,18 @@ class MemMatrixList extends Component
                 ->distinct()
                 ->orderByDesc('year')
                 ->pluck('year')
-                ->map(fn ($year) => (string) $year)
+                ->map(fn($year) => (string) $year)
                 ->all();
 
         $current = (string) now()->year;
 
-        if (! in_array($current, $years, true)) {
+        if (!in_array($current, $years, true)) {
             $years[] = $current;
         }
 
         // The selected year must always be selectable, even if a matrix was
         // deleted out from under it.
-        if ($this->year !== '' && ! in_array($this->year, $years, true)) {
+        if ($this->year !== '' && !in_array($this->year, $years, true)) {
             $years[] = $this->year;
         }
 
@@ -613,11 +675,11 @@ class MemMatrixList extends Component
             ->withCount('items')
             ->when(
                 $schoolId === null,
-                fn ($query) => $query->whereRaw('1 = 0'),
-                fn ($query) => $query->where('school_id', $schoolId),
+                fn($query) => $query->whereRaw('1 = 0'),
+                fn($query) => $query->where('school_id', $schoolId),
             )
-            ->when($this->year !== '', fn ($query) => $query->where('year', (int) $this->year))
-            ->when($this->status !== 'all', fn ($query) => $query->where('status', $this->status))
+            ->when($this->year !== '', fn($query) => $query->where('year', (int) $this->year))
+            ->when($this->status !== 'all', fn($query) => $query->where('status', $this->status))
             // Months read January → December; "All" puts the newest year first.
             ->orderByDesc('year')
             ->orderBy('month')

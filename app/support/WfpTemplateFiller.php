@@ -167,7 +167,38 @@ class WfpTemplateFiller
 
         $parts = self::readParts($templateBytes);
         $sheetPath = $layout['sheet_path'];
-        $parts[$sheetPath] = self::writeRows($parts[$sheetPath], $layout, $rows);
+
+        // Title rows paint the template's gray section colour; resolve it once
+        // only when at least one row is an account-title section header.
+        $titleStyle = null;
+
+        foreach ($rows as $row) {
+            if (is_array($row) && isset($row['__account_title__'])) {
+                $titleStyle = self::titleStyle($parts);
+
+                break;
+            }
+        }
+
+        [$sheetXml, $stylesXml] = self::writeRows(
+            $parts[$sheetPath],
+            $parts['xl/styles.xml'] ?? '',
+            $layout,
+            $rows,
+            $titleStyle,
+        );
+
+        $parts[$sheetPath] = $sheetXml;
+
+        if (isset($parts['xl/styles.xml'])) {
+            $parts['xl/styles.xml'] = $stylesXml;
+        }
+
+        $parts['xl/workbook.xml'] = self::updatePrintArea(
+            $parts['xl/workbook.xml'] ?? '',
+            (string) ($layout['sheet_name'] ?? ''),
+            $parts[$sheetPath],
+        );
 
         return PurePhpZipWriter::create($parts);
     }
@@ -212,14 +243,52 @@ class WfpTemplateFiller
         return PurePhpZipWriter::create($parts);
     }
 
+    /**
+     * The title-block cells that identify a generated form: the school's name
+     * in its own cell, and the planning year in the form's title and its two
+     * target headings. Both are pinned in config, so a template revision that
+     * moves them is a config change rather than a code change.
+     *
+     * The year matters: the shipped template is headed for one year, and a
+     * workbook generated for another must not keep the template's year.
+     *
+     * @return array<string, string> cell reference => text
+     */
+    public static function titleCells(?string $school, ?int $year): array
+    {
+        $cells = [];
+
+        $schoolCell = trim((string) config('wfp.template.school_name_cell', 'A6'));
+        $school = trim((string) $school);
+
+        if ($school !== '' && $schoolCell !== '') {
+            $cells[$schoolCell] = $school;
+        }
+
+        if ($year === null) {
+            return $cells;
+        }
+
+        foreach ((array) config('wfp.template.year_cells', []) as $ref => $pattern) {
+            $ref = trim((string) $ref);
+
+            if ($ref !== '' && is_string($pattern) && $pattern !== '') {
+                $cells[$ref] = sprintf($pattern, $year);
+            }
+        }
+
+        return $cells;
+    }
+
     /* ------------------------------------------------------------------
      * Writing
      * ----------------------------------------------------------------- */
 
     /**
      * @param  array<int, array<string, mixed>>  $rows
+     * @return array{0: string, 1: string} patched sheet XML and styles XML
      */
-    private static function writeRows(string $sheetXml, array $layout, array $rows): string
+    private static function writeRows(string $sheetXml, string $stylesXml, array $layout, array $rows, ?int $titleStyle = null): array
     {
         $dataRows = array_values(array_map('intval', (array) $layout['data_rows']));
 
@@ -242,9 +311,30 @@ class WfpTemplateFiller
             for ($i = 1; $i <= $delta; $i++) {
                 $dataRows[] = $lastDataRow + $i;
             }
+        } elseif ($desired < count($dataRows)) {
+            /*
+             * Fewer rows than the template's blank band: drop the unused tail
+             * of the band and pull the TOTAL row and the signature block up,
+             * so the workbook is as long as the plan rather than as long as
+             * the form. One line is always kept, so an empty plan still opens
+             * with a working line and a valid TOTAL range.
+             */
+            $keep = max(1, $desired);
+            $sheetXml = self::trimDataRows($sheetXml, $dataRows, $keep);
+            $dataRows = array_slice($dataRows, 0, $keep);
         }
 
         $styles = self::harvestStyles($sheetXml, $dataRows);
+
+        // The template's blank band was cut from a completed workbook, so its
+        // cells carry hundreds of one-off styles: bold print, gray/yellow
+        // section fills and fixed heights. Generated lines get clean variants
+        // (white, not bold, wrapped); only the account-title rows keep the
+        // template's gray/bold section style.
+        [$stylesXml, $cleanStyles] = self::cleanCellStyles($stylesXml, self::stylesUsed($sheetXml, $dataRows));
+
+        $fitRows = [];
+        $titleRows = [];
 
         foreach ($rows as $index => $row) {
             $targetRow = $dataRows[$index] ?? null;
@@ -253,8 +343,18 @@ class WfpTemplateFiller
                 continue;
             }
 
+            // An account-title section row paints the whole band gray.
+            $rowStyle = (isset($row['__account_title__']) && $titleStyle !== null) ? (string) $titleStyle : null;
+            $styleMap = $rowStyle === null ? $cleanStyles : null;
+
             $writes = self::writesForRow((array) $row, $layout);
-            $sheetXml = self::rebuildRow($sheetXml, $targetRow, $writes, $styles);
+            $sheetXml = self::rebuildRow($sheetXml, $targetRow, $writes, $styles, $rowStyle, true, $styleMap);
+
+            if ($styleMap !== null) {
+                $fitRows[] = $targetRow;
+            } else {
+                $titleRows[] = $targetRow;
+            }
         }
 
         // Blank out any template data rows the run did not fill.
@@ -265,10 +365,18 @@ class WfpTemplateFiller
                 $writes[$col] = ['value' => null, 'numeric' => false];
             }
 
-            $sheetXml = self::rebuildRow($sheetXml, $dataRows[$index], $writes, $styles);
+            $sheetXml = self::rebuildRow($sheetXml, $dataRows[$index], $writes, $styles, null, false, $cleanStyles);
+            $fitRows[] = $dataRows[$index];
         }
 
-        return self::updateDimension($sheetXml);
+        $sheetXml = self::fitRowHeights($sheetXml, $fitRows, $stylesXml);
+
+        // Section rows are deliberately left unwrapped (only their colour and
+        // weight are the template's), so they are one line even when they land
+        // on a template row that shipped at 102 or 122 points.
+        $sheetXml = self::fitRowHeights($sheetXml, $titleRows, $stylesXml, false);
+
+        return [self::updateDimension($sheetXml), $stylesXml];
     }
 
     /**
@@ -285,11 +393,12 @@ class WfpTemplateFiller
         $codeColumns = (array) ($layout['code_columns'] ?? []);
         $hasMonth = array_key_exists('month', $row);
         $month = $hasMonth ? (int) $row['month'] : null;
+        $isTitle = isset($row['__account_title__']);
 
         $writes = [];
 
         foreach ($row as $field => $value) {
-            if ($field === 'month') {
+            if ($field === 'month' || $field === '__account_title__') {
                 continue;
             }
 
@@ -340,6 +449,22 @@ class WfpTemplateFiller
             if (isset($columns[$field])) {
                 $writes[$columns[$field]] = ['value' => self::stringify($value), 'numeric' => $numeric];
             }
+
+            // A title row has no dedicated Account Title column on some
+            // templates — fall back to the Objectives column so the title is
+            // still visible rather than dropped.
+            if ($isTitle && $field === 'account_title' && ! isset($columns['account_title']) && isset($columns['objective'])) {
+                $writes[$columns['objective']] = ['value' => self::stringify($value), 'numeric' => false];
+            }
+        }
+
+        // A title row paints the whole band gray: write every blank column as
+        // an empty cell so each inherits the row's gray style. Columns already
+        // written above (title, code) keep their values.
+        if ($isTitle) {
+            foreach (self::blankColumns($layout) as $col) {
+                $writes[$col] ??= ['value' => null, 'numeric' => false];
+            }
         }
 
         return $writes;
@@ -376,12 +501,18 @@ class WfpTemplateFiller
 
     /**
      * Rebuild one row element from a set of column writes, keeping every other
-     * cell and each cell's own style.
+     * cell and each cell's own style. When `$rowStyle` is given (a title
+     * section's gray), it overrides every written cell's style so the whole
+     * row paints gray. `$unhide` lifts the template's `hidden` flag: a row
+     * that now carries data must be visible, and the shipped template hides
+     * some of its blank lines.
      *
      * @param  array<string, array{value: ?string, numeric: bool}>  $writes  column letter => write
      * @param  array<string, string>  $styles  column letter => harvested style id
+     * @param  string|null  $rowStyle  style id forced on every written cell
+     * @param  array<string, string>|null  $styleMap  base style id => clean style id
      */
-    private static function rebuildRow(string $sheetXml, int $rowNumber, array $writes, array $styles): string
+    private static function rebuildRow(string $sheetXml, int $rowNumber, array $writes, array $styles, ?string $rowStyle = null, bool $unhide = false, ?array $styleMap = null): string
     {
         $pattern = self::rowPattern($rowNumber);
 
@@ -397,6 +528,10 @@ class WfpTemplateFiller
 
         $attrs = $open[1];
 
+        if ($unhide) {
+            $attrs = (string) preg_replace('/\s+hidden="[^"]*"/', '', $attrs);
+        }
+
         $cells = [];
         $order = [];
         $existing = [];
@@ -408,6 +543,15 @@ class WfpTemplateFiller
                 }
 
                 $col = $ref[1];
+
+                // A section row must be uniformly gray and bold, including
+                // cells the filler does not write (formulas and the template's
+                // suppressed totals); otherwise a yellow or blue cell is left
+                // in the middle of the gray band.
+                if ($rowStyle !== null) {
+                    $element = self::withStyleId($element, $rowStyle);
+                }
+
                 $existing[$col] = $element;
 
                 if (isset($writes[$col])) {
@@ -434,12 +578,14 @@ class WfpTemplateFiller
                 continue;
             }
 
-            $style = null;
+            $style = $rowStyle;
 
-            if (isset($existing[$col]) && preg_match('/\bs="(\d+)"/', $existing[$col], $s) === 1) {
-                $style = $s[1];
-            } elseif (isset($styles[$col])) {
-                $style = $styles[$col];
+            if ($style === null) {
+                if (isset($existing[$col]) && preg_match('/\bs="(\d+)"/', $existing[$col], $s) === 1) {
+                    $style = $s[1];
+                } elseif (isset($styles[$col])) {
+                    $style = $styles[$col];
+                }
             }
 
             $cells[$col] = self::cellElement($col, $rowNumber, $spec['value'], $spec['numeric'], $style);
@@ -450,9 +596,44 @@ class WfpTemplateFiller
 
         $rebuilt = '<row'.$attrs.'>'.implode('', $cells).'</row>';
 
+        if ($styleMap !== null) {
+            $rebuilt = self::restyleRow($rebuilt, $styleMap);
+        }
+
         // A callback (not a replacement string) so a value containing "$"
         // is never read as a backreference.
         return (string) preg_replace_callback($pattern, static fn (): string => $rebuilt, $sheetXml, 1);
+    }
+
+    /** Force one cell element to a style id, adding the attribute if needed. */
+    private static function withStyleId(string $element, string $styleId): string
+    {
+        if (preg_match('/\bs="\d+"/', $element) === 1) {
+            return (string) preg_replace('/\bs="\d+"/', 's="'.$styleId.'"', $element, 1);
+        }
+
+        return (string) preg_replace('/<c\b/', '<c s="'.$styleId.'"', $element, 1);
+    }
+
+    /**
+     * Swap every cell's style id for its clean variant, including cells the
+     * template computes (a formula may be kept while its bold print is not).
+     *
+     * @param  array<string, string>  $styleMap  base style id => clean style id
+     */
+    private static function restyleRow(string $rowXml, array $styleMap): string
+    {
+        return (string) preg_replace_callback(
+            '/<c\b[^>]*>/',
+            static function (array $m) use ($styleMap): string {
+                if (preg_match('/\bs="(\d+)"/', $m[0], $s) === 1 && isset($styleMap[$s[1]])) {
+                    return (string) preg_replace('/\bs="\d+"/', 's="'.$styleMap[$s[1]].'"', $m[0], 1);
+                }
+
+                return $m[0];
+            },
+            $rowXml
+        );
     }
 
     private static function cellElement(string $col, int $rowNumber, ?string $value, bool $numeric, ?string $style): string
@@ -511,6 +692,363 @@ class WfpTemplateFiller
         }
 
         return $styles;
+    }
+
+    /**
+     * Every style id used by the data band, so clean variants can be prepared
+     * before any row is rewritten.
+     *
+     * @param  array<int, int>  $dataRows
+     * @return array<int, string>
+     */
+    private static function stylesUsed(string $sheetXml, array $dataRows): array
+    {
+        $styles = [];
+
+        foreach ($dataRows as $rowNumber) {
+            if (preg_match(self::rowPattern($rowNumber), $sheetXml, $m) !== 1) {
+                continue;
+            }
+
+            if (preg_match_all('/<c\b[^>]*>/', $m[0], $cells) === 0) {
+                continue;
+            }
+
+            foreach ($cells[0] as $cell) {
+                if (preg_match('/\bs="(\d+)"/', $cell, $s) === 1) {
+                    $styles[$s[1]] = $s[1];
+                }
+            }
+        }
+
+        return array_values($styles);
+    }
+
+    /**
+     * Build a clean style for every template style in the data band: the same
+     * font family and size but not bold, the same border and number format,
+     * no fill, and wrapped text. New fonts and cellXfs are appended to
+     * styles.xml, so every existing style index stays valid.
+     *
+     * @param  array<int, string>  $styleIds
+     * @return array{0: string, 1: array<string, string>} styles XML and base style => clean style
+     */
+    private static function cleanCellStyles(string $stylesXml, array $styleIds): array
+    {
+        if ($stylesXml === '' || $styleIds === []) {
+            return [$stylesXml, []];
+        }
+
+        if (preg_match('/<fonts\b([^>]*)>(.*?)<\/fonts>/s', $stylesXml, $fontsBlock) !== 1
+            || preg_match('/<cellXfs\b([^>]*)>(.*?)<\/cellXfs>/s', $stylesXml, $xfsBlock) !== 1) {
+            return [$stylesXml, []];
+        }
+
+        if (preg_match_all('/<font\b[^>]*>.*?<\/font>|<font\b[^>]*\/>/s', $fontsBlock[2], $fonts) === 0
+            || preg_match_all('/<xf\b[^>]*\/>|<xf\b[^>]*>.*?<\/xf>/s', $xfsBlock[2], $xfs) === 0) {
+            return [$stylesXml, []];
+        }
+
+        $fontsByXml = [];
+
+        foreach ($fonts[0] as $index => $font) {
+            $fontsByXml[$font] ??= $index;
+        }
+
+        $nonBold = []; // original font id => non-bold font id
+        $newFonts = [];
+
+        foreach ($styleIds as $styleId) {
+            $fontId = self::styleFontId($xfs[0][(int) $styleId] ?? '');
+
+            if ($fontId === null || isset($nonBold[$fontId])) {
+                continue;
+            }
+
+            $font = $fonts[0][$fontId] ?? '';
+
+            if ($font === '' || ! self::fontIsBold($font)) {
+                $nonBold[$fontId] = $fontId;
+
+                continue;
+            }
+
+            $clean = (string) preg_replace('/<b\b[^>]*\/>|<b\b[^>]*>.*?<\/b>/s', '', $font);
+
+            if (isset($fontsByXml[$clean])) {
+                $nonBold[$fontId] = $fontsByXml[$clean];
+
+                continue;
+            }
+
+            $newFonts[] = $clean;
+            $newFontsIndex = count($fonts[0]) + count($newFonts) - 1;
+            $nonBold[$fontId] = $newFontsIndex;
+            $fontsByXml[$clean] = $newFontsIndex;
+        }
+
+        $xfsByXml = [];
+
+        foreach ($xfs[0] as $index => $xf) {
+            $xfsByXml[$xf] ??= $index;
+        }
+
+        $map = [];
+        $newXfs = [];
+
+        foreach ($styleIds as $styleId) {
+            $styleId = (int) $styleId;
+            $xf = $xfs[0][$styleId] ?? null;
+
+            if ($xf === null) {
+                continue;
+            }
+
+            $clean = self::cleanCellXf($xf, $nonBold);
+
+            if (isset($xfsByXml[$clean])) {
+                $map[(string) $styleId] = (string) $xfsByXml[$clean];
+
+                continue;
+            }
+
+            $newXfs[] = $clean;
+            $cleanIndex = count($xfs[0]) + count($newXfs) - 1;
+            $map[(string) $styleId] = (string) $cleanIndex;
+            $xfsByXml[$clean] = $cleanIndex;
+        }
+
+        return [self::appendStyleElements($stylesXml, $fontsBlock, $xfsBlock, $newFonts, $newXfs), $map];
+    }
+
+    /**
+     * A cellXf with the same number format, border and alignment as the
+     * template's, but a non-bold font, no fill, and wrapping switched on.
+     *
+     * @param  array<int, int>  $nonBold  original font id => non-bold font id
+     */
+    private static function cleanCellXf(string $xf, array $nonBold): string
+    {
+        $fontId = self::styleFontId($xf);
+
+        if ($fontId !== null && isset($nonBold[$fontId])) {
+            $xf = (string) preg_replace('/\bfontId="\d+"/', 'fontId="'.$nonBold[$fontId].'"', $xf, 1);
+        }
+
+        $xf = (string) preg_replace('/\bfillId="\d+"/', 'fillId="0"', $xf, 1);
+        $xf = self::withXfAttribute($xf, 'applyFont', '1');
+        $xf = self::withXfAttribute($xf, 'applyFill', '1');
+
+        if (preg_match('/\bborderId="[1-9]\d*"/', $xf) === 1) {
+            $xf = self::withXfAttribute($xf, 'applyBorder', '1');
+        }
+
+        if (preg_match('/\bnumFmtId="[1-9]\d*"/', $xf) === 1) {
+            $xf = self::withXfAttribute($xf, 'applyNumberFormat', '1');
+        }
+
+        return self::withWrappedAlignment($xf);
+    }
+
+    private static function styleFontId(string $xf): ?int
+    {
+        return preg_match('/\bfontId="(\d+)"/', $xf, $m) === 1 ? (int) $m[1] : null;
+    }
+
+    private static function fontIsBold(string $font): bool
+    {
+        return preg_match('/<b\b(?![^>]*\bval="(?:0|false)")/i', $font) === 1;
+    }
+
+    /** Add or replace one attribute on an `<xf>` element's opening tag. */
+    private static function withXfAttribute(string $xf, string $attribute, string $value): string
+    {
+        if (preg_match('/^<xf\b([^>]*?)(\/?)>/s', $xf, $m) !== 1) {
+            return $xf;
+        }
+
+        $attrs = $m[1];
+        $pattern = '/\b'.preg_quote($attribute, '/').'="[^"]*"/';
+
+        if (preg_match($pattern, $attrs) === 1) {
+            $attrs = (string) preg_replace($pattern, $attribute.'="'.$value.'"', $attrs, 1);
+        } else {
+            $attrs .= ' '.$attribute.'="'.$value.'"';
+        }
+
+        return '<xf'.$attrs.$m[2].'>'.substr($xf, strlen($m[0]));
+    }
+
+    /** Preserve an xf's alignment, but force wrapping on. */
+    private static function withWrappedAlignment(string $xf): string
+    {
+        $alignment = '';
+
+        if (preg_match('/<alignment\b([^>]*?)\/>/s', $xf, $m) === 1) {
+            $alignment = $m[1];
+        } elseif (preg_match('/<alignment\b([^>]*)>/s', $xf, $m) === 1) {
+            $alignment = $m[1];
+        }
+
+        $alignment = trim((string) preg_replace('/\bwrapText="[^"]*"/', '', $alignment));
+        $alignment = ($alignment === '' ? '' : $alignment.' ').'wrapText="1"';
+
+        $xf = (string) preg_replace('/<alignment\b[^>]*\/>|<alignment\b[^>]*>.*?<\/alignment>/s', '', $xf);
+        $xf = self::withXfAttribute($xf, 'applyAlignment', '1');
+        $element = '<alignment '.$alignment.'/>';
+
+        if (preg_match('/^<xf\b[^>]*\/>$/s', $xf) === 1) {
+            return (string) preg_replace('/\/>$/', '>'.$element.'</xf>', $xf, 1);
+        }
+
+        if (str_ends_with($xf, '</xf>')) {
+            return substr($xf, 0, -strlen('</xf>')).$element.'</xf>';
+        }
+
+        return $xf;
+    }
+
+    /**
+     * Append the new fonts and cellXfs to styles.xml and keep both `count`
+     * attributes truthful.
+     *
+     * @param  array<int, string>  $newFonts
+     * @param  array<int, string>  $newXfs
+     */
+    private static function appendStyleElements(string $stylesXml, array $fontsBlock, array $xfsBlock, array $newFonts, array $newXfs): string
+    {
+        if ($newFonts !== []) {
+            $fontCount = preg_match_all('/<font\b/', $fontsBlock[2]);
+            $attrs = self::withCountAttribute($fontsBlock[1], $fontCount + count($newFonts));
+            $fontsXml = '<fonts'.$attrs.'>'.$fontsBlock[2].implode('', $newFonts).'</fonts>';
+            $stylesXml = (string) preg_replace_callback(
+                '/<fonts\b[^>]*>.*?<\/fonts>/s',
+                static fn (): string => $fontsXml,
+                $stylesXml,
+                1
+            );
+        }
+
+        if ($newXfs !== []) {
+            $xfCount = preg_match_all('/<xf\b/', $xfsBlock[2]);
+            $attrs = self::withCountAttribute($xfsBlock[1], $xfCount + count($newXfs));
+            $xfsXml = '<cellXfs'.$attrs.'>'.$xfsBlock[2].implode('', $newXfs).'</cellXfs>';
+            $stylesXml = (string) preg_replace_callback(
+                '/<cellXfs\b[^>]*>.*?<\/cellXfs>/s',
+                static fn (): string => $xfsXml,
+                $stylesXml,
+                1
+            );
+        }
+
+        return $stylesXml;
+    }
+
+    private static function withCountAttribute(string $attrs, int $count): string
+    {
+        if (preg_match('/\bcount="\d+"/', $attrs) === 1) {
+            return (string) preg_replace('/\bcount="\d+"/', 'count="'.$count.'"', $attrs, 1);
+        }
+
+        return rtrim($attrs).' count="'.$count.'"';
+    }
+
+    /**
+     * The cellXfs index of the first style whose fill is gray — the template's
+     * section-header colour — so account-title rows paint the same gray as the
+     * form's own section bands. Returns null when no gray fill exists, in
+     * which case title rows keep their column's harvested style (no
+     * corruption).
+     */
+    private static function titleStyle(array $parts): ?int
+    {
+        $styles = $parts['xl/styles.xml'] ?? '';
+
+        if ($styles === '' || ! preg_match('/<cellXfs[^>]*>(.*?)<\/cellXfs>/s', $styles, $block)) {
+            return null;
+        }
+
+        if (! preg_match_all('/<xf\b[^>]*>/s', $block[1], $xfs)) {
+            return null;
+        }
+
+        foreach ($xfs[0] as $index => $xf) {
+            if (! preg_match('/\bfillId="(\d+)"/', $xf, $f)) {
+                continue;
+            }
+
+            if (self::fillIsGray($styles, (int) $f[1])) {
+                return $index;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Whether the fill at $fillId paints a mid-gray: a gray125 pattern, or a
+     * solid fill whose foreground/background colour is gray.
+     */
+    private static function fillIsGray(string $styles, int $fillId): bool
+    {
+        if (! preg_match('/<fills[^>]*>(.*?)<\/fills>/s', $styles, $block)) {
+            return false;
+        }
+
+        $index = -1;
+
+        if (! preg_match_all('/<fill\b[^>]*>.*?<\/fill>/s', $block[1], $fills, PREG_SET_ORDER)) {
+            return false;
+        }
+
+        foreach ($fills as $fill) {
+            $index++;
+
+            if ($index !== $fillId) {
+                continue;
+            }
+
+            $xml = $fill[0];
+
+            if (preg_match('/patternType="gray125"/i', $xml) === 1) {
+                return true;
+            }
+
+            if (preg_match_all('/<(fg|bg)Color\b[^>]*\brgb="([0-9A-Fa-f]{6,8})"/i', $xml, $colors, PREG_SET_ORDER) === 1) {
+                foreach ($colors as $color) {
+                    if (self::isGrayRgb($color[2])) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether an ARGB/RGB colour is a mid-gray: r == g == b, neither near-black
+     * nor near-white.
+     */
+    private static function isGrayRgb(string $rgb): bool
+    {
+        $hex = strtoupper(preg_replace('/[^0-9A-Fa-f]/', '', $rgb) ?? '');
+
+        if (strlen($hex) === 8) {
+            $hex = substr($hex, 2); // drop the ARGB alpha byte
+        }
+
+        if (strlen($hex) !== 6) {
+            return false;
+        }
+
+        $r = hexdec(substr($hex, 0, 2));
+        $g = hexdec(substr($hex, 2, 2));
+        $b = hexdec(substr($hex, 4, 2));
+
+        return $r === $g && $g === $b && $r >= 0x40 && $r <= 0xE8;
     }
 
     /**
@@ -617,6 +1155,214 @@ class WfpTemplateFiller
     }
 
     /**
+     * Remove the tail of the template's blank data band, keeping `$keep` rows,
+     * and pull every row below the band up by the removed count. The rows that
+     * move carry formulas (the TOTAL row's SUM ranges and its self-references)
+     * and merges, so both are re-pointed at the rows' new positions.
+     *
+     * Only whole rows from the END of the band are removed, so a line that
+     * stays keeps its own per-row formulas untouched.
+     *
+     * @param  array<int, int>  $dataRows  the band, in sheet order
+     */
+    private static function trimDataRows(string $sheetXml, array $dataRows, int $keep): string
+    {
+        $band = array_values(array_map('intval', $dataRows));
+
+        if ($keep >= count($band)) {
+            return $sheetXml;
+        }
+
+        $firstRemoved = $band[$keep];
+        $lastRemoved = $band[count($band) - 1];
+        $removed = $lastRemoved - $firstRemoved + 1;
+        $lastKept = $firstRemoved - 1;
+
+        // The removed rows themselves.
+        $sheetXml = (string) preg_replace_callback(
+            self::ROW_PATTERN,
+            static function (array $m) use ($firstRemoved, $lastRemoved): string {
+                if (preg_match('/\br="(\d+)"/', $m[0], $rn) !== 1) {
+                    return $m[0];
+                }
+
+                $number = (int) $rn[1];
+
+                return $number >= $firstRemoved && $number <= $lastRemoved ? '' : $m[0];
+            },
+            $sheetXml
+        );
+
+        // Everything below the band moves up, cells and formulas included.
+        $sheetXml = (string) preg_replace_callback(
+            self::ROW_PATTERN,
+            static function (array $m) use ($lastRemoved, $lastKept, $removed): string {
+                $row = $m[0];
+
+                if (preg_match('/\br="(\d+)"/', $row, $rn) !== 1) {
+                    return $row;
+                }
+
+                $number = (int) $rn[1];
+
+                if ($number <= $lastRemoved) {
+                    return $row;
+                }
+
+                $new = $number - $removed;
+
+                $row = (string) preg_replace('/<row\b([^>]*?)\br="'.$number.'"/', '<row$1r="'.$new.'"', $row, 1);
+
+                $row = (string) preg_replace_callback(
+                    '/\br="([A-Z]+)'.$number.'"/',
+                    static fn (array $c): string => 'r="'.$c[1].$new.'"',
+                    $row
+                );
+
+                return self::shiftFormulaRows($row, $lastRemoved, $lastKept, $removed);
+            },
+            $sheetXml
+        );
+
+        return self::shiftMergesUp($sheetXml, $firstRemoved, $lastRemoved, $removed);
+    }
+
+    /**
+     * Re-point a moved row's formulas at the rows' new positions: a reference
+     * past the removed band shifts up; a reference into the band collapses
+     * onto the band's new last row, so a TOTAL `SUM(...)` still covers exactly
+     * the surviving data rows.
+     */
+    private static function shiftFormulaRows(string $row, int $lastRemoved, int $lastKept, int $removed): string
+    {
+        return (string) preg_replace_callback(
+            '/<f\b[^>]*>.*?<\/f>/s',
+            static function (array $f) use ($lastRemoved, $lastKept, $removed): string {
+                return (string) preg_replace_callback(
+                    '/(\$?[A-Z]{1,3}\$?)(\d+)(?!\d)/',
+                    static function (array $c) use ($lastRemoved, $lastKept, $removed): string {
+                        $number = (int) $c[2];
+
+                        if ($number > $lastRemoved) {
+                            return $c[1].($number - $removed);
+                        }
+
+                        if ($number > $lastKept) {
+                            return $c[1].$lastKept;
+                        }
+
+                        return $c[0];
+                    },
+                    $f[0]
+                );
+            },
+            $row
+        );
+    }
+
+    /**
+     * Drop merge ranges wholly inside the removed band, move the ones below it
+     * up, and clamp a range that straddles the cut to the surviving rows.
+     * The `<mergeCells count>` is kept in step with the ranges that remain.
+     */
+    private static function shiftMergesUp(string $sheetXml, int $firstRemoved, int $lastRemoved, int $removed): string
+    {
+        $sheetXml = (string) preg_replace_callback(
+            '/<mergeCell ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"\/>/',
+            static function (array $m) use ($firstRemoved, $lastRemoved, $removed): string {
+                $start = (int) $m[2];
+                $end = (int) $m[4];
+
+                if ($start >= $firstRemoved && $end <= $lastRemoved) {
+                    return '';
+                }
+
+                if ($start > $lastRemoved) {
+                    $start -= $removed;
+                    $end -= $removed;
+                } elseif ($start >= $firstRemoved) {
+                    $start = $firstRemoved;
+                    $end -= $removed;
+                } elseif ($end >= $firstRemoved) {
+                    $end = $firstRemoved - 1;
+                }
+
+                return '<mergeCell ref="'.$m[1].$start.':'.$m[3].$end.'"/>';
+            },
+            $sheetXml
+        );
+
+        return self::updateMergeCount($sheetXml);
+    }
+
+    /** Rewrite `<mergeCells count>` to the number of ranges left in it. */
+    private static function updateMergeCount(string $sheetXml): string
+    {
+        if (preg_match('/<mergeCells\b([^>]*)>(.*?)<\/mergeCells>/s', $sheetXml, $m) !== 1) {
+            return $sheetXml;
+        }
+
+        $count = preg_match_all('/<mergeCell\b/', $m[2]);
+
+        if ($count === 0) {
+            return (string) preg_replace('/<mergeCells\b[^>]*>.*?<\/mergeCells>/s', '', $sheetXml, 1);
+        }
+
+        $attrs = (string) preg_replace('/\bcount="\d+"/', 'count="'.$count.'"', $m[1]);
+        $rebuilt = '<mergeCells'.$attrs.'>'.$m[2].'</mergeCells>';
+
+        return (string) preg_replace_callback(
+            '/<mergeCells\b[^>]*>.*?<\/mergeCells>/s',
+            static fn (): string => $rebuilt,
+            $sheetXml,
+            1
+        );
+    }
+
+    /**
+     * Keep the sheet's print area as tall as the sheet actually is: a trimmed
+     * form must not print the template's removed blank band, and a form that
+     * grew past the template's band must still print its new lines.
+     */
+    private static function updatePrintArea(string $workbookXml, string $sheetName, string $sheetXml): string
+    {
+        if ($workbookXml === '' || $sheetName === '') {
+            return $workbookXml;
+        }
+
+        $maxRow = 0;
+
+        if (preg_match_all('/<row\b[^>]*\br="(\d+)"/', $sheetXml, $rows) > 0) {
+            foreach ($rows[1] as $row) {
+                $maxRow = max($maxRow, (int) $row);
+            }
+        }
+
+        if ($maxRow === 0) {
+            return $workbookXml;
+        }
+
+        $quoted = "'".$sheetName."'!";
+        $plain = $sheetName.'!';
+
+        return (string) preg_replace_callback(
+            '/<definedName\b([^>]*\bname="_xlnm\.Print_Area"[^>]*)>(.*?)<\/definedName>/s',
+            static function (array $m) use ($maxRow, $quoted, $plain): string {
+                $ref = html_entity_decode($m[2], ENT_XML1 | ENT_QUOTES, 'UTF-8');
+
+                if (! str_starts_with($ref, $quoted) && ! str_starts_with($ref, $plain)) {
+                    return $m[0];
+                }
+
+                $ref = (string) preg_replace('/(:\$?[A-Z]+\$?)\d+$/', '${1}'.$maxRow, $ref);
+
+                return '<definedName'.$m[1].'>'.htmlspecialchars($ref, ENT_XML1 | ENT_QUOTES, 'UTF-8').'</definedName>';
+            },
+            $workbookXml
+        );
+    }
+
+    /**
      * Rewrite the sheet's `<dimension>` to cover the sheet's actual used range.
      */
     private static function updateDimension(string $sheetXml): string
@@ -649,6 +1395,172 @@ class WfpTemplateFiller
         $ref = 'A1:'.self::columnLetter($maxCol).$maxRow;
 
         return (string) preg_replace('/<dimension ref="[^"]*"\/>/', '<dimension ref="'.$ref.'"/>', $sheetXml, 1);
+    }
+
+    /**
+     * Give each generated line the height its wrapped text needs. The template
+     * stores fixed heights copied from the workbook it was cut from (21, 42,
+     * 63, 102, 122.4 …), so a line landing on one of those rows would either
+     * clip its text or be absurdly tall. The height is written without
+     * `customHeight`, leaving Excel free to re-fit the row after an edit.
+     *
+     * @param  array<int, int>  $dataRows
+     */
+    private static function fitRowHeights(string $sheetXml, array $dataRows, string $stylesXml, bool $wrap = true): string
+    {
+        if ($dataRows === []) {
+            return $sheetXml;
+        }
+
+        $widths = self::columnWidths($sheetXml);
+        $fontSizes = self::styleFontSizes($stylesXml);
+
+        foreach ($dataRows as $rowNumber) {
+            $sheetXml = self::fitRowHeight($sheetXml, (int) $rowNumber, $widths, $fontSizes, $wrap);
+        }
+
+        return $sheetXml;
+    }
+
+    /**
+     * @param  array<int, float>  $widths  1-based column index => width
+     * @param  array<int, float>  $fontSizes  style id => point size
+     */
+    private static function fitRowHeight(string $sheetXml, int $rowNumber, array $widths, array $fontSizes, bool $wrap = true): string
+    {
+        $pattern = self::rowPattern($rowNumber);
+
+        if (preg_match($pattern, $sheetXml, $m) !== 1) {
+            return $sheetXml;
+        }
+
+        $row = $m[0];
+        $height = 15.0;
+
+        if (preg_match_all('/<c\b[^>]*>.*?<\/c>/s', $row, $cells) !== false) {
+            foreach ($cells[0] as $cell) {
+                if (preg_match('/\br="([A-Z]+)\d+"/', $cell, $ref) !== 1) {
+                    continue;
+                }
+
+                if (preg_match('/<is>.*?<t[^>]*>(.*?)<\/t>/s', $cell, $text) !== 1) {
+                    continue;
+                }
+
+                $value = html_entity_decode($text[1], ENT_XML1 | ENT_QUOTES, 'UTF-8');
+
+                if (trim($value) === '') {
+                    continue;
+                }
+
+                $styleId = preg_match('/\bs="(\d+)"/', $cell, $s) === 1 ? (int) $s[1] : 0;
+                $fontSize = $fontSizes[$styleId] ?? 11.0;
+                $lineHeight = max(15.0, $fontSize * 1.32);
+                $columnWidth = $widths[self::columnIndex($ref[1])] ?? 8.43;
+
+                // Excel's width unit is one character of the default 11pt
+                // font; a 16pt cell fits proportionally fewer per line. The
+                // 0.85 margin absorbs word-wrap boundaries, which can leave a
+                // line short enough to need one more than the raw length
+                // suggests.
+                $charactersPerLine = max(4, (int) floor($columnWidth * (11.0 / $fontSize) * 0.85));
+                $lines = 0;
+
+                if (! $wrap) {
+                    $lines = 1;
+                } else {
+                    foreach (preg_split('/\r\n|\r|\n/', $value) ?: [] as $line) {
+                        $lines += max(1, (int) ceil(mb_strlen($line) / $charactersPerLine));
+                    }
+                }
+
+                $height = max($height, max(1, $lines) * $lineHeight);
+            }
+        }
+
+        $height = min(409.0, $height);
+
+        if (preg_match('/^<row\b([^>]*?)(\/?)>/s', $row, $open) === 1) {
+            $attrs = (string) preg_replace('/\s+(?:ht|customHeight)="[^"]*"/', '', $open[1]);
+            $attrs = rtrim($attrs).' ht="'.self::formatHeight($height).'"';
+            $row = '<row'.$attrs.$open[2].'>'.substr($row, strlen($open[0]));
+        }
+
+        return (string) preg_replace_callback($pattern, static fn (): string => $row, $sheetXml, 1);
+    }
+
+    /**
+     * @return array<int, float> 1-based column index => width
+     */
+    private static function columnWidths(string $sheetXml): array
+    {
+        $widths = [];
+        $default = 8.43;
+
+        if (preg_match('/<sheetFormatPr\b[^>]*\bdefaultColWidth="([0-9.]+)"/', $sheetXml, $m) === 1) {
+            $default = (float) $m[1];
+        }
+
+        if (preg_match('/<cols\b[^>]*>(.*?)<\/cols>/s', $sheetXml, $block) !== 1) {
+            return $widths;
+        }
+
+        if (preg_match_all('/<col\b[^>]*\/?>/', $block[1], $cols) === false) {
+            return $widths;
+        }
+
+        foreach ($cols[0] as $col) {
+            $min = preg_match('/\bmin="(\d+)"/', $col, $minMatch) === 1 ? (int) $minMatch[1] : 1;
+            $max = preg_match('/\bmax="(\d+)"/', $col, $maxMatch) === 1 ? (int) $maxMatch[1] : $min;
+            $width = preg_match('/\bwidth="([0-9.]+)"/', $col, $widthMatch) === 1 ? (float) $widthMatch[1] : $default;
+
+            // The template ends with `<col min="52" max="16384">`; only the
+            // columns this table can occupy are worth remembering.
+            $max = min($max, 200);
+
+            for ($index = $min; $index <= $max; $index++) {
+                $widths[$index] = $width;
+            }
+        }
+
+        return $widths;
+    }
+
+    /**
+     * @return array<int, float> style id => point size
+     */
+    private static function styleFontSizes(string $stylesXml): array
+    {
+        if ($stylesXml === ''
+            || preg_match('/<fonts\b[^>]*>(.*?)<\/fonts>/s', $stylesXml, $fontsBlock) !== 1
+            || preg_match('/<cellXfs\b[^>]*>(.*?)<\/cellXfs>/s', $stylesXml, $xfsBlock) !== 1) {
+            return [];
+        }
+
+        if (preg_match_all('/<font\b[^>]*>.*?<\/font>|<font\b[^>]*\/>/s', $fontsBlock[1], $fonts) === 0
+            || preg_match_all('/<xf\b[^>]*\/>|<xf\b[^>]*>.*?<\/xf>/s', $xfsBlock[1], $xfs) === 0) {
+            return [];
+        }
+
+        $sizes = [];
+
+        foreach ($fonts[0] as $index => $font) {
+            $sizes[$index] = preg_match('/<sz\b[^>]*\bval="([0-9.]+)"/', $font, $m) === 1 ? (float) $m[1] : 11.0;
+        }
+
+        $styleSizes = [];
+
+        foreach ($xfs[0] as $index => $xf) {
+            $fontId = self::styleFontId($xf);
+            $styleSizes[$index] = $fontId !== null ? ($sizes[$fontId] ?? 11.0) : 11.0;
+        }
+
+        return $styleSizes;
+    }
+
+    private static function formatHeight(float $height): string
+    {
+        return rtrim(rtrim(number_format($height, 2, '.', ''), '0'), '.');
     }
 
     /* ------------------------------------------------------------------

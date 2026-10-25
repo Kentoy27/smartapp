@@ -6,8 +6,11 @@ use App\Models\AccountClassification;
 use App\Models\MonthlyExpenditureItem;
 use App\Models\MonthlyExpenditureMatrix;
 use App\Models\User;
+use App\Models\WfpLineTemplate;
 use App\Models\WfpPlan;
+use App\Models\WfpReportCheck;
 use App\Support\MemImporter;
+use App\Support\WfpAllotment;
 use App\Support\WfpGenerator;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -54,8 +57,6 @@ class MemEditor extends Component
     /** @var array<int, int> */
     public array $removedItemIds = [];
 
-    public string $matrixStatus = MonthlyExpenditureMatrix::STATUS_DRAFT;
-
     public ?string $successMessage = null;
 
     public ?string $errorMessage = null;
@@ -75,6 +76,28 @@ class MemEditor extends Component
     /** The live query behind the account combobox (title or object code). */
     public string $accountSearch = '';
 
+    /* Template picker for the Add a Line form. */
+
+    /** Search term for the template picker (name / activity / account). */
+    public string $templateSearch = '';
+
+    /** The template last applied to the line being encoded, or null. */
+    public ?int $appliedTemplateId = null;
+
+    public string $appliedTemplateName = '';
+
+    /**
+     * The values the last applied template contributed, keyed by lineForm
+     * field — used to decide which fields are still "template-owned" and
+     * therefore replaceable when a new template is chosen.
+     *
+     * @var array<string, mixed>
+     */
+    public array $appliedTemplateSnapshot = [];
+
+    /** A template chosen while the user has edits: awaits replace or keep. */
+    public ?int $pendingTemplateId = null;
+
     /* CSV import. */
     public $importFile;
 
@@ -93,11 +116,12 @@ class MemEditor extends Component
 
     public function mount(?MonthlyExpenditureMatrix $matrix = null): void
     {
-        abort_unless($matrix !== null && $matrix->managedBy(Auth::user()), 404);
+        // The page OPENS for a read-only reader; every write below goes
+        // through guard(), which keeps the SH-only managedBy() gate.
+        abort_unless($matrix !== null && $matrix->canBeViewedBy(Auth::user()), 404);
 
         $this->matrixId = $matrix->id;
         $this->loadedVersion = (int) $matrix->version;
-        $this->matrixStatus = $matrix->status;
         $this->loadItems($matrix);
     }
 
@@ -109,6 +133,16 @@ class MemEditor extends Component
         abort_unless($matrix->managedBy(Auth::user()), 404);
 
         return $matrix;
+    }
+
+    /**
+     * Whether the signed-in account may edit this matrix. The Blade hides
+     * every write control for a read-only reader; each action re-checks the
+     * same gate server-side (see guard()).
+     */
+    public function canEdit(): bool
+    {
+        return Auth::user()?->canManageWfp() === true;
     }
 
     private function loadItems(MonthlyExpenditureMatrix $matrix): void
@@ -143,6 +177,7 @@ class MemEditor extends Component
             'activity_movs' => (string) ($item->activity_movs ?? ''),
             'major_output' => (string) ($item->major_output ?? ''),
             'performance_indicator' => (string) ($item->performance_indicator ?? ''),
+            'wfp_line_template_id' => $item->wfp_line_template_id,
         ];
     }
 
@@ -166,6 +201,7 @@ class MemEditor extends Component
             'activity_movs' => '',
             'major_output' => '',
             'performance_indicator' => '',
+            'wfp_line_template_id' => null,
         ];
     }
 
@@ -225,6 +261,8 @@ class MemEditor extends Component
         }
 
         $this->items[] = $this->blankRow($section);
+
+        $this->persist();
     }
 
     /* ---------------------------------------------------------- line modal */
@@ -242,6 +280,11 @@ class MemEditor extends Component
         $this->lineSection = in_array($section, ['operations', 'project'], true) ? $section : 'operations';
         $this->lineForm = $this->blankRow($this->lineSection);
         $this->accountSearch = '';
+        $this->templateSearch = '';
+        $this->appliedTemplateId = null;
+        $this->appliedTemplateName = '';
+        $this->appliedTemplateSnapshot = [];
+        $this->pendingTemplateId = null;
         $this->showLineModal = true;
         $this->resetValidation();
     }
@@ -266,6 +309,31 @@ class MemEditor extends Component
                 : 'operations';
             $this->lineForm = $row;
             $this->accountSearch = (string) ($row['account_title'] ?? '');
+            $this->templateSearch = '';
+
+            // If this line was encoded from a template, remember it so the
+            // form can show "filled from template" and guard edits on switch.
+            if (! empty($row['wfp_line_template_id'] ?? null)) {
+                $template = WfpLineTemplate::query()->active()->find((int) $row['wfp_line_template_id']);
+
+                if ($template !== null) {
+                    $this->appliedTemplateId = $template->id;
+                    $this->appliedTemplateName = (string) $template->name;
+                    $this->appliedTemplateSnapshot = array_intersect_key($row, array_flip([
+                        'objective', 'activity_description', 'resource_kind', 'unit',
+                        'quantity', 'unit_cost', 'account_title', 'account_code',
+                        'account_classification_id', 'funding_source',
+                        'organizational_classification', 'major_output',
+                        'performance_indicator', 'activity_movs',
+                    ]));
+                }
+            } else {
+                $this->appliedTemplateId = null;
+                $this->appliedTemplateName = '';
+                $this->appliedTemplateSnapshot = [];
+            }
+
+            $this->pendingTemplateId = null;
             $this->showLineModal = true;
             $this->resetValidation();
 
@@ -279,6 +347,11 @@ class MemEditor extends Component
         $this->editingKey = null;
         $this->lineForm = [];
         $this->accountSearch = '';
+        $this->templateSearch = '';
+        $this->appliedTemplateId = null;
+        $this->appliedTemplateName = '';
+        $this->appliedTemplateSnapshot = [];
+        $this->pendingTemplateId = null;
         $this->resetValidation();
     }
 
@@ -293,6 +366,7 @@ class MemEditor extends Component
         $this->guard();
 
         $this->lineForm['section'] = $this->lineSection;
+        $this->lineForm['wfp_line_template_id'] = $this->appliedTemplateId;
 
         // The combobox doubles as a free-text title: when no classification was
         // chosen, whatever was typed becomes the line's account title.
@@ -319,17 +393,17 @@ class MemEditor extends Component
             }
 
             $this->closeLineModal();
+        } else {
+            $row = array_merge($this->blankRow($this->lineSection), $this->lineForm);
+            $row['_key'] = 'new-'.bin2hex(random_bytes(8));
+            $row['id'] = null;
 
-            return;
+            $this->items[] = $row;
+
+            $this->closeLineModal();
         }
 
-        $row = array_merge($this->blankRow($this->lineSection), $this->lineForm);
-        $row['_key'] = 'new-'.bin2hex(random_bytes(8));
-        $row['id'] = null;
-
-        $this->items[] = $row;
-
-        $this->closeLineModal();
+        $this->persist();
     }
 
     /**
@@ -385,6 +459,8 @@ class MemEditor extends Component
                 return false;
             }
         ));
+
+        $this->persist();
     }
 
     /**
@@ -409,6 +485,8 @@ class MemEditor extends Component
 
             break;
         }
+
+        $this->persist();
     }
 
     /**
@@ -474,7 +552,7 @@ class MemEditor extends Component
             $this->items[$index] = $rows[$slot];
         }
 
-        $this->persist($this->matrixStatus);
+        $this->persist();
     }
 
     /**
@@ -497,6 +575,8 @@ class MemEditor extends Component
 
             break;
         }
+
+        $this->persist();
     }
 
     /**
@@ -566,33 +646,12 @@ class MemEditor extends Component
 
     /* ---------------------------------------------------------------- save */
 
-    public function saveDraft(): void
-    {
-        if ($this->persist(MonthlyExpenditureMatrix::STATUS_DRAFT)) {
-            $this->successMessage = 'Draft saved.';
-        }
-    }
-
-    public function validateMatrix(): void
-    {
-        if ($this->persist(MonthlyExpenditureMatrix::STATUS_VALIDATED)) {
-            $this->successMessage = 'Matrix validated.';
-        }
-    }
-
-    public function finalizeMatrix(): void
-    {
-        if ($this->persist(MonthlyExpenditureMatrix::STATUS_FINALIZED)) {
-            $this->successMessage = 'Matrix finalized.';
-        }
-    }
-
     /**
      * Write the grid to the database. Returns false (with an error message) only
      * when the optimistic lock fails; validation failures throw and are handled
      * by Livewire.
      */
-    private function persist(string $status): bool
+    private function persist(): bool
     {
         $matrix = $this->guard();
 
@@ -610,7 +669,15 @@ class MemEditor extends Component
             return false;
         }
 
-        DB::transaction(function () use ($matrix, $status): void {
+        // Whether the report's check has anything to clear: the lines are
+        // about to be rewritten, so a check that covered them no longer
+        // describes what the report will show.
+        $checkExisted = WfpReportCheck::query()
+            ->where('school_id', $matrix->school_id)
+            ->where('year', $matrix->year)
+            ->exists();
+
+        DB::transaction(function () use ($matrix): void {
             $position = 0;
             $keptIds = [];
 
@@ -643,6 +710,7 @@ class MemEditor extends Component
                     'activity_movs' => self::nullIfBlank($row['activity_movs'] ?? null),
                     'major_output' => self::nullIfBlank($row['major_output'] ?? null),
                     'performance_indicator' => self::nullIfBlank($row['performance_indicator'] ?? null),
+                    'wfp_line_template_id' => ! empty($row['wfp_line_template_id']) ? (int) $row['wfp_line_template_id'] : null,
                 ]);
                 $item->syncTotal();
                 $item->save();
@@ -654,15 +722,18 @@ class MemEditor extends Component
 
             $matrix->items()->whereNotIn('id', $keptIds ?: [0])->delete();
 
-            $matrix->status = $status;
             $matrix->updated_by = Auth::id();
             $matrix->save();
             $matrix->bumpVersion();
         });
 
+        // The year's lines changed, so the Bookkeeper's check of the account
+        // titles and codes no longer stands for what the report shows; it is
+        // cleared and must be given again (see WfpReportCheck).
+        WfpReportCheck::clearFor((int) $matrix->school_id, (int) $matrix->year);
+
         $fresh = MonthlyExpenditureMatrix::findOrFail($matrix->id);
         $this->loadedVersion = (int) $fresh->version;
-        $this->matrixStatus = $fresh->status;
         $this->loadItems($fresh);
 
         return true;
@@ -696,7 +767,7 @@ class MemEditor extends Component
         $matrix = $this->guard();
 
         // Save what is on screen first, so the plan is generated from it.
-        if (! $this->persist($matrix->status)) {
+        if (! $this->persist()) {
             return null;
         }
 
@@ -777,6 +848,185 @@ class MemEditor extends Component
         if (trim($this->accountSearch) !== trim((string) ($this->lineForm['account_title'] ?? ''))) {
             $this->lineForm['account_classification_id'] = null;
         }
+    }
+
+    /* ------------------------------------------------------------ templates */
+
+    /**
+     * Choose a template for the line being encoded. If the user already has
+     * unsaved edits, ask whether to replace or keep them; otherwise apply it
+     * straight away.
+     */
+    public function chooseTemplate(int $id): void
+    {
+        $this->guard();
+
+        $template = WfpLineTemplate::query()->active()->findOrFail($id);
+
+        if ($this->hasTemplateEdits()) {
+            $this->pendingTemplateId = $id;
+
+            return;
+        }
+
+        $this->applyTemplate($id, 'fill');
+    }
+
+    /** Replace every template-owned field with the chosen template's values. */
+    public function confirmTemplateReplace(): void
+    {
+        $this->guard();
+
+        if ($this->pendingTemplateId === null) {
+            return;
+        }
+
+        $this->applyTemplate($this->pendingTemplateId, 'replace');
+        $this->pendingTemplateId = null;
+    }
+
+    /** Keep the user's edits; only refill fields still owned by the template. */
+    public function keepTemplateEdits(): void
+    {
+        $this->guard();
+
+        if ($this->pendingTemplateId === null) {
+            return;
+        }
+
+        $this->applyTemplate($this->pendingTemplateId, 'fill');
+        $this->pendingTemplateId = null;
+    }
+
+    /** Drop the pending template choice without applying anything. */
+    public function dismissTemplate(): void
+    {
+        $this->pendingTemplateId = null;
+    }
+
+    /** Unlink the template from the line being encoded, keeping its values. */
+    public function clearTemplate(): void
+    {
+        $this->guard();
+
+        $this->appliedTemplateId = null;
+        $this->appliedTemplateName = '';
+        $this->appliedTemplateSnapshot = [];
+    }
+
+    /**
+     * Whether the line's template-owned fields differ from the snapshot of
+     * the last applied template — i.e. the user has edited them.
+     *
+     * @return bool
+     */
+    public function hasTemplateEdits(): bool
+    {
+        if ($this->appliedTemplateId === null || $this->appliedTemplateSnapshot === []) {
+            return false;
+        }
+
+        foreach ($this->appliedTemplateSnapshot as $field => $value) {
+            if ((string) ($this->lineForm[$field] ?? '') !== (string) $value) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Apply one template to the line form. `fill` keeps user-edited values;
+     * `replace` overwrites every field the template maps.
+     */
+    private function applyTemplate(int $id, string $mode): void
+    {
+        $template = WfpLineTemplate::query()
+            ->with(['resourceKind', 'unit', 'accountClassification', 'fundingSource', 'orgClassification'])
+            ->active()
+            ->findOrFail($id);
+
+        // The section lives on its own property, not in lineForm.
+        $this->lineSection = $template->line_type;
+
+        $snapshot = [];
+
+        // Each mapped field: template value → lineForm field.
+        $mapping = [
+            'objective' => $template->objective ?? '',
+            'activity_description' => $template->activity_expenditure,
+            'resource_kind' => $template->resourceKind?->name ?? '',
+            'unit' => $template->unit?->name ?? '',
+            'quantity' => $template->suggested_quantity !== null ? (string) (float) $template->suggested_quantity : '',
+            'unit_cost' => $template->suggested_unit_cost !== null ? (string) (float) $template->suggested_unit_cost : '',
+            'account_title' => $template->accountClassification?->account_title ?? '',
+            'account_code' => $template->accountClassification?->uacs_object_code ?? '',
+            'account_classification_id' => $template->account_classification_id,
+            'funding_source' => $template->fundingSource?->name ?? '',
+            'organizational_classification' => $template->orgClassification?->name ?? '',
+            'major_output' => $template->major_output ?? '',
+            'performance_indicator' => $template->performance_indicator ?? '',
+            'activity_movs' => $template->activity_movs ?? '',
+        ];
+
+        foreach ($mapping as $field => $value) {
+            $snapshot[$field] = $value;
+
+            if ($mode === 'replace') {
+                $this->lineForm[$field] = $value;
+                continue;
+            }
+
+            // fill: only take the template value when the field is empty or
+            // still holds the previous template's value (template-owned).
+            $current = (string) ($this->lineForm[$field] ?? '');
+            $previous = (string) ($this->appliedTemplateSnapshot[$field] ?? '');
+
+            if ($current === '' || $current === $previous) {
+                $this->lineForm[$field] = $value;
+            }
+        }
+
+        // Wire the account combobox to show the chosen account.
+        if ($template->account_classification_id !== null) {
+            $this->accountSearch = (string) ($template->accountClassification?->account_title ?? '');
+        }
+
+        $this->appliedTemplateId = $template->id;
+        $this->appliedTemplateName = (string) $template->name;
+        $this->appliedTemplateSnapshot = $snapshot;
+
+        foreach (array_keys($mapping) as $field) {
+            $this->resetValidation('lineForm.'.$field);
+        }
+    }
+
+    /** @return array<int, WfpLineTemplate> */
+    #[Computed]
+    public function templateOptions(): array
+    {
+        $term = trim($this->templateSearch);
+
+        return WfpLineTemplate::query()
+            ->with(['resourceKind', 'unit', 'accountClassification', 'fundingSource', 'orgClassification'])
+            ->active()
+            ->when($term !== '', function ($query) use ($term): void {
+                $like = '%'.str_replace(['%', '_'], ['\%', '\_'], $term).'%';
+
+                $query->where(function ($query) use ($like): void {
+                    $query->where('name', 'like', $like)
+                        ->orWhere('activity_expenditure', 'like', $like)
+                        ->orWhere('tags', 'like', $like)
+                        ->orWhereHas('accountClassification', function ($query) use ($like): void {
+                            $query->where('account_title', 'like', $like)
+                                ->orWhere('uacs_object_code', 'like', $like);
+                        });
+                });
+            })
+            ->orderBy('name')
+            ->limit(50)
+            ->get()
+            ->all();
     }
 
     /**
@@ -926,14 +1176,57 @@ class MemEditor extends Component
     }
 
     /**
+     * The allotment budget the Budget office set for this matrix's school
+     * and year, or null when none has been set. One query per render; the
+     * matrix page and its month tabs read this same figure.
+     */
+    #[Computed]
+    public function allotted(): ?float
+    {
+        $matrix = $this->matrix;
+
+        return WfpAllotment::allotment((int) $matrix->school_id, (int) $matrix->year);
+    }
+
+    /**
+     * The year's allotment read against the year's consumption: the running
+     * balance the School Head needs while encoding a month. The month being
+     * edited contributes its unsaved grid total, so adding or removing a line
+     * moves the balance immediately; the other months read their persisted
+     * totals. The shape is the one WfpLineItemAllotment shows, computed by
+     * the same helper.
+     *
+     * @return array{allotted: ?float, consumed: float, remaining: float, percent: float, is_over: bool}
+     */
+    #[Computed]
+    public function allocation(): array
+    {
+        $matrix = $this->matrix;
+
+        $consumed = 0.0;
+
+        foreach ($this->months as $month) {
+            $consumed += (float) ($month['total'] ?? 0.0);
+        }
+
+        return WfpAllotment::balance($this->allotted, $consumed);
+    }
+
+    /**
      * The twelve months of this matrix's planning year for the SH's own school,
      * in calendar order — the month tab strip at the top of the editor. The
      * month being edited is flagged (`current`); a month whose matrix is missing
      * (deleted) carries no id and renders inactive. Each tab also carries that
      * month's total: the month being edited reads the unsaved grid (so it agrees
      * with the summary strip), the others read their persisted lines. A month
-     * with no lines has no total (null) rather than a misleading zero. One query
-     * for the whole year, so drawing the strip costs nothing.
+     * with no lines has no total (null) rather than a misleading zero.
+     *
+     * Each tab also carries the running balance after that month — the annual
+     * allotment minus the cumulative monthly totals through it — when the
+     * Budget office has set an allotment. A month with no matrix carries the
+     * previous balance forward, so a gap in the year reads as unchanged.
+     *
+     * One query for the whole year, so drawing the strip costs nothing.
      *
      * @return array<int, array<string, mixed>>
      */
@@ -941,6 +1234,7 @@ class MemEditor extends Component
     public function months(): array
     {
         $matrix = $this->matrix;
+        $allotted = $this->allotted;
 
         $siblings = MonthlyExpenditureMatrix::query()
             ->where('school_id', $matrix->school_id)
@@ -951,10 +1245,19 @@ class MemEditor extends Component
             ->keyBy('month');
 
         $months = [];
+        $running = 0.0;
 
         foreach (MonthlyExpenditureMatrix::MONTH_ABBREVIATIONS as $number => $abbreviation) {
             $sibling = $siblings->get($number);
             $isCurrent = $number === (int) $matrix->month;
+
+            $total = $isCurrent
+                ? ($this->items === [] ? null : $this->totals['grand'])
+                : ($sibling instanceof MonthlyExpenditureMatrix && $sibling->items_count > 0
+                    ? (float) ($sibling->items_sum_calculated_total ?? 0)
+                    : null);
+
+            $running = round($running + (float) ($total ?? 0.0), 2);
 
             $months[] = [
                 'month' => $number,
@@ -965,11 +1268,8 @@ class MemEditor extends Component
                 'id' => $sibling instanceof MonthlyExpenditureMatrix ? (int) $sibling->id : null,
                 'status' => $sibling instanceof MonthlyExpenditureMatrix ? $sibling->status : null,
                 'current' => $isCurrent,
-                'total' => $isCurrent
-                    ? ($this->items === [] ? null : $this->totals['grand'])
-                    : ($sibling instanceof MonthlyExpenditureMatrix && $sibling->items_count > 0
-                        ? (float) ($sibling->items_sum_calculated_total ?? 0)
-                        : null),
+                'total' => $total,
+                'balance' => $allotted === null ? null : round($allotted - $running, 2),
             ];
         }
 

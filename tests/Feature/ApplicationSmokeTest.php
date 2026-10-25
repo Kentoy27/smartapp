@@ -3,6 +3,9 @@
 namespace Tests\Feature;
 
 use App\Livewire\AccountClassificationsTable;
+use App\Livewire\BudgetAllotmentMonitor;
+use App\Livewire\BudgetLineItemAllotment;
+use App\Livewire\BudgetLineItemChecker;
 use App\Livewire\DashboardSummary;
 use App\Livewire\DistrictList;
 use App\Livewire\DistrictManager;
@@ -17,12 +20,17 @@ use App\Livewire\OpcrfParts;
 use App\Livewire\OpcrfReview;
 use App\Livewire\OpcrfScheduleManager;
 use App\Livewire\OpcrfUpload;
+use App\Livewire\SchoolAllotmentManager;
 use App\Livewire\Sidebar;
 use App\Livewire\UsersTable;
 use App\Livewire\WfpGenerateButton;
 use App\Livewire\WfpLineItemAllotment;
+use App\Livewire\WfpLineTemplatesTable;
+use App\Livewire\WfpLookupTable;
+use App\Livewire\WfpManager;
 use App\Livewire\WfpMyUploadsList;
 use App\Livewire\WfpPlanEditor;
+use App\Livewire\WfpUpload;
 use App\Models\District;
 use App\Models\MonthlyExpenditureMatrix;
 use App\Models\OpcrfSchedule;
@@ -91,6 +99,18 @@ class ApplicationSmokeTest extends TestCase
         ]);
     }
 
+    private function bookkeeper(): User
+    {
+        return User::create([
+            'name' => 'Book Keeper',
+            'username' => 'booky',
+            'email' => 'booky@example.com',
+            'password' => Hash::make('secret123'),
+            'role' => 'bookkeeper',
+            'is_superadmin' => false,
+        ]);
+    }
+
     /** Every route a signed-in person can reach, with a real id substituted. */
     private function routes(OpcrfSubmission $submission): array
     {
@@ -110,11 +130,21 @@ class ApplicationSmokeTest extends TestCase
             '/wfp',
             '/wfp/line-items',
             '/wfp/line-items/export',
+            '/budget/allotments',
+            '/budget/line-items',
+            '/budget/per-line-item',
             '/wfp/matrices',
             '/wfp/matrices/template',
             '/wfp/matrices/1',
             '/wfp/plans/1',
             '/wfp/plans/1/export',
+            '/admin/wfp-setup',
+            '/admin/wfp-setup/lookups/funding-sources',
+            '/admin/wfp-setup/lookups/funding-sources/template',
+            '/admin/wfp-setup/lookups/funding-sources/export',
+            '/admin/wfp-setup/templates',
+            '/admin/wfp-setup/templates/template',
+            '/admin/wfp-setup/templates/export',
             '/download/opcrf-template',
             '/opcrf/part/1',
             '/opcrf/part/2',
@@ -129,6 +159,7 @@ class ApplicationSmokeTest extends TestCase
         Storage::fake('local');
         $admin = $this->superadmin();
         $staff = $this->staff();
+        $bookkeeper = $this->bookkeeper();
 
         $submission = OpcrfSubmission::create([
             'user_id' => $staff->id,
@@ -157,6 +188,7 @@ class ApplicationSmokeTest extends TestCase
             foreach ([
                 'guest' => null,
                 'staff' => $staff,
+                'bookkeeper' => $bookkeeper,
                 'superadmin' => $admin,
             ] as $role => $user) {
                 $response = $user === null
@@ -263,6 +295,33 @@ class ApplicationSmokeTest extends TestCase
         Livewire::actingAs($schoolHead)->test(MemEditor::class, ['matrix' => $matrix])->assertOk();
         Livewire::actingAs($schoolHead)->test(WfpPlanEditor::class, ['plan' => $plan])->assertOk();
 
+        // Bookkeeper-owned components: the Bookkeeper works the Budget
+        // office-style checking pages (its write actions refuse it — covered
+        // in BookkeeperRoleTest).
+        $bookkeeper = User::create([
+            'name' => 'Book Keeper',
+            'username' => 'booky',
+            'email' => 'booky@example.com',
+            'password' => Hash::make('secret123'),
+            'role' => 'bookkeeper',
+            'is_superadmin' => false,
+            'school_id' => $school->id,
+        ]);
+
+        $bookkeeperComponents = [
+            Sidebar::class,
+            DashboardSummary::class,
+            OpcrfMovs::class,
+            BudgetLineItemChecker::class,
+            BudgetLineItemAllotment::class,
+        ];
+
+        foreach ($bookkeeperComponents as $component) {
+            Livewire::actingAs($bookkeeper)
+                ->test($component)
+                ->assertOk();
+        }
+
         // Administrator-owned components, including opening the review modal
         // so its biggest view actually renders.
         $admin = $this->administrator();
@@ -273,11 +332,39 @@ class ApplicationSmokeTest extends TestCase
             OpcrfAnalytics::class,
             OpcrfScheduleManager::class,
             AccountClassificationsTable::class,
+            WfpLineTemplatesTable::class,
         ];
 
         foreach ($superComponents as $component) {
-            Livewire::actingAs($admin)->test($component)->assertOk();
+            Livewire::actingAs($admin)
+                ->test($component)
+                ->assertOk();
         }
+
+        // The lookup table takes a category parameter; exercise each one.
+        foreach (['funding-sources', 'units', 'resource-kinds', 'org-classifications'] as $category) {
+            Livewire::actingAs($admin)
+                ->test(WfpLookupTable::class, ['category' => $category])
+                ->assertOk();
+        }
+
+        // The Budget office's own components are shared with the
+        // administrative side, so they render for both.
+        Livewire::actingAs($admin)->test(SchoolAllotmentManager::class)->assertOk();
+        Livewire::actingAs($admin)->test(BudgetAllotmentMonitor::class)->assertOk();
+
+        $budget = User::create([
+            'name' => 'Budget Officer',
+            'username' => 'budgetofficer',
+            'email' => 'budget@example.com',
+            'password' => Hash::make('secret123'),
+            'role' => 'budget',
+            'is_superadmin' => false,
+        ]);
+
+        Livewire::actingAs($budget)->test(SchoolAllotmentManager::class)->assertOk();
+        Livewire::actingAs($budget)->test(BudgetAllotmentMonitor::class)->assertOk();
+        Livewire::actingAs($budget)->test(BudgetLineItemChecker::class)->assertOk();
 
         Livewire::actingAs($admin)
             ->test(OpcrfReview::class)
@@ -310,6 +397,8 @@ class ApplicationSmokeTest extends TestCase
             OpcrfScheduleManager::class,
             OpcrfReview::class,
             AccountClassificationsTable::class,
+            BudgetAllotmentMonitor::class,
+            BudgetLineItemChecker::class,
         ];
 
         foreach ($superOnly as $component) {
@@ -366,6 +455,42 @@ class ApplicationSmokeTest extends TestCase
     }
 
     /**
+     * The Bookkeeper's interface is the division-wide checking pages alone:
+     * the staff pages and the School Head's WFP workspace (components and
+     * model-bound editors) refuse it with the same 404 they give any other
+     * uninvited role.
+     */
+    public function test_a_bookkeeper_is_refused_the_staff_and_wfp_authoring_components(): void
+    {
+        Storage::fake('local');
+        $bookkeeper = $this->bookkeeper();
+
+        $refused = [
+            OpcrfUpload::class,
+            OpcrfParts::class,
+            OpcrfForm::class,
+            WfpUpload::class,
+            WfpMyUploadsList::class,
+            MemMatrixList::class,
+            MemEditor::class,
+            WfpPlanEditor::class,
+            WfpManager::class,
+            WfpGenerateButton::class,
+            WfpLineItemAllotment::class,
+        ];
+
+        foreach ($refused as $component) {
+            $html = Livewire::actingAs($bookkeeper)->test($component)->html();
+
+            $this->assertStringContainsString(
+                'Page Not Found',
+                $html,
+                $component.' rendered for a Bookkeeper; its module is the WFP alone.'
+            );
+        }
+    }
+
+    /**
      * The same boundaries for signed-out visitors.
      */
     public function test_guests_are_refused_by_every_livewire_component(): void
@@ -395,6 +520,9 @@ class ApplicationSmokeTest extends TestCase
             WfpPlanEditor::class,
             WfpGenerateButton::class,
             WfpMyUploadsList::class,
+            SchoolAllotmentManager::class,
+            BudgetAllotmentMonitor::class,
+            BudgetLineItemChecker::class,
         ];
 
         foreach ($components as $component) {

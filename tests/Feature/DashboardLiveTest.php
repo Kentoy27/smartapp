@@ -284,9 +284,11 @@ class DashboardLiveTest extends TestCase
             ->assertSee('Forwarded to Superadmin SY');
     }
 
-    public function test_the_superadmin_district_list_refreshes_its_counts(): void
+    public function test_the_district_list_refreshes_its_counts(): void
     {
-        $component = Livewire::actingAs($this->superadmin())->test(DistrictList::class);
+        // The District List is the administrator side of the app (see
+        // UsersTable::mount()'s gate), so the fixture is an administrator.
+        $component = Livewire::actingAs($this->administrator())->test(DistrictList::class);
         $component->assertSee('No districts yet');
 
         $district = District::create(['name' => 'District Live']);

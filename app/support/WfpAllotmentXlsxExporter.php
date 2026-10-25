@@ -4,6 +4,7 @@ namespace App\Support;
 
 use App\Models\School;
 use App\Models\User;
+use Illuminate\Support\Str;
 
 /**
  * The annual MOOE allotment report as an .xlsx: the same form the page shows —
@@ -82,6 +83,8 @@ final class WfpAllotmentXlsxExporter
         $months = WfpAllotment::months($schoolId, $year);
         $lines = WfpAllotment::lineItems($schoolId, $year);
         $total = WfpAllotment::total($lines);
+        $certification = WfpAllotment::certification($schoolId, $year);
+        $checking = WfpAllotment::checking($schoolId, $year);
 
         /** @var array<int, array<string, array{style: int, kind: string, value: string|float|null}>> $cells */
         $cells = [];
@@ -217,16 +220,50 @@ final class WfpAllotmentXlsxExporter
         $signatureRow += 2;
 
         $text($signatureRow, 'A', self::S_LABEL_BOLD, mb_strtoupper($preparedBy?->name ?: (string) $preparedBy?->username), false);
-        $text($signatureRow, 'E', self::S_PLAIN, '_________________', false);
-        $text($signatureRow, 'G', self::S_PLAIN, '_________________', false);
+        $text(
+            $signatureRow,
+            'E',
+            $checking === null ? self::S_PLAIN : self::S_LABEL_BOLD,
+            $checking === null ? '_________________' : mb_strtoupper($checking['name']),
+            false
+        );
+        $text(
+            $signatureRow,
+            'G',
+            $certification === null ? self::S_PLAIN : self::S_LABEL_BOLD,
+            $certification === null ? '_________________' : mb_strtoupper($certification['name']),
+            false
+        );
         $text($signatureRow, 'H', self::S_PLAIN, '_________________', false);
 
         $signatureRow++;
 
         $text($signatureRow, 'A', self::S_PLAIN, $preparedBy?->position ?: 'School Principal I', false);
-        $text($signatureRow, 'E', self::S_PLAIN, 'Senior Bookkeeper', false);
-        $text($signatureRow, 'G', self::S_PLAIN, 'Budget Officer III', false);
+        $text($signatureRow, 'E', self::S_PLAIN, $checking['position'] ?? 'Senior Bookkeeper', false);
+        $text($signatureRow, 'G', self::S_PLAIN, $certification['position'] ?? 'Budget Officer III', false);
         $text($signatureRow, 'H', self::S_PLAIN, 'Schools Division Superintendent', false);
+
+        // The check and the certification are dated statements; the page
+        // carries the same dates under each signer's name.
+        if ($checking !== null) {
+            $text(
+                $signatureRow + 1,
+                'E',
+                self::S_PLAIN,
+                'Checked '.$checking['checked_at']->format('M j, Y'),
+                false
+            );
+        }
+
+        if ($certification !== null) {
+            $text(
+                $signatureRow + 1,
+                'G',
+                self::S_PLAIN,
+                'Certified '.$certification['certified_at']->format('M j, Y'),
+                false
+            );
+        }
 
         /* ----------------------------------------------------------- package */
 
@@ -265,10 +302,24 @@ final class WfpAllotmentXlsxExporter
         ]);
     }
 
-    /** The download's file name: one report per school per year. */
-    public static function downloadName(int $year): string
+    /**
+     * The download's file name: one report per school per year.
+     *
+     * The School Head's own copy names only the year (it is their own school,
+     * so there is nothing to disambiguate). The Budget office downloads the
+     * same report for many schools, so it passes the school name and gets a
+     * file per school rather than a folder of identical names.
+     */
+    public static function downloadName(int $year, ?string $school = null): string
     {
-        return sprintf('per-line-item-expenditure-%d.xlsx', $year);
+        $name = sprintf('per-line-item-expenditure-%d', $year);
+        $slug = $school === null ? '' : Str::slug($school);
+
+        if ($slug !== '') {
+            $name .= '-'.$slug;
+        }
+
+        return $name.'.xlsx';
     }
 
     /* ------------------------------------------------------------ worksheet */
