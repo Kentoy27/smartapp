@@ -130,17 +130,18 @@ class UsersTable extends Component
     protected function rules(): array
     {
         $editing = $this->editingUserId !== null;
-        $schoolHead = $this->isSchoolHead();
+        $belongsToSchool = $this->belongsToSchool();
         $autoPassword = $this->hasAutoPassword();
 
         return [
-            // Only a School Head belongs to a school. For the other roles the
-            // cascade is not even rendered, so it must not be required here
-            // either — and a crafted request cannot smuggle a school in.
-            'school_division' => $schoolHead ? ['required', 'string'] : ['nullable', 'string'],
+            // Only the school-side roles (SH and Bookkeeper) belong to a
+            // school. For the other roles the cascade is not even rendered,
+            // so it must not be required here either — and a crafted request
+            // cannot smuggle a school in.
+            'school_division' => $belongsToSchool ? ['required', 'string'] : ['nullable', 'string'],
             // The school must belong to the selected division (the dropdown
             // only offers those, but the rule is the real boundary).
-            'school_id_choice' => $schoolHead ? [
+            'school_id_choice' => $belongsToSchool ? [
                 'required', 'string',
                 Rule::in(School::query()
                     ->where('district_id', $this->school_division)
@@ -163,7 +164,7 @@ class UsersTable extends Component
             'password' => $editing || $autoPassword
                 ? ['nullable', 'string', 'min:8']
                 : ['required', 'string', 'min:8'],
-            'role' => ['required', Rule::in(['user', 'viewer', 'budget', 'administrator', 'superadmin'])],
+            'role' => ['required', Rule::in(['user', 'viewer', 'bookkeeper', 'budget', 'administrator', 'superadmin'])],
         ];
     }
 
@@ -249,7 +250,7 @@ class UsersTable extends Component
         abort_unless($this->canAssignRoles(), 403);
 
         $validated = $this->validate([
-            'selectedRole' => ['required', Rule::in(['user', 'viewer', 'budget', 'administrator', 'superadmin'])],
+            'selectedRole' => ['required', Rule::in(['user', 'viewer', 'bookkeeper', 'budget', 'administrator', 'superadmin'])],
         ]);
 
         $user = User::findOrFail($this->roleUserId);
@@ -264,6 +265,7 @@ class UsersTable extends Component
         $role = match ($validated['selectedRole']) {
             'superadmin' => 'Super Admin',
             'administrator' => 'Administrator',
+            'bookkeeper' => 'Bookkeeper',
             'budget' => 'Budget',
             'viewer' => 'SDS Viewer',
             default => 'SH',
@@ -331,7 +333,7 @@ class UsersTable extends Component
 
     public function setRole(string $role): void
     {
-        if (! in_array($role, ['user', 'viewer', 'budget', 'administrator', 'superadmin'], true)) {
+        if (! in_array($role, ['user', 'viewer', 'bookkeeper', 'budget', 'administrator', 'superadmin'], true)) {
             return;
         }
 
@@ -349,14 +351,26 @@ class UsersTable extends Component
         return $this->role === 'user';
     }
 
+    /**
+     * Does the form's role carry a school? The School Head and the Bookkeeper
+     * are both attached to one school (each one's whole job is that school's
+     * WFP work), so both render the Division → School cascade and both must
+     * pick a school to save. The School-ID-as-login default stays an SH-only
+     * convenience — see isSchoolHead().
+     */
+    public function belongsToSchool(): bool
+    {
+        return in_array($this->role, ['user', 'bookkeeper'], true);
+    }
+
     public function updatedRole(string $role): void
     {
         $this->isSuperadmin = $role === 'superadmin';
 
-        // Switching away from SH hides the cascade, so drop whatever it held —
-        // otherwise a hidden selection would silently attach the account to a
-        // school on save.
-        if ($role !== 'user') {
+        // Switching to a role that carries no school hides the cascade, so
+        // drop whatever it held — otherwise a hidden selection would silently
+        // attach the account to a school on save.
+        if (! in_array($role, ['user', 'bookkeeper'], true)) {
             $this->school_division = '';
             $this->school_id_choice = '';
             $this->usernamePrefill = '';
@@ -398,7 +412,9 @@ class UsersTable extends Component
         }
 
         $user = User::create([
-            'school_id' => $selectedRole === 'user' && $validated['school_id_choice'] !== ''
+            // SH and Bookkeeper are both school-side roles; for the others a
+            // crafted school choice is dropped rather than attached.
+            'school_id' => in_array($selectedRole, ['user', 'bookkeeper'], true) && $validated['school_id_choice'] !== ''
                 ? (int) $validated['school_id_choice']
                 : null,
             'name' => $validated['name'],
@@ -424,6 +440,7 @@ class UsersTable extends Component
         $roleDescription = match ($user->role) {
             'superadmin' => 'a super admin',
             'administrator' => 'an administrator',
+            'bookkeeper' => 'a bookkeeper',
             'budget' => 'a Budget user',
             'viewer' => 'a viewer',
             default => 'a user',
@@ -449,7 +466,7 @@ class UsersTable extends Component
             ? $validated['role']
             : 'user';
 
-        $user->school_id = $selectedRole === 'user' && $validated['school_id_choice'] !== ''
+        $user->school_id = in_array($selectedRole, ['user', 'bookkeeper'], true) && $validated['school_id_choice'] !== ''
             ? (int) $validated['school_id_choice']
             : null;
         $user->name = $validated['name'];
@@ -569,6 +586,10 @@ class UsersTable extends Component
      * can type another login over it — and a login they already typed survives
      * a later change of school: the prefill only takes the field back while it
      * still holds the default we wrote (or nothing at all).
+     *
+     * The default is an SH convenience alone: a Bookkeeper is attached to the
+     * school but signs in with their own login, so their Username field is
+     * never touched here.
      */
     public function updatedSchoolIdChoice(): void
     {
@@ -589,7 +610,7 @@ class UsersTable extends Component
             return;
         }
 
-        if ($this->username === '' || $this->username === $this->usernamePrefill) {
+        if ($this->isSchoolHead() && ($this->username === '' || $this->username === $this->usernamePrefill)) {
             $this->username = $schoolId;
             $this->usernamePrefill = $schoolId;
         }

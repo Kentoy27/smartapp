@@ -86,6 +86,20 @@ return [
         'school_name_cell' => env('WFP_TEMPLATE_SCHOOL_CELL', 'A6'),
 
         /*
+         * The title-block cells that name the form's PLANNING YEAR, as sprintf
+         * patterns with one `%d`. The shipped template hard-codes its own year
+         * in the title and in the two target headings ("CY 2026 …", "Physical
+         * Target (2026)", "Financial Target (2026)"); a form generated for
+         * another year would otherwise be titled with the template's year.
+         * Blank the block to leave the template's own text untouched.
+         */
+        'year_cells' => [
+            'A9' => 'CY %d Work and Financial Plan',
+            'E11' => 'Physical Target (%d)',
+            'R11' => 'Financial Target (%d)',
+        ],
+
+        /*
          * How many rows BELOW the header row belong to the header block. The
          * official template spreads its table header across three merged rows:
          * the parent headings (Objectives, Physical Target (2024), Financial

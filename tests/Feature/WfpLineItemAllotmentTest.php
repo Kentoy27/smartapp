@@ -8,6 +8,7 @@ use App\Models\District;
 use App\Models\MonthlyExpenditureItem;
 use App\Models\MonthlyExpenditureMatrix;
 use App\Models\School;
+use App\Models\SchoolAllotment;
 use App\Models\User;
 use App\Support\PurePhpZipReader;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -378,6 +379,34 @@ class WfpLineItemAllotmentTest extends TestCase
         $this->assertStringNotContainsString('Someone Else’s Expense', $sheet);
         $this->assertStringNotContainsString('5029999999', $sheet);
         $this->assertStringContainsString('<v>100</v>', $sheet);
+    }
+
+    public function test_the_export_names_the_certifying_officer(): void
+    {
+        $sh = $this->schoolHead();
+        $budget = User::factory()->create([
+            'role' => 'budget',
+            'is_superadmin' => false,
+            'name' => 'Maria Budget',
+            'position' => 'Budget Officer II',
+        ]);
+
+        SchoolAllotment::create([
+            'school_id' => $sh->school_id,
+            'year' => (int) now()->year,
+            'amount' => 10000,
+            'certified_by' => $budget->id,
+            'certified_at' => now(),
+        ]);
+
+        $sheet = $this->partsOf(
+            $this->actingAs($sh)->get(route('wfp.lineitems.export'))->getContent()
+        )['xl/worksheets/sheet1.xml'];
+
+        $this->assertStringContainsString('Certifying Availability of Allotment:', $sheet);
+        $this->assertStringContainsString('MARIA BUDGET', $sheet);
+        $this->assertStringContainsString('Budget Officer II', $sheet);
+        $this->assertStringContainsString('Certified', $sheet);
     }
 
     public function test_a_guest_and_non_school_head_roles_cannot_export(): void

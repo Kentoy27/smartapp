@@ -264,6 +264,19 @@ class Sidebar extends Component
                 'order' => 14,
             ];
 
+            // School Allotments: the ceiling each School Head may consume
+            // through their Monthly Expenditure Matrices. It belongs beside
+            // the WFP review list because it is the same money read as a
+            // budget rather than as an uploaded plan.
+            $items[] = [
+                'label' => 'School Allotments',
+                'route' => 'budget.allotments.index',
+                'path' => 'budget-allotments',
+                'icon' => 'wallet',
+                'section' => 'Files',
+                'order' => 15,
+            ];
+
             if (Auth::user()?->canManageUsersAndSchools()) {
                 $items[] = [
                     'label' => 'Users',
@@ -299,6 +312,17 @@ class Sidebar extends Component
                     'section' => 'Admin',
                     'order' => 22,
                 ];
+
+                // WFP Setup: the administrator's lookup library and activity
+                // templates behind the Work and Financial Plan.
+                $items[] = [
+                    'label' => 'WFP Setup',
+                    'route' => 'wfp.setup.index',
+                    'path' => 'wfp-setup',
+                    'icon' => 'settings',
+                    'section' => 'Admin',
+                    'order' => 23,
+                ];
             }
         } elseif (Auth::user()?->isBudgetRole()) {
             $items[] = [
@@ -311,13 +335,94 @@ class Sidebar extends Component
                 'section' => 'Files',
                 'order' => 13,
             ];
+            // The budget side of the WFP workflow is one group, like the
+            // School Head's: the plans the schools uploaded, the ceiling the
+            // Budget office sets, the per-line detail checked against both,
+            // and the printed annual report the School Head reads. All four
+            // are plain links one level down, and the group opens by default
+            // (see mount()).
             $items[] = [
-                'label' => 'WFP Uploads',
+                'label' => 'WFP',
                 'route' => 'wfp.submissions.index',
-                'path' => 'wfp-submissions',
+                // The group lights up on any page it holds, including the
+                // Budget-only pages that do not start with `wfp.`.
+                'active' => ['wfp.submissions.*', 'budget.*'],
+                'path' => 'wfp',
                 'icon' => 'chart-column',
                 'section' => 'Files',
                 'order' => 14,
+                'children' => [
+                    [
+                        'key' => 'budget-wfp-plans',
+                        'label' => 'Work & Financial Plan',
+                        'title' => 'Review the Work and Financial Plans the schools uploaded',
+                        'url' => route('wfp.submissions.index'),
+                        'route' => 'wfp.submissions.*',
+                    ],
+                    [
+                        'key' => 'budget-allotments',
+                        'label' => 'School Allotments',
+                        'title' => 'Set and certify each school\'s annual allotment',
+                        'url' => route('budget.allotments.index'),
+                        'route' => 'budget.allotments.*',
+                    ],
+                    [
+                        'key' => 'budget-line-items',
+                        'label' => 'Monthly Expenditure',
+                        'title' => 'Every school\'s expenditure lines, per line item, read-only',
+                        'url' => route('budget.lineitems.index'),
+                        'route' => 'budget.lineitems.*',
+                    ],
+                    // The printed annual report those lines add up to: the same
+                    // form the School Head reads, per school. It sits last
+                    // because it is what the pages above it produce.
+                    [
+                        'key' => 'budget-line-item-allotment',
+                        'label' => 'Per Line Item Expenditure',
+                        'title' => 'A school\'s annual MOOE allotment, allocated per line item or object of expenditure',
+                        'url' => route('budget.per-line-item.index'),
+                        'route' => 'budget.per-line-item.*',
+                    ],
+                ],
+            ];
+        } elseif (Auth::user()?->isBookkeeperRole()) {
+            // The Bookkeeper works the same division-wide checking pages the
+            // Budget office does — the Monthly Expenditure lines and the
+            // annual Per Line Item Expenditure report, where the check is
+            // signed — so the group mirrors the Budget office's, without the
+            // Budget-only destinations (uploaded-plan review, allotment
+            // setting and certification). No OPCRF, MOV or AIP destination
+            // exists for the role; the pages it lacks are refused by their
+            // own guards, not by this absence.
+            $items[] = [
+                'label' => 'WFP',
+                'route' => 'budget.lineitems.index',
+                // The group lights up on any page it holds, like the Budget
+                // office's copy of it.
+                'active' => 'budget.*',
+                'path' => 'wfp',
+                'icon' => 'chart-column',
+                'section' => 'Files',
+                'order' => 14,
+                'children' => [
+                    [
+                        'key' => 'budget-line-items',
+                        'label' => 'Monthly Expenditure',
+                        'title' => 'Every school\'s expenditure lines, per line item, read-only — the account titles and codes you check',
+                        'url' => route('budget.lineitems.index'),
+                        'route' => 'budget.lineitems.*',
+                    ],
+                    // The report that carries the check: each school's year
+                    // rolled up per account code, and the "Checked as to the
+                    // Correctness of Account Titles and Codes" signatory.
+                    [
+                        'key' => 'budget-line-item-allotment',
+                        'label' => 'Per Line Item Expenditure',
+                        'title' => 'Read each school\'s annual MOOE allotment report and sign it as checked',
+                        'url' => route('budget.per-line-item.index'),
+                        'route' => 'budget.per-line-item.*',
+                    ],
+                ],
             ];
         } else {
             // Opcrf is a staff-facing page: regular users only.

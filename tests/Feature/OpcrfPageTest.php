@@ -116,12 +116,14 @@ class OpcrfPageTest extends TestCase
         $html = \Livewire\Livewire::test(\App\Livewire\Sidebar::class, ['usersCount' => 3])
             ->html();
 
-        // The staff OPCRF page stays hidden — but the superadmin's review
-        // destination remains available under the same Files label.
+        // The staff OPCRF page stays hidden — but the superadmin's own
+        // destinations remain available under the same Files label. (Users /
+        // Districts & Schools are the Administrator's pages, not the
+        // superadmin's, so they are not offered here.)
         $this->assertStringNotContainsString('href="'.route('opcrf.index').'"', $html);
         $this->assertStringContainsString('OPCRF', $html);
         $this->assertStringContainsString('OPCRF Schedule', $html);
-        $this->assertStringContainsString('Users', $html);
+        $this->assertStringContainsString('School Allotments', $html);
     }
 
     public function test_sidebar_shows_the_review_opcrf_badge_to_superadmins(): void

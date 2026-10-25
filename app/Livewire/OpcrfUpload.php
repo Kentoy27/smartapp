@@ -189,7 +189,7 @@ class OpcrfUpload extends Component
         // confirmSubmit() reads Auth::id() — so a guest is refused here
         // rather than half way through a submit.
         abort_unless(Auth::check(), 404);
-        abort_if(Auth::user()->hasAdminAccess(), 404);
+        abort_if(! Auth::user()->canAccessStaffPages(), 404);
     }
 
     /**
@@ -198,7 +198,7 @@ class OpcrfUpload extends Component
     public function openUpload(): void
     {
         abort_unless(Auth::check(), 404);
-        abort_if(Auth::user()->hasAdminAccess(), 404);
+        abort_if(! Auth::user()->canAccessStaffPages(), 404);
 
         $this->uploadMode = 'part_one';
         $submission = $this->latestSubmission(OpcrfSubmission::PART_ONE);
@@ -212,7 +212,7 @@ class OpcrfUpload extends Component
     public function openFullUpload(): void
     {
         abort_unless(Auth::check(), 404);
-        abort_if(Auth::user()->hasAdminAccess(), 404);
+        abort_if(! Auth::user()->canAccessStaffPages(), 404);
 
         $this->uploadMode = 'full_workbook';
         $submission = $this->latestSubmission(OpcrfSubmission::FULL_WORKBOOK);
@@ -342,7 +342,7 @@ class OpcrfUpload extends Component
     private function authorizedSubmissionForUpload(): ?OpcrfSubmission
     {
         abort_unless(Auth::check(), 404);
-        abort_if(Auth::user()->hasAdminAccess(), 404);
+        abort_if(! Auth::user()->canAccessStaffPages(), 404);
 
         $part = $this->isFullWorkbookUpload()
             ? OpcrfSubmission::FULL_WORKBOOK

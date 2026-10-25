@@ -733,6 +733,15 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
 .mem-toolbar { margin-left: auto; }
 /* One line of context above the grid, kept quiet so the buttons lead. */
 .mem-toolbar-copy { max-width: 46ch; font-size: 0.75rem; line-height: 1.45; color: var(--text-muted); }
+/* On a phone the three download buttons cannot sit side by side: let them
+   wrap onto their own rows instead of hanging past the card's edge. */
+@media (max-width: 720px) {
+    .mem-toolbar {
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        max-width: 100%;
+    }
+}
 
 /* WFP validation panel (plan editor) — a collapsible report card. */
 .mem-validation { padding: 0; margin-bottom: 16px; }
@@ -746,16 +755,10 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
 .mem-validation__body p { margin: 4px 0; }
 
 /* THE SECTION BLOCKS: the matrix is two lists (Operations, Project), each
-   with its own header, subtotal and add button, rather than one 15-wide
-   table with a Section dropdown in every row. */
+   drawn as the printed form draws it — its own column header, its own banner
+   with the subtotal and add button, and its own lines. */
 .mem-section { border-top: 1px solid var(--border); padding: 14px 16px 4px; }
 .mem-section:first-of-type { border-top: 0; }
-.mem-section__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
-.mem-section__title { display: flex; align-items: center; gap: 8px; }
-.mem-section__count { font-size: 0.75rem; font-weight: 600; color: var(--text-muted); }
-.mem-section__aside { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.mem-section__subtotal { font-size: 0.8125rem; color: var(--text-muted); }
-.mem-section__subtotal strong { font-variant-numeric: tabular-nums; color: var(--text-strong); }
 
 /* THE TOTALS STRIP: full width, always in view — the old tfoot sat at the
    far right of a 1500px table. The monthly total is the one number to read. */
@@ -796,8 +799,8 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
 .mem-actions__hint { max-width: 40ch; font-size: 0.75rem; line-height: 1.45; color: var(--text-muted); }
 
 /* THE ADD-LINE MODAL: the section is a two-way switch (it decides where the
-   finished row lands), and quantity/unit/cost/total read as one line — the
-   total is the answer the other three produce, so it sits with them. */
+   finished row lands). Resource kind, quantity, unit and unit cost are one
+   thought, so they sit in a labeled group with their product (the total). */
 .mem-line-sections { display: inline-flex; gap: 4px; padding: 3px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-muted); }
 .mem-line-section { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 6px; font-size: 0.8125rem; font-weight: 600; color: var(--text-muted); cursor: pointer; transition: background 0.15s, color 0.15s; }
 .mem-line-section:has(input:checked) { background: var(--bg-elevated); color: var(--primary); }
@@ -815,13 +818,21 @@ control to a real radio size and keep it from growing as a flex item. */
     box-shadow: none;
     accent-color: var(--primary);
 }
-.mem-line-money { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 14px; align-items: start; }
+/* The resource group reads as one unit: a bordered panel whose label names
+   the set, with the four inputs and their computed total on a single row. */
+.mem-line-resource { min-width: 0; padding: 12px 14px 14px; border: 1px solid var(--border); border-radius: 10px; }
+.mem-line-resource__label { display: block; margin-bottom: 10px; font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
+.mem-line-resource__fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 14px; align-items: start; }
 .mem-line-total { display: flex; flex-direction: column; gap: 2px; padding: 6px 12px; border-radius: 8px; background: var(--bg-muted); min-width: 110px; }
 .mem-line-total__label { font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
 .mem-line-total__value { font-size: 1.0625rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-strong); }
 .field-required { font-weight: 400; font-size: 0.6875rem; letter-spacing: 0.03em; text-transform: uppercase; color: var(--text-faint); }
+@media (max-width: 960px) {
+    .mem-line-resource__fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .mem-line-resource__fields .mem-line-total { grid-column: 1 / -1; justify-self: end; }
+}
 @media (max-width: 640px) {
-    .mem-line-money { grid-template-columns: 1fr; }
+    .mem-line-resource__fields { grid-template-columns: 1fr; }
 }
 /* The Add-a-line dialog is tall; a two-column grid keeps every field on screen
    without scrolling on a normal laptop. Fields that read as a single unit (the
@@ -905,12 +916,10 @@ body.sorting .mem-drag-handle { cursor: grabbing; }
 .mem-plan-table input, .mem-plan-table textarea { width: 100%; font: inherit; font-size: 0.8125rem; }
 .mem-plan-table textarea { resize: vertical; min-height: 40px; }
 
-<<<<<<< HEAD
-=======
 /*
- * The WFP generate button and the caption naming which workbook it produces:
- * the school's generated plan once its matrix has lines, and the blank
- * account-code form until then.
+ * The WFP year picker and generate button, with the caption naming which
+ * workbook they produce: the school's generated plan once its matrix has
+ * lines, and the blank account-code form until then.
  */
 .wfp-generate {
     display: flex;
@@ -919,13 +928,19 @@ body.sorting .mem-drag-handle { cursor: grabbing; }
     gap: 6px;
 }
 
+.wfp-generate__controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
 .wfp-generate__source {
     font-size: 12px;
     line-height: 1.35;
     color: var(--text-muted);
 }
 
->>>>>>> feature/wfp
 /* ---------- AIP (Annual Implementation Plan) module ---------- */
 .aip-sub { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; }
 .aip-muted { color: var(--text-faint); }
@@ -1144,7 +1159,6 @@ body.sorting .mem-drag-handle { cursor: grabbing; }
     padding: 10px 12px;
     background: var(--bg-muted);
     border-bottom: 1px solid var(--border);
-<<<<<<< HEAD
     font-size: 0.6875rem;
     font-weight: 700;
     text-transform: uppercase;
@@ -1329,236 +1343,6 @@ body.sorting .mem-drag-handle { cursor: grabbing; }
    compact list row (what it is, what it costs, what it is charged to), and
    the row's pencil opens the one focused line form to change it. A month's
    lines stay scannable instead of a tall stack of mostly-empty fields. */
-.mem-list { min-width: 760px; }
-.mem-list td { vertical-align: top; }
-.mem-list__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 4px; font-size: 0.75rem; color: var(--text-muted); }
-.mem-list__meta .mem-chip { font-size: 0.68rem; }
-.mem-list__meta-item { color: var(--text-muted); }
-.mem-list__movs { margin-top: 4px; font-size: 0.75rem; color: var(--text-muted); }
-.mem-list__muted { color: var(--text-faint); }
-
-/* ---------- PER LINE ITEM EXPENDITURE (annual allotment report) ----------
-   The report is the printed form: a letterhead, the MONTH / BUDGET column
-   beside the year's lines rolled up per account code, and the signature
-   block. It is drawn as a document rather than as an app table — squared
-   borders and plain type, so what is on screen is what comes off the
-   printer — and @media print strips the application chrome around it. */
-.wfp-allotment {
-    padding: 24px 20px 20px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--bg-panel);
-}
-
-.wfp-allotment-letterhead {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-    margin-bottom: 18px;
-    text-align: center;
-    line-height: 1.35;
-}
-
-.wfp-allotment-letterhead span {
-    font-size: 0.8125rem;
-    color: var(--text);
-}
-
-.wfp-allotment-letterhead strong {
-    font-size: 0.9375rem;
-    font-weight: 700;
-    color: var(--text-strong);
-    text-transform: uppercase;
-}
-
-.wfp-allotment-letterhead h2 {
-    margin-top: 12px;
-    font-size: 0.875rem;
-    font-weight: 700;
-    color: var(--text-strong);
-    text-transform: uppercase;
-    letter-spacing: 0.01em;
-}
-
-.wfp-allotment-grid {
-    display: flex;
-    align-items: flex-start;
-    gap: 22px;
-}
-
-.wfp-allotment-table {
-    border-collapse: collapse;
-    font-size: 0.8125rem;
-    color: var(--text);
-}
-
-.wfp-allotment-table th,
-.wfp-allotment-table td {
-    padding: 4px 8px;
-    border: 1px solid var(--border);
-    vertical-align: top;
-}
-
-.wfp-allotment-table thead th {
-=======
->>>>>>> feature/wfp
-    font-size: 0.6875rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-<<<<<<< HEAD
-=======
-    color: var(--text-muted);
-    white-space: nowrap;
-}
-.aip-grid tbody td {
-    padding: 10px 12px;
-    vertical-align: top;
-    border-bottom: 1px solid var(--border);
-}
-.aip-grid tbody tr:hover { background: var(--bg-hover); }
-.aip-grid tbody tr:last-child td { border-bottom: none; }
-.aip-grid textarea,
-.aip-grid input[type="text"],
-.aip-grid input[type="number"] {
-    width: 100%;
-    min-width: 110px;
-    padding: 7px 9px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--bg-elevated);
-    color: var(--text);
-    font: inherit;
-    font-size: 0.8125rem;
-    resize: vertical;
-    transition: border-color 0.15s, box-shadow 0.15s;
-}
-.aip-grid input[type="number"] { min-width: 90px; text-align: right; font-variant-numeric: tabular-nums; }
-.aip-grid textarea:focus,
-.aip-grid input:focus {
-    outline: none;
-    border-color: var(--primary);
-    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
-}
-.aip-grid td .users-action { margin-left: 4px; }
-
-/* Preview / review modals. */
-.aip-preview-modal,
-.aip-review-modal { max-width: 980px; width: 100%; }
-.aip-preview-body,
-.aip-review-body { max-height: 78vh; overflow-y: auto; }
-.aip-preview-project { margin-bottom: 18px; }
-.aip-preview-project h3 { font-size: 0.9375rem; color: var(--text-strong); margin-bottom: 6px; }
-.aip-preview-project p { font-size: 0.8125rem; color: var(--text); line-height: 1.5; margin-bottom: 4px; }
-
-.aip-version-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
-.aip-version-bar .users-action.is-selected { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
-.aip-review-contents { margin-bottom: 8px; }
-.aip-total-line { text-align: right; font-size: 0.875rem; color: var(--text-strong); margin-top: 4px; }
-.aip-history-title { font-size: 0.9375rem; color: var(--text-strong); margin: 18px 0 8px; }
-.aip-remarks-field { margin-top: 12px; }
-.aip-remarks-field textarea {
-    width: 100%;
-    padding: 9px 12px;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    color: var(--text-strong);
-    font: inherit;
-    font-size: 0.875rem;
-    resize: vertical;
-}
-.aip-remarks-field textarea:focus {
-    outline: none;
-    border-color: var(--primary);
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
-}
-
-/* ==========================================================================
-   PROFILE (shared by users and superadmins)
-   ========================================================================== */
-.profile-card { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-card); padding: 20px 22px; margin-bottom: 20px; }
-.profile-identity { display: flex; align-items: center; gap: 14px; min-width: 220px; }
-.profile-avatar { display: flex; align-items: center; justify-content: center; width: 52px; height: 52px; flex: 0 0 auto; border-radius: 50%; background: var(--primary-soft); color: var(--primary-strong); font-size: 1.125rem; font-weight: 700; letter-spacing: 0.02em; }
-.profile-identity-text { display: flex; flex-direction: column; gap: 3px; }
-.profile-identity-text strong { color: var(--text-strong); font-size: 1rem; }
-.profile-role { color: var(--text-muted); font-size: 0.8125rem; }
-.profile-meta { display: grid; grid-template-columns: auto 1fr; gap: 6px 18px; margin: 0; flex: 1 1 320px; font-size: 0.875rem; }
-.profile-meta dt { color: var(--text-muted); }
-.profile-meta dd { color: var(--text-strong); margin: 0; word-break: break-word; }
-
-/* ==========================================================================
-   DIGITAL SIGNATURE CARD
-   ========================================================================== */
-.sig-card { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-card); padding: 20px 22px 22px; }
-.sig-card-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.sig-card-heading { min-width: 0; }
-.sig-card-title { display: flex; align-items: center; gap: 8px; font-size: 1.0625rem; font-weight: 700; color: var(--text-strong); }
-.sig-card-sub { color: var(--text-muted); font-size: 0.8125rem; margin-top: 4px; }
-
-.sig-badge { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; padding: 5px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
-.sig-badge--ok { background: var(--ok-soft); color: var(--ok); }
-.sig-badge--empty { background: var(--warn-soft); color: var(--warn); }
-
-.sig-alert { display: flex; align-items: flex-start; gap: 8px; margin-top: 16px; padding: 10px 12px; border-radius: 8px; font-size: 0.8125rem; }
-.sig-alert--ok { background: var(--ok-soft); color: var(--ok); }
-.sig-alert--error { background: var(--danger-soft); color: var(--danger); }
-.sig-alert-close { margin-left: auto; background: none; border: none; padding: 0 2px; color: inherit; font-size: 1.125rem; line-height: 1; cursor: pointer; opacity: 0.7; }
-.sig-alert-close:hover { opacity: 1; }
-
-.sig-grid { display: grid; grid-template-columns: minmax(220px, 320px) 1fr; gap: 22px; margin-top: 18px; }
-/* Stacked until the details column has room to be read as a table: at 820px
-   the preview (320px) left it 131px wide, which broke "Not uploaded" inside
-   a word. The preview is capped at 320px, so two columns only pay off once
-   the card is wider than preview + a readable details column. */
-@media (max-width: 900px) { .sig-grid { grid-template-columns: 1fr; } }
-
-.sig-preview { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.sig-preview-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
-.sig-preview-box { position: relative; display: flex; align-items: center; justify-content: center; height: 150px; padding: 12px; border: 1px dashed var(--border); border-radius: 10px; background: var(--bg-elevated); overflow: hidden; }
-.sig-preview-img { max-width: 100%; max-height: 126px; object-fit: contain; }
-.sig-preview-generic { display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--text-faint); font-size: 0.8125rem; }
-.sig-preview-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; background: rgba(15, 23, 42, 0.55); color: #fff; font-size: 0.8125rem; }
-.sig-preview-note { font-size: 0.75rem; color: var(--text-muted); }
-.sig-preview-note--pending { color: var(--warn); }
-
-.sig-spinner { width: 14px; height: 14px; flex: 0 0 auto; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: sig-spin 0.7s linear infinite; }
-.sig-spinner--button { display: inline-block; width: 12px; height: 12px; vertical-align: -1px; margin-right: 2px; }
-@keyframes sig-spin { to { transform: rotate(360deg); } }
-
-.sig-details { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-.sig-meta { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 0; font-size: 0.875rem; }
-.sig-meta dt { color: var(--text-muted); }
-.sig-meta dd { margin: 0; color: var(--text-strong); word-break: break-word; }
-.sig-status-text.is-ok { color: var(--ok); font-weight: 600; }
-.sig-pending { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--bg-elevated); }
-.sig-pending-title { display: flex; align-items: center; gap: 6px; font-size: 0.8125rem; font-weight: 600; color: var(--text-strong); margin-bottom: 8px; }
-.sig-meta--pending dt, .sig-meta--pending dd { font-size: 0.8125rem; }
-.sig-link { margin-top: 10px; background: none; border: none; padding: 0; color: var(--primary); font: inherit; font-size: 0.8125rem; cursor: pointer; text-decoration: underline; }
-.sig-link:hover { color: var(--primary-strong); }
-.sig-link:disabled { opacity: 0.6; cursor: wait; }
-
-.sig-instructions { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 18px; padding: 10px 12px; border-radius: 8px; background: var(--bg-muted); color: var(--text-muted); font-size: 0.8125rem; }
-.sig-instructions strong { color: var(--text-strong); }
-
-.sig-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 18px; }
-.sig-actions .btn-primary, .sig-actions .btn-ghost, .sig-actions .btn-danger { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; }
-
-/* The native picker is visually hidden but still focusable, so the styled
-   label can open it for mouse, keyboard and screen-reader users alike. */
-.sig-file-input { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
-.sig-file-label { cursor: pointer; }
-.sig-file-label:focus-within { outline: 2px solid var(--primary-strong); outline-offset: 2px; }
-
-.sig-help { margin-top: 14px; color: var(--text-faint); font-size: 0.75rem; line-height: 1.5; }
-
-/* ---------- MEM editor: the read-only LIST of lines ----------
-   The section grid stopped being a wall of inputs: a line now reads as a
-   compact list row (what it is, what it costs, what it is charged to), and
-   the row's pencil opens the one focused line form to change it. A month's
-   lines stay scannable instead of a tall stack of mostly-empty fields. */
-.mem-list { min-width: 760px; }
 .mem-list td { vertical-align: top; }
 .mem-list__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 4px; font-size: 0.75rem; color: var(--text-muted); }
 .mem-list__meta .mem-chip { font-size: 0.68rem; }
@@ -1634,7 +1418,6 @@ body.sorting .mem-drag-handle { cursor: grabbing; }
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
->>>>>>> feature/wfp
     background: var(--bg-muted);
     color: var(--text-strong);
     text-align: center;
@@ -1810,8 +1593,6 @@ body.sorting .mem-drag-handle { cursor: grabbing; }
         break-inside: avoid;
     }
 }
-<<<<<<< HEAD
-=======
 
 /* ---------- MEM editor: the month navigation strip ----------
    The editor is one month, but a year is planned a month at a time, so the
@@ -1824,7 +1605,10 @@ body.sorting .mem-drag-handle { cursor: grabbing; }
 .mem-month-tabs {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
+    /* Tight gutters: each tab's minimum width is set by its balance figure
+       ("Bal. 1,730,871.00"), so the twelve of them only share one row at
+       desktop widths if the padding and gap stay out of the numbers' way. */
+    gap: 3px;
     padding: 4px;
     margin: 0 0 16px;
     border: 1px solid var(--border);
@@ -1840,7 +1624,7 @@ body.sorting .mem-drag-handle { cursor: grabbing; }
     flex-direction: column;
     align-items: center;
     gap: 2px;
-    padding: 7px 12px;
+    padding: 7px 7px;
     border-radius: 7px;
     font-size: 0.8125rem;
     font-weight: 600;
@@ -1852,6 +1636,19 @@ body.sorting .mem-drag-handle { cursor: grabbing; }
 }
 
 a.mem-month-tab:hover { background: var(--bg-hover); color: var(--text-strong); }
+
+/* The Budget office's month strip is clickable, so its tabs are buttons. The
+   reset keeps them reading as the same tab rather than as a browser button. */
+button.mem-month-tab {
+    border: 0;
+    background: transparent;
+    appearance: none;
+    font-family: inherit;
+    cursor: pointer;
+    text-align: center;
+}
+
+button.mem-month-tab:hover { background: var(--bg-hover); color: var(--text-strong); }
 
 .mem-month-tab.is-current {
     background: var(--bg-elevated);
@@ -1878,6 +1675,20 @@ a.mem-month-tab:hover { background: var(--bg-hover); color: var(--text-strong); 
     font-variant-numeric: tabular-nums;
 }
 
+/* The running balance after that month's expenditure, drawn only when the
+   Budget office has set an allotment for the year. Over-allotment months read
+   in the danger color, the same signal the summary uses. */
+.mem-month-tab__balance {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0;
+    line-height: 1.2;
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+}
+
+.mem-month-tab__balance.is-over { color: var(--danger); }
+
 .mem-month-tab.is-current .mem-month-tab__total { color: var(--primary); }
 a.mem-month-tab:hover .mem-month-tab__total { color: var(--text-muted); }
 
@@ -1891,4 +1702,506 @@ a.mem-month-tab:hover .mem-month-tab__total { color: var(--text-muted); }
 
 .mem-month-tab__dot--validated { background: var(--primary); }
 .mem-month-tab__dot--finalized { background: var(--ok); }
->>>>>>> feature/wfp
+
+/* ---------- MEM editor: the list in the printed form's layout ----------
+   The columns are the DepEd form's own, so what the School Head reads on
+   screen lines up with what the matrix exports and prints: Objectives,
+   Project/Activity/Expenditure, Resources Needed (Kind/Quantity/Unit/Unit
+   Cost), Total Estimated Cost, Account Title, Account Code. The section name
+   is a banner row inside the table, as on the form.
+
+   THE COLUMN RULER: table-layout: fixed reads the <col> shares, not each
+   cell's content, so the eleven columns divide the page width and never add
+   up to the horizontal scrollbar that a content-sized table produced. The
+   text columns take the room that is left; the numeric ones keep enough
+   width for their figures. */
+.mem-list { table-layout: fixed; }
+.mem-list .mem-col--line { width: 5.25%; }
+.mem-list .mem-col--objective { width: 13.25%; }
+.mem-list .mem-col--activity { width: 18.5%; }
+.mem-list .mem-col--kind { width: 8.5%; }
+.mem-list .mem-col--quantity { width: 6.75%; }
+.mem-list .mem-col--unit { width: 4.25%; }
+.mem-list .mem-col--unit-cost { width: 7%; }
+.mem-list .mem-col--total { width: 7.75%; }
+.mem-list .mem-col--account-title { width: 10.5%; }
+.mem-list .mem-col--account-code { width: 9%; }
+.mem-list .mem-col--actions { width: 9.25%; }
+
+.mem-list thead th {
+    text-transform: none;
+    vertical-align: middle;
+    /* The printed form's column headings are bold, and at the table's
+       compact size the shared .data-table 11px muted grey read as regular
+       weight. An explicit, slightly larger, darker bold makes them read
+       as headings without touching the body cells. */
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--text-strong);
+    overflow-wrap: anywhere;
+}
+.mem-list thead th { padding-left: 4px; padding-right: 4px; }
+.mem-list tbody td { padding-left: 6px; padding-right: 6px; }
+/* The sub-heading row (Kind, Quantity, Unit, Unit Cost) sits in narrow
+   numeric columns; narrower gutters keep those one-word headings whole. */
+.mem-list thead tr:nth-child(3) th { padding-left: 3px; padding-right: 3px; }
+/* Figures and codes read as one line: a wrapped amount is a misread amount. */
+.mem-list thead .mem-list__quantity,
+.mem-list td.mem-num,
+.mem-list .ac-code { white-space: nowrap; }
+.mem-list .ac-code { font-size: 0.75rem; }
+.mem-list td.mem-num { padding-left: 4px; padding-right: 4px; }
+.mem-list td:nth-child(10) { padding-left: 4px; padding-right: 4px; }
+/* Long titles may break inside a word before they push the column wider
+   than its share — table-layout: fixed would paint over the next cell. */
+.mem-list td:nth-child(2),
+.mem-list td:nth-child(3),
+.mem-list td:nth-child(4),
+.mem-list td:nth-child(9) { overflow-wrap: anywhere; }
+.mem-list__gutter { white-space: nowrap; }
+.mem-list__objective { min-width: 0; }
+/* The four row actions fold into two columns instead of one 154px strip.
+   Two classes deep because the layout's inline sheet carries the shared
+   .data-table actions rule and loads after this file. */
+.data-table.mem-list th.users-actions-col,
+.data-table.mem-list td.users-actions-col {
+    white-space: normal;
+    width: auto;
+    padding-left: 4px;
+    padding-right: 4px;
+}
+.mem-list .users-actions-row {
+    display: grid;
+    grid-template-columns: repeat(2, 34px);
+    justify-content: end;
+    gap: 4px;
+    width: auto;
+}
+.mem-list__banner td { padding: 8px 12px; background: var(--bg-muted); border-bottom: 1px solid var(--border); vertical-align: middle; }
+.mem-list__banner-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.mem-list__banner-title { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 0.8125rem; font-weight: 700; color: var(--text-strong); }
+.mem-list__banner-count { font-size: 0.75rem; font-weight: 600; color: var(--text-muted); }
+.mem-list__banner-aside { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
+.mem-list__banner-subtotal { font-size: 0.8125rem; color: var(--text-muted); }
+.mem-list__banner-subtotal strong { font-variant-numeric: tabular-nums; color: var(--text-strong); }
+.mem-list thead th.mem-num { text-align: right; }
+
+/* THE NARROW-SCREEN LINE: eleven printed-form columns cannot be read on a
+   tablet or a phone, so below the desktop breakpoint each line becomes a
+   labelled card. The column headings are hidden and every cell carries its
+   own label (data-label), keeping the meaning the columns used to give it. */
+@media (max-width: 1279px) {
+    .mem-list,
+    .mem-list thead,
+    .mem-list tbody,
+    .mem-list tr,
+    .mem-list td {
+        display: block;
+        width: auto;
+    }
+
+    .mem-list thead tr:not(.mem-list__banner) { display: none; }
+
+    .mem-list tbody tr {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px 16px;
+        padding: 14px 16px 14px 48px;
+        border-bottom: 1px solid var(--border);
+        position: relative;
+    }
+    .mem-list tbody tr:last-child { border-bottom: 0; }
+
+    .mem-list tbody td {
+        padding: 0;
+        border-bottom: 0;
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+    .mem-list tbody td::before {
+        content: attr(data-label);
+        display: block;
+        margin-bottom: 2px;
+        font-size: 0.625rem;
+        font-weight: 700;
+        line-height: 1.3;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+    }
+    .mem-list tbody td.mem-list__gutter::before,
+    .mem-list tbody td.users-actions-col::before { display: none; }
+
+    .mem-list tbody td.mem-list__objective,
+    .mem-list tbody td:nth-child(3),
+    .mem-list tbody td:nth-child(8),
+    .mem-list tbody td:nth-child(9),
+    .mem-list tbody td.users-actions-col { grid-column: 1 / -1; }
+
+    /* The line's identity sits in the card's gutter, as the grip and the
+       number do in the table. */
+    .mem-list tbody td.mem-list__gutter {
+        position: absolute;
+        left: 14px;
+        top: 16px;
+        padding: 0;
+        white-space: normal;
+    }
+    .mem-list .mem-rownum { text-align: left; }
+    .mem-list .mem-rownum__inner { flex-direction: column; gap: 6px; }
+
+    /* The computed total is the line's answer, so it gets its own bar. */
+    .mem-list tbody td:nth-child(8) {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 8px 10px;
+        border-radius: 8px;
+        background: var(--bg-muted);
+    }
+    .mem-list tbody td:nth-child(8)::before { margin-bottom: 0; }
+
+    .mem-list .users-actions-row {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 6px;
+    }
+
+    .mem-list tbody tr.mem-list__empty-row {
+        display: block;
+        padding: 0;
+    }
+    .mem-list tbody tr.mem-list__empty-row td {
+        padding: 16px 12px;
+        border-bottom: 0;
+    }
+    .mem-list tbody tr.mem-list__empty-row td::before { display: none; }
+}
+
+/* ---------- SCHOOL ALLOTMENTS ----------
+   Two surfaces read the same figure: the Budget office's manager (the ceiling
+   and the year's consumption, per school) and the School Head's report (their
+   own ceiling against the matrices they have entered). Both use these. */
+.allotment-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px 20px;
+    margin-bottom: 16px;
+    padding: 18px 20px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow-card);
+}
+
+.allotment-summary.is-over { border-color: var(--danger); }
+
+.allotment-summary__item {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.allotment-summary__label {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+}
+
+.allotment-summary__value {
+    font-size: 1.25rem;
+    font-weight: 700;
+    line-height: 1.2;
+    color: var(--text-strong);
+    font-variant-numeric: tabular-nums;
+}
+
+.allotment-summary__value.is-over { color: var(--danger); }
+.allotment-summary__value.is-unset { color: var(--text-faint); }
+
+.allotment-summary__hint { font-size: 0.75rem; color: var(--text-muted); }
+
+.allotment-summary__progress {
+    grid-column: 1 / -1;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--bg-muted);
+    overflow: hidden;
+}
+
+.allotment-summary__progress-bar {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--primary);
+    transition: width 0.3s ease;
+}
+
+.allotment-summary__progress-bar.is-over { background: var(--danger); }
+
+.allotment-summary__note {
+    grid-column: 1 / -1;
+    margin: 0;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+}
+
+.allotment-summary.is-over .allotment-summary__note { color: var(--danger); }
+
+.school-allotment-table th,
+.school-allotment-table td { vertical-align: top; }
+
+.allotment-input {
+    width: 150px;
+    padding: 7px 9px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-elevated);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.8125rem;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.allotment-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+
+.allotment-money {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.allotment-remaining.is-over { color: var(--danger); font-weight: 700; }
+.allotment-muted { color: var(--text-faint); }
+
+.allotment-badge--over { background: var(--danger-soft); color: var(--danger); }
+.allotment-badge--certified { background: var(--ok-soft); color: var(--ok); }
+
+/* The Budget office's monitoring strip reads four figures across, rather
+   than the three the School Head's report summary carries. On the dashboard
+   it sits in the narrower column, so it pairs the figures instead. */
+.allotment-summary--monitor { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.allotment-summary--dashboard { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+.allotment-certify {
+    align-self: flex-start;
+    margin-top: 2px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--primary);
+    font: inherit;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.allotment-certify:hover { text-decoration: underline; }
+.allotment-certify:disabled { color: var(--text-faint); cursor: not-allowed; text-decoration: none; }
+
+.allotment-footnote {
+    margin: 14px 0 0;
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+}
+
+@media (max-width: 1100px) {
+    .allotment-summary--monitor { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 900px) {
+    .allotment-summary,
+    .allotment-summary--monitor { grid-template-columns: 1fr; }
+}
+
+/* The report summary is application context, not part of the printed form. */
+@media print {
+    .allotment-summary { display: none !important; }
+}
+
+/* ---------- LINE ITEM CHECKING ----------
+   The Budget office's read-only, per-line view of every school's Monthly
+   Expenditure Matrix lines. The table keeps the printed form's column order
+   and shares the page as one fixed grid; on narrow screens it scrolls
+   horizontally inside .table-wrap so a line stays comparable across columns. */
+.budget-line-table {
+    min-width: 1080px;
+    table-layout: fixed;
+}
+
+.budget-line-table .blc-col--line { width: 3%; }
+.budget-line-table .blc-col--school { width: 14%; }
+.budget-line-table .blc-col--objective { width: 12%; }
+.budget-line-table .blc-col--activity { width: 16%; }
+.budget-line-table .blc-col--kind { width: 8%; }
+.budget-line-table .blc-col--quantity { width: 6%; }
+.budget-line-table .blc-col--unit { width: 5%; }
+.budget-line-table .blc-col--unit-cost { width: 7%; }
+.budget-line-table .blc-col--total { width: 8%; }
+.budget-line-table .blc-col--account-title { width: 11%; }
+.budget-line-table .blc-col--account-code { width: 10%; }
+
+.budget-line-table thead th {
+    vertical-align: bottom;
+    padding-left: 6px;
+    padding-right: 6px;
+}
+
+.budget-line-table thead tr:nth-child(2) th {
+    padding-top: 4px;
+    padding-bottom: 10px;
+    font-size: 0.6875rem;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+.budget-line-table tbody td {
+    vertical-align: top;
+    padding-left: 6px;
+    padding-right: 6px;
+}
+
+.budget-line-table td.mem-num { white-space: nowrap; }
+.budget-line-table .mem-status { margin-top: 5px; }
+.budget-line-table .ac-code { white-space: nowrap; font-size: 0.75rem; }
+
+.budget-line-table td:nth-child(2),
+.budget-line-table td:nth-child(3),
+.budget-line-table td:nth-child(4),
+.budget-line-table td:nth-child(10) {
+    overflow-wrap: anywhere;
+}
+
+.budget-line-table .table-empty .ac-import-btn { margin-left: 8px; }
+
+/* ---------- WFP SETUP ----------  
+   The administrator's lookup library and activity-templates pages. Reuses
+   the app's page-header / card / data-table styling; only the category
+   grid and the template-table specifics are added here. */
+
+.wfp-setup__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+    margin-top: 12px;
+}
+
+.wfp-setup__card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    text-decoration: none;
+    color: inherit;
+    background: #fff;
+}
+
+.wfp-setup__card:hover {
+    border-color: #3b82f6;
+    background: #f8fafc;
+}
+
+.wfp-setup__card-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    background: #f1f5f9;
+    color: #475569;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.wfp-setup__card--templates .wfp-setup__card-icon {
+    background: #f0fdf4;
+    color: #16a34a;
+}
+
+.wfp-setup__card-body h3 {
+    margin: 0 0 4px 0;
+    font-size: 1rem;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.wfp-setup__card-body p {
+    margin: 0;
+    font-size: 0.875rem;
+    color: #64748b;
+    line-height: 1.4;
+}
+
+.wfp-setup__card-arrow {
+    margin-left: auto;
+    color: #cbd5e1;
+}
+
+/* Lookup table: code column compact, meta small. */
+.wfp-lookup-table .ac-code,
+.wfp-template-table .ac-code {
+    white-space: nowrap;
+}
+
+.wfp-template__meta {
+    margin-top: 4px;
+    font-size: 0.8125rem;
+    color: #64748b;
+}
+
+/* ---------- WFP TEMPLATE PICKER (Add a Line form) ---------- */
+
+.wfp-template-applied {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    margin-bottom: 10px;
+    border: 1px solid #dbeafe;
+    background: #eff6ff;
+    border-radius: 8px;
+    color: #1e40af;
+    font-size: 0.875rem;
+}
+
+.wfp-template-applied__label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.wfp-template-applied__clear {
+    margin-left: auto;
+    background: transparent;
+    border: none;
+    color: #1e40af;
+    cursor: pointer;
+    font-size: 0.8125rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.wfp-template-applied__clear:hover {
+    background: #dbeafe;
+}
+
+/* Keep the template picker combobox inside the two-column line form. */
+.mem-line-fields > .field.mem-line-span .mem-combo__menu {
+    z-index: 50;
+}
+
+

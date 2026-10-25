@@ -64,6 +64,21 @@ class User extends Authenticatable
         return ! $this->is_superadmin && $this->role === 'budget';
     }
 
+    /**
+     * Whether this account is a Bookkeeper — the role that checks the
+     * correctness of the schools' account titles and codes.
+     *
+     * The Bookkeeper works the Budget office-style, division-wide checking
+     * pages (Monthly Expenditure and Per Line Item Expenditure — see
+     * {@see canCheckLineItems()}), never writes a school's plan, and signs
+     * the annual report's "Checked as to the Correctness of Account Titles
+     * and Codes" block.
+     */
+    public function isBookkeeperRole(): bool
+    {
+        return ! $this->is_superadmin && $this->role === 'bookkeeper';
+    }
+
     /** Whether this account may review submitted AIP plans. */
     public function canReviewAip(): bool
     {
@@ -74,6 +89,49 @@ class User extends Authenticatable
     public function canReviewWfp(): bool
     {
         return $this->hasAdminAccess() || $this->isBudgetRole();
+    }
+
+    /**
+     * Whether this account may set the school allotment budgets the School
+     * Heads consume through their Monthly Expenditure Matrices.
+     *
+     * Setting the ceiling is the Budget office's job (the Budget role); the
+     * administrative side that oversees the schools may also set it. It is
+     * never the School Head's own call — the SH reads the ceiling on their
+     * own report, they do not write it.
+     */
+    public function canManageAllotments(): bool
+    {
+        return $this->isBudgetRole() || $this->hasAdminAccess();
+    }
+
+    /**
+     * Whether this account may certify that a school's allotment is available.
+     *
+     * The certification is the Budget Officer's statement on the School
+     * Head's report, so it belongs to the Budget role alone. The
+     * administrative side may set the ceiling but does not sign for the
+     * Budget office; it still sees the certification status on the page.
+     */
+    public function canCertifyAllotments(): bool
+    {
+        return $this->isBudgetRole();
+    }
+
+    /**
+     * Whether this account may read the per-line expenditure items the
+     * schools encode in their Monthly Expenditure Matrices, school by
+     * school, and each school's annual MOOE allotment report.
+     *
+     * Checking the lines — their account titles, codes and amounts — is the
+     * Budget office's work, and the school Bookkeeper's: both work the same
+     * division-wide, read-only pages (Monthly Expenditure and Per Line Item
+     * Expenditure). The School Head owns the lines and never checks their
+     * own entry, so neither is the SH's.
+     */
+    public function canCheckLineItems(): bool
+    {
+        return $this->isBudgetRole() || $this->isBookkeeperRole();
     }
 
     /** Whether this account may manage accounts and school organization. */
@@ -90,6 +148,7 @@ class User extends Authenticatable
 
         return match ($this->role) {
             'administrator' => 'Administrator',
+            'bookkeeper' => 'Bookkeeper',
             'budget' => 'Budget',
             'viewer' => 'SDS Viewer',
             default => 'SH',
@@ -97,15 +156,58 @@ class User extends Authenticatable
     }
 
     /**
-     * Whether this account may access the Work and Financial Plan (WFP)
-     * module. WFP is for the School Head (SH) role only: the role column
-     * uses 'user' for SH (the UI labels it 'SH'), 'viewer' for the SDS
-     * Viewer, and 'superadmin' for superadmins. Only a non-superadmin SH
-     * can reach WFP — everyone else gets a 404 from the route guard.
+     * Whether this account may access the School Head's Work and Financial
+     * Plan (WFP) workspace — the /wfp pages, the matrices and the report's
+     * school-scoped copy. The role column uses 'user' for the School Head
+     * (SH, the UI labels it 'SH'); only a non-superadmin SH reaches it —
+     * everyone else gets a 404 from the route guard.
+     *
+     * The Bookkeeper does NOT work these pages: its interface is the Budget
+     * office-style, division-wide pair (Monthly Expenditure and Per Line
+     * Item Expenditure — see {@see canCheckLineItems()}).
      */
     public function canAccessWfp(): bool
     {
         return ! $this->is_superadmin && $this->role === 'user';
+    }
+
+    /**
+     * Whether this account may author the WFP work: edit matrices, generate
+     * and download workbooks, upload completed plans. WFP is written by the
+     * School Head (SH) role alone — the one account that owns a school's
+     * plan.
+     */
+    public function canManageWfp(): bool
+    {
+        return ! $this->is_superadmin && $this->role === 'user';
+    }
+
+    /**
+     * Whether this account may sign the report's "Checked as to the
+     * Correctness of Account Titles and Codes" block.
+     *
+     * The check is the Bookkeeper's statement about the lines' account
+     * titles and codes, so it belongs to the Bookkeeper role alone. The
+     * School Head whose lines are checked never signs for the checking, and
+     * the administrative side reads the status but does not stand for the
+     * Bookkeeper's office.
+     */
+    public function canCheckWfpReport(): bool
+    {
+        return $this->isBookkeeperRole();
+    }
+
+    /**
+     * Whether this account uses the staff-facing school pages (OPCRF, MOV).
+     *
+     * Those pages are the non-administrative school work, so the
+     * administrative side (including superadmins) is refused. The Bookkeeper
+     * is excluded as well: its module is the division-wide checking pages
+     * alone, so it carries no OPCRF or MOV destination of its own.
+     */
+    public function canAccessStaffPages(): bool
+    {
+        return ! $this->hasAdminAccess() && ! $this->isBookkeeperRole();
     }
 
     /**

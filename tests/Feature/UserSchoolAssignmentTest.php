@@ -22,20 +22,26 @@ class UserSchoolAssignmentTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function superadmin(): User
+    /**
+     * The account that manages users: an Administrator. The Users page is
+     * the administrator-only side of the app (a superadmin is refused there),
+     * so this is the role the form under test is built for.
+     */
+    private function administrator(): User
     {
         return User::create([
             'name' => 'Admin User',
             'username' => 'adminuser',
             'email' => 'adminuser@example.com',
             'password' => Hash::make('password123'),
-            'is_superadmin' => true,
+            'role' => 'administrator',
+            'is_superadmin' => false,
         ]);
     }
 
     public function test_creating_a_user_links_the_selected_school(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         $district = District::create(['name' => 'SDO Example Division']);
         $school = School::create(['district_id' => $district->id, 'name' => 'ABC Elementary School', 'school_id' => '123456']);
 
@@ -64,7 +70,7 @@ class UserSchoolAssignmentTest extends TestCase
 
     public function test_division_and_school_are_required(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
 
         Livewire::actingAs($admin)
             ->test(UsersTable::class)
@@ -81,7 +87,7 @@ class UserSchoolAssignmentTest extends TestCase
 
     public function test_a_school_outside_the_selected_division_is_rejected(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         $district = District::create(['name' => 'Division A']);
         $other = District::create(['name' => 'Division B']);
         $school = School::create(['district_id' => $other->id, 'name' => 'Elsewhere School', 'school_id' => '999999']);
@@ -105,7 +111,7 @@ class UserSchoolAssignmentTest extends TestCase
 
     public function test_changing_the_division_clears_the_school_choice(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         $district = District::create(['name' => 'Division A']);
         $other = District::create(['name' => 'Division B']);
         School::create(['district_id' => $district->id, 'name' => 'A School', 'school_id' => '111111']);
@@ -123,7 +129,7 @@ class UserSchoolAssignmentTest extends TestCase
 
     public function test_editing_a_user_prefills_their_school_and_can_change_it(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         $district = District::create(['name' => 'Division A']);
         $schoolA = School::create(['district_id' => $district->id, 'name' => 'A School', 'school_id' => '111111']);
         $schoolB = School::create(['district_id' => $district->id, 'name' => 'B School', 'school_id' => '222222']);
@@ -149,7 +155,7 @@ class UserSchoolAssignmentTest extends TestCase
 
     public function test_the_division_dropdown_comes_from_the_database(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         District::create(['name' => 'District I']);
         District::create(['name' => 'District II']);
 
@@ -163,7 +169,7 @@ class UserSchoolAssignmentTest extends TestCase
 
     public function test_picking_a_school_fills_the_login_with_its_school_id(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         $district = District::create(['name' => 'Division A']);
         $school = School::create(['district_id' => $district->id, 'name' => 'ABC Elementary School', 'school_id' => '123456']);
 
@@ -179,7 +185,7 @@ class UserSchoolAssignmentTest extends TestCase
 
     public function test_a_school_without_a_school_id_leaves_the_login_alone(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         $district = District::create(['name' => 'Division A']);
         // Not every school record carries a DepEd ID (older rows may not),
         // and then there is simply nothing to default the login to.
@@ -197,7 +203,7 @@ class UserSchoolAssignmentTest extends TestCase
 
     public function test_an_sh_password_defaults_to_the_school_id(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         $district = District::create(['name' => 'Division A']);
         $school = School::create(['district_id' => $district->id, 'name' => 'ABC Elementary School', 'school_id' => '123456']);
 
@@ -226,7 +232,7 @@ class UserSchoolAssignmentTest extends TestCase
 
     public function test_the_password_field_stays_for_a_school_without_an_id(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         $district = District::create(['name' => 'Division A']);
         $school = School::create(['district_id' => $district->id, 'name' => 'No ID School', 'school_id' => null]);
 
@@ -254,7 +260,7 @@ class UserSchoolAssignmentTest extends TestCase
 
     public function test_the_password_field_is_gone_for_an_sh_before_a_school_is_picked(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
 
         // The role alone decides it: the field must not pop back into the
         // "add form" the moment a school has not been chosen yet.
@@ -273,7 +279,7 @@ class UserSchoolAssignmentTest extends TestCase
 
     public function test_a_non_sh_account_still_sets_its_own_password(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
 
         $component = Livewire::actingAs($admin)
             ->test(UsersTable::class)
@@ -294,7 +300,7 @@ class UserSchoolAssignmentTest extends TestCase
 
     public function test_a_stale_default_login_is_dropped_for_a_school_without_an_id(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         $district = District::create(['name' => 'Division A']);
         $withId = School::create(['district_id' => $district->id, 'name' => 'A School', 'school_id' => '111111']);
         $withoutId = School::create(['district_id' => $district->id, 'name' => 'B School', 'school_id' => null]);
@@ -312,7 +318,7 @@ class UserSchoolAssignmentTest extends TestCase
 
     public function test_a_login_typed_by_hand_survives_a_change_of_school(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         $district = District::create(['name' => 'Division A']);
         $first = School::create(['district_id' => $district->id, 'name' => 'A School', 'school_id' => '111111']);
         $second = School::create(['district_id' => $district->id, 'name' => 'B School', 'school_id' => '222222']);
@@ -331,7 +337,7 @@ class UserSchoolAssignmentTest extends TestCase
 
     public function test_the_still_untouched_default_login_follows_a_changed_school(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         $district = District::create(['name' => 'Division A']);
         $first = School::create(['district_id' => $district->id, 'name' => 'A School', 'school_id' => '111111']);
         $second = School::create(['district_id' => $district->id, 'name' => 'B School', 'school_id' => '222222']);
@@ -349,7 +355,7 @@ class UserSchoolAssignmentTest extends TestCase
 
     public function test_the_school_cascade_belongs_to_the_sh_role_alone(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         District::create(['name' => 'Division A']);
 
         Livewire::actingAs($admin)
@@ -366,7 +372,7 @@ class UserSchoolAssignmentTest extends TestCase
 
     public function test_a_non_sh_account_is_created_without_a_school(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         $district = District::create(['name' => 'Division A']);
         $school = School::create(['district_id' => $district->id, 'name' => 'A School', 'school_id' => '111111']);
 
@@ -393,7 +399,7 @@ class UserSchoolAssignmentTest extends TestCase
 
     public function test_switching_away_from_sh_drops_the_school_selection(): void
     {
-        $admin = $this->superadmin();
+        $admin = $this->administrator();
         $district = District::create(['name' => 'Division A']);
         $school = School::create(['district_id' => $district->id, 'name' => 'A School', 'school_id' => '111111']);
 

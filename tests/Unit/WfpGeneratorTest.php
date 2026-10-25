@@ -246,16 +246,21 @@ class WfpGeneratorTest extends TestCase
         WfpGenerator::generate($plan);
 
         // Same grouping fields (the two lines differ only by month) → one row,
-        // with the physical and financial targets summed.
+        // with the physical and financial targets summed — preceded by its
+        // account-title section row.
         $rows = WfpGenerator::buildExportRows($plan, monthly: false);
 
-        $this->assertCount(1, $rows);
-        $this->assertEquals(1500.0, (float) $rows[0]['financial_target']);
-        $this->assertEquals(15.0, (float) $rows[0]['physical_target']);
+        $this->assertCount(2, $rows);
+        $this->assertSame(true, $rows[0]['__account_title__'] ?? false);
+        $this->assertEquals(1500.0, (float) $rows[1]['financial_target']);
+        $this->assertEquals(15.0, (float) $rows[1]['physical_target']);
 
-        // Month-shaped keeps one row per line, each with its month.
+        // Month-shaped keeps one row per line, each with its month — plus the
+        // shared account-title section row ahead of them.
         $monthlyRows = WfpGenerator::buildExportRows($plan, monthly: true);
-        $this->assertCount(2, $monthlyRows);
-        $this->assertSame(1, $monthlyRows[0]['month']);
+        $this->assertCount(3, $monthlyRows);
+        $this->assertSame(true, $monthlyRows[0]['__account_title__'] ?? false);
+        $this->assertSame(1, $monthlyRows[1]['month']);
+        $this->assertSame(2, $monthlyRows[2]['month']);
     }
 }

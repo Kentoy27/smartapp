@@ -78,14 +78,19 @@ final class WfpAccountCodeGenerator
 
     /**
      * The generated workbook bytes: the official template patched with the
-     * account-code rows and stamped with the account's school name.
+     * account-code rows and stamped with the account's school name and the
+     * planning year.
      *
      * The school's name goes into the template's own title-block cell (A6,
      * under the Schools Division line) so the completed form identifies itself
-     * and a re-upload is recognised (WfpSpreadsheet::detectSchoolName).
+     * and a re-upload is recognised (WfpSpreadsheet::detectSchoolName). The
+     * year is stamped into the title and the two target headings, so a form
+     * generated for a year other than the template's is not mistitled.
      */
-    public static function bytes(?User $user = null): string
+    public static function bytes(?User $user = null, ?int $year = null): string
     {
+        $year ??= (int) now()->year;
+
         $layout = WfpTemplate::inspect();
 
         $bytes = WfpTemplateFiller::fill(
@@ -94,14 +99,10 @@ final class WfpAccountCodeGenerator
             $layout,
         );
 
-        $school = trim((string) ($user?->school?->name ?? ''));
-        $cell = trim((string) config('wfp.template.school_name_cell', 'A6'));
-
-        if ($school === '' || $cell === '') {
-            return $bytes;
-        }
-
-        return WfpTemplateFiller::writeCells($bytes, [$cell => $school]);
+        return WfpTemplateFiller::writeCells(
+            $bytes,
+            WfpTemplateFiller::titleCells((string) ($user?->school?->name ?? ''), $year),
+        );
     }
 
     /**

@@ -77,7 +77,17 @@ class AipPageTest extends TestCase
         $budget = User::factory()->create(['role' => 'budget', 'is_superadmin' => false]);
         $budgetItems = collect(Livewire::actingAs($budget)->test(Sidebar::class)->instance()->items());
         $this->assertSame('aip.review', $budgetItems->firstWhere('label', 'Review AIP')['route']);
-        $this->assertSame('wfp.submissions.index', $budgetItems->firstWhere('label', 'WFP Uploads')['route']);
+
+        // The Budget office's WFP pages are one group, opened by default.
+        $wfp = $budgetItems->firstWhere('label', 'WFP');
+
+        $this->assertSame('wfp.submissions.index', $wfp['route']);
+        $this->assertSame(
+            route('wfp.submissions.index'),
+            collect($wfp['children'])->firstWhere('label', 'Work & Financial Plan')['url']
+        );
+
+        $this->assertNull($budgetItems->firstWhere('label', 'WFP Uploads'));
         $this->assertNull($budgetItems->firstWhere('label', 'AIP'));
         $this->assertNull($budgetItems->firstWhere('label', 'OPCRF'));
         $this->assertNull($budgetItems->firstWhere('label', 'MOV'));

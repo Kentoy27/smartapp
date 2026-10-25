@@ -248,11 +248,14 @@ class WfpUploadsListTest extends TestCase
         $budget = User::factory()->create(['role' => 'budget', 'is_superadmin' => false]);
 
         $items = collect(Livewire::actingAs($budget)->test(Sidebar::class)->instance()->items());
+        $wfp = $items->firstWhere('label', 'WFP');
+
+        $this->assertSame('wfp.submissions.index', $wfp['route']);
         $this->assertSame(
-            'wfp.submissions.index',
-            $items->firstWhere('label', 'WFP Uploads')['route']
+            route('wfp.submissions.index'),
+            collect($wfp['children'])->firstWhere('label', 'Work & Financial Plan')['url']
         );
-        $this->assertNull($items->firstWhere('label', 'WFP'));
+        $this->assertNull($items->firstWhere('label', 'WFP Uploads'));
 
         $this->actingAs($budget)
             ->get(route('wfp.submissions.index'))

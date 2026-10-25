@@ -42,22 +42,19 @@ final class WfpPlanExporter
             $layout,
         );
 
-        // The form identifies itself: the plan's school goes into the
-        // template's own title-block cell.
-        $school = trim((string) ($plan->school?->name ?? ''));
-        $schoolCell = trim((string) config('wfp.template.school_name_cell', 'A6'));
-
-        if ($school === '' || $schoolCell === '') {
-            return $bytes;
-        }
-
-        return WfpTemplateFiller::writeCells($bytes, [$schoolCell => $school]);
+        // The form identifies itself: the plan's school and planning year go
+        // into the template's own title block.
+        return WfpTemplateFiller::writeCells(
+            $bytes,
+            WfpTemplateFiller::titleCells((string) ($plan->school?->name ?? ''), (int) $plan->year),
+        );
     }
 
     /**
-     * The plan the SH's own download should come from, brought up to date with
-     * the MEM first — or null when the school has nothing to build from, in
-     * which case the caller falls back to the blank account-code form.
+     * The plan the SH's own download should come from, for the year they
+     * picked, brought up to date with the MEM first — or null when the school
+     * has nothing to build from, in which case the caller falls back to the
+     * blank account-code form.
      *
      * Generation happens HERE rather than leaving a stale workbook to be
      * downloaded: the button says "Generate and Download", and a plan whose
@@ -65,10 +62,14 @@ final class WfpPlanExporter
      * the MEM no longer has. A FINALIZED plan is never regenerated behind the
      * approver's back — regeneration voids an approval (see WfpGenerator) — so
      * it is exported exactly as it was approved.
+     *
+     * The year is a PREFERENCE, not an instruction: a year the school has no
+     * plan or matrix lines for resolves to one it does have (see dataYearFor),
+     * so a crafted value cannot generate from another year's data.
      */
-    public static function exportableFor(?User $user): ?WfpPlan
+    public static function exportableFor(?User $user, ?int $preferredYear = null): ?WfpPlan
     {
-        $year = self::dataYearFor($user);
+        $year = self::dataYearFor($user, $preferredYear);
 
         if ($year === null) {
             return null;
@@ -89,37 +90,59 @@ final class WfpPlanExporter
     }
 
     /**
-     * The year the SH's generated WFP belongs to — the newest year they have a
-     * plan for, else the newest year their matrices actually carry lines for.
-     * Null when they have neither: an empty year of matrices is not data (the
+     * The year the SH's generated WFP belongs to: the year they picked when
+     * the school has data in it, otherwise the newest year it has data for.
+     * Null when it has none: an empty year of matrices is not data (the
      * twelve months exist as soon as a year is opened), so the blank form is
      * then the only thing that can be generated.
      *
      * Read-only on purpose: the card renders it to say which workbook is
      * coming, and rendering must never create a plan.
      */
-    public static function dataYearFor(?User $user): ?int
+    public static function dataYearFor(?User $user, ?int $preferredYear = null): ?int
+    {
+        $years = self::dataYears($user);
+
+        if ($years === []) {
+            return null;
+        }
+
+        return $preferredYear !== null && in_array($preferredYear, $years, true)
+            ? $preferredYear
+            : $years[0];
+    }
+
+    /**
+     * Every year the school has something to generate from — a plan it has
+     * already generated, or matrix lines to generate one from — newest first.
+     * Empty when it has neither; the caller decides what to offer then (the
+     * generate button still offers the current year, for the blank form).
+     *
+     * @return array<int, int>
+     */
+    public static function dataYears(?User $user): array
     {
         if ($user === null || ! $user->canAccessWfp() || $user->school_id === null) {
-            return null;
+            return [];
         }
 
         $schoolId = (int) $user->school_id;
 
-        // A plan already generated is what the school's WFP IS; a newer year of
-        // matrix lines then waits for its own plan rather than silently
-        // re-pointing this download at another year.
-        $planYear = WfpPlan::query()->where('school_id', $schoolId)->max('year');
+        $planYears = WfpPlan::query()
+            ->where('school_id', $schoolId)
+            ->pluck('year');
 
-        if ($planYear !== null) {
-            return (int) $planYear;
-        }
-
-        $matrixYear = MonthlyExpenditureMatrix::query()
+        $matrixYears = MonthlyExpenditureMatrix::query()
             ->where('school_id', $schoolId)
             ->whereHas('items')
-            ->max('year');
+            ->pluck('year');
 
-        return $matrixYear === null ? null : (int) $matrixYear;
+        return $planYears
+            ->merge($matrixYears)
+            ->map(static fn ($year): int => (int) $year)
+            ->unique()
+            ->sortDesc()
+            ->values()
+            ->all();
     }
 }

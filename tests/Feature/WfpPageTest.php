@@ -99,6 +99,37 @@ class WfpPageTest extends TestCase
         ]);
     }
 
+    /**
+     * One matrix for the given year carrying one line, written the way the app
+     * writes a line: the total is computed server-side, never taken from a
+     * request.
+     */
+    private function matrixWithLine(User $head, int $year, string $activity, string $code, int $month = 3): MonthlyExpenditureMatrix
+    {
+        $matrix = MonthlyExpenditureMatrix::create([
+            'school_id' => $head->school_id,
+            'year' => $year,
+            'month' => $month,
+            'status' => MonthlyExpenditureMatrix::STATUS_DRAFT,
+        ]);
+
+        $item = $matrix->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'objective' => 'To keep the school lit',
+            'activity_description' => $activity,
+            'quantity' => 1,
+            'unit' => 'bill',
+            'unit_cost' => 6000,
+            'account_title' => 'Electricity Expense',
+            'account_code' => $code,
+        ]);
+        $item->syncTotal();
+        $item->save();
+
+        return $matrix;
+    }
+
     public function test_the_school_head_opens_the_wfp_page_with_the_generate_action(): void
     {
         $this->actingAs($this->schoolHead())
@@ -152,7 +183,7 @@ class WfpPageTest extends TestCase
         }
     }
 
-    public function test_the_download_is_the_fy_2026_form_stamped_with_the_school_and_its_accounts(): void
+    public function test_the_download_is_the_shipped_form_stamped_with_the_school_its_year_and_its_accounts(): void
     {
         if (! is_file(storage_path('forms/WFP-Template.xlsx'))) {
             $this->markTestSkipped('The shipped WFP template is not present.');
@@ -167,18 +198,20 @@ class WfpPageTest extends TestCase
         $bytes = base64_decode((string) data_get($component->effects, 'download.content'));
         $sheet = $this->wfpSheetXml($bytes);
 
-        // The school's own copy: named in the title block, its account named
-        // and coded on the first line of the table.
+        // The school's own copy: named in the title block, headed for the year
+        // it is generated for, its account named and coded on the first line
+        // of the table.
         $this->assertSame('Smoke School', $this->wfpCellText($sheet, 'A6'));
-        $this->assertSame('CY 2026 Work and Financial Plan', $this->wfpCellText($sheet, 'A9'));
+        $this->assertSame('CY '.now()->year.' Work and Financial Plan', $this->wfpCellText($sheet, 'A9'));
         $this->assertSame('Travelling Expenses-Local', $this->wfpCellText($sheet, 'A14'));
         $this->assertSame('5020101000', $this->wfpCellText($sheet, 'S14'));
 
-        // The form's own machinery — the Total row and the blank lines below —
-        // is intact, so it opens as a working workbook, not a flat table.
-        $this->assertSame('Total', $this->wfpCellText($sheet, 'A178'));
-        $this->assertSame('SUM(R14:R177)', $this->wfpCellFormula($sheet, 'R178'));
-        $this->assertSame('', (string) $this->wfpCellText($sheet, 'B15'));
+        // The form's own machinery — the Total row — is intact, and the
+        // export is trimmed to the single account line it carries, with the
+        // signature block moved up beneath it.
+        $this->assertSame('Total', $this->wfpCellText($sheet, 'A15'));
+        $this->assertSame('SUM(R14:R14)', $this->wfpCellFormula($sheet, 'R15'));
+        $this->assertSame('Prepared by:', $this->wfpCellText($sheet, 'B18'));
     }
 
     /**
@@ -229,14 +262,23 @@ class WfpPageTest extends TestCase
         $bytes = base64_decode((string) data_get($component->effects, 'download.content'));
         $sheet = $this->wfpSheetXml($bytes);
 
-        // The plan's line, in its own month: March is physical column G, and
-        // the financial band alternates month/object-code columns, so March is
-        // V with the object code in W.
-        $this->assertSame('To keep the school lit', $this->wfpCellText($sheet, 'A14'));
-        $this->assertSame('Payment for Electricity', $this->wfpCellText($sheet, 'B14'));
-        $this->assertSame('1.00', $this->wfpCellText($sheet, 'G14'));
-        $this->assertSame('6000.00', $this->wfpCellText($sheet, 'V14'));
-        $this->assertSame('5020402000', $this->wfpCellText($sheet, 'W14'));
+        // The account-title gray section row heads the account group at row
+        // 14, so the plan's own line lands at row 15: March is physical column
+        // G, the financial band alternates month/object-code columns, so March
+        // is V with the object code in W.
+        $this->assertSame('Electricity Expense', $this->wfpCellText($sheet, 'A14'));
+        $this->assertSame('To keep the school lit', $this->wfpCellText($sheet, 'A15'));
+        $this->assertSame('Payment for Electricity', $this->wfpCellText($sheet, 'B15'));
+        $this->assertSame('1.00', $this->wfpCellText($sheet, 'G15'));
+        $this->assertSame('6000.00', $this->wfpCellText($sheet, 'V15'));
+        $this->assertSame('5020402000', $this->wfpCellText($sheet, 'W15'));
+
+        // The export is as long as the plan: the TOTAL row sits under the two
+        // rows written, its range covers exactly them, and no row carrying
+        // data is left hidden (the template hides its second blank line).
+        $this->assertSame('Total', $this->wfpCellText($sheet, 'A16'));
+        $this->assertSame('SUM(V14:V15)', $this->wfpCellFormula($sheet, 'V16'));
+        $this->assertDoesNotMatchRegularExpression('/<row\b[^>]*\bhidden="1"/', $sheet);
 
         // The blank form's own line is nowhere in it.
         $this->assertNotSame('Travelling Expenses-Local', $this->wfpCellText($sheet, 'A14'));
@@ -247,6 +289,85 @@ class WfpPageTest extends TestCase
         $this->assertNotNull($plan);
         $this->assertSame(1, $plan->items()->count());
         $this->assertSame((int) $head->id, (int) $plan->generated_by);
+    }
+
+    public function test_the_year_select_offers_every_year_with_data_newest_first(): void
+    {
+        $head = $this->schoolHead();
+
+        $this->matrixWithLine($head, 2025, 'Payment for Electricity', '5020402000');
+        $this->matrixWithLine($head, 2026, 'Payment for Water', '5020403000');
+
+        Livewire::actingAs($head)
+            ->test(WfpGenerateButton::class)
+            ->assertSet('year', '2026')
+            ->assertSeeHtmlInOrder(['CY 2026', 'CY 2025']);
+    }
+
+    public function test_a_school_with_no_data_is_offered_the_current_year_for_the_blank_form(): void
+    {
+        $this->classification('Office Supplies Expenses', '5020301000');
+
+        Livewire::actingAs($this->schoolHead())
+            ->test(WfpGenerateButton::class)
+            ->assertSet('year', (string) now()->year)
+            ->assertSee('CY '.now()->year)
+            ->assertSee('Built from your 1 account code');
+    }
+
+    public function test_a_year_the_school_has_no_data_in_falls_back_to_the_newest_year_that_does(): void
+    {
+        $head = $this->schoolHead();
+        $this->matrixWithLine($head, 2026, 'Payment for Electricity', '5020402000');
+
+        // The select is a choice between real workbooks, not a way to retitle
+        // one year's numbers as another's.
+        Livewire::actingAs($head)
+            ->test(WfpGenerateButton::class)
+            ->set('year', '2019')
+            ->assertSet('year', '2026');
+    }
+
+    /**
+     * The picker is the whole point: a school with two years of matrices
+     * generates the WFP for the year it chose, from that year's lines only,
+     * and the form carries that year in its title block.
+     */
+    public function test_the_school_head_can_generate_for_the_year_they_pick(): void
+    {
+        if (! is_file(storage_path('forms/WFP-Template.xlsx'))) {
+            $this->markTestSkipped('The shipped WFP template is not present.');
+        }
+
+        $head = $this->schoolHead();
+
+        $this->matrixWithLine($head, 2025, 'Payment for Electricity', '5020402000');
+        $this->matrixWithLine($head, 2026, 'Payment for Water', '5020403000');
+
+        $component = Livewire::actingAs($head)
+            ->test(WfpGenerateButton::class)
+            ->set('year', '2025')
+            ->call('download')
+            ->assertFileDownloaded(WfpAccountCodeGenerator::downloadName($head, 2025));
+
+        // Only the picked year's plan was generated.
+        $plan = WfpPlan::query()->where('school_id', $head->school_id)->where('year', 2025)->firstOrFail();
+        $this->assertSame(1, $plan->items()->count());
+        $this->assertSame(0, WfpPlan::query()->where('school_id', $head->school_id)->where('year', 2026)->count());
+
+        $bytes = base64_decode((string) data_get($component->effects, 'download.content'));
+        $sheet = $this->wfpSheetXml($bytes);
+
+        // The form names the year it was generated for — in the title and in
+        // both target headings — rather than keeping the template's year.
+        $this->assertSame('CY 2025 Work and Financial Plan', $this->wfpCellText($sheet, 'A9'));
+        $this->assertSame('Physical Target (2025)', $this->wfpCellText($sheet, 'E11'));
+        $this->assertSame('Financial Target (2025)', $this->wfpCellText($sheet, 'R11'));
+
+        // And it holds the 2025 line, not the 2026 one — sitting under its
+        // account-title section row at row 14.
+        $this->assertSame('Payment for Electricity', $this->wfpCellText($sheet, 'B15'));
+        $this->assertSame('6000.00', $this->wfpCellText($sheet, 'V15'));
     }
 
     public function test_generating_with_no_account_codes_reports_an_error_and_downloads_nothing(): void

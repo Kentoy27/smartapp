@@ -24,10 +24,81 @@
         <h1>{{ $matrix->periodLabel() }}</h1>
         <p>
             The source of truth for your Work and Financial Plan.
-            <span class="mem-status mem-status--{{ $matrixStatus }}">{{ ucfirst($matrixStatus) }}</span>
             · {{ count($items) }} {{ count($items) === 1 ? 'line' : 'lines' }}
         </p>
     </div>
+
+    {{-- THE ALLOTMENT BALANCE: the annual budget the Budget office set for
+         this school, read against the year's matrices. The month being edited
+         contributes its unsaved grid, so the balance moves as lines are added
+         or removed — the SH sees what is left before saving. The month tabs
+         below carry the same figure after each month. --}}
+    @php($allocation = $this->allocation)
+    <section
+        class="allotment-summary{{ $allocation['is_over'] ? ' is-over' : '' }}"
+        aria-label="Allotment budget for {{ $matrix->year }}"
+    >
+        <div class="allotment-summary__item">
+            <span class="allotment-summary__label">Allotted budget</span>
+            <strong class="allotment-summary__value">
+                {{ $allocation['allotted'] === null ? 'Not set' : number_format($allocation['allotted'], 2) }}
+            </strong>
+            <span class="allotment-summary__hint">Set by the Budget office for CY {{ $matrix->year }}</span>
+        </div>
+
+        <div class="allotment-summary__item">
+            <span class="allotment-summary__label">Consumed by monthly expenditures</span>
+            <strong class="allotment-summary__value">{{ number_format($allocation['consumed'], 2) }}</strong>
+            <span class="allotment-summary__hint">
+                Your CY {{ $matrix->year }} matrices’ total — this month includes unsaved lines
+            </span>
+        </div>
+
+        <div class="allotment-summary__item">
+            <span class="allotment-summary__label">
+                {{ $allocation['is_over'] ? 'Over allotment' : 'Remaining' }}
+            </span>
+            <strong @class([
+                'allotment-summary__value',
+                'is-over' => $allocation['is_over'],
+                'is-unset' => $allocation['allotted'] === null,
+            ])>
+                {{ $allocation['allotted'] === null
+                    ? '—'
+                    : number_format(abs($allocation['remaining']), 2) }}
+            </strong>
+            <span class="allotment-summary__hint">
+                {{ $allocation['allotted'] === null
+                    ? 'No ceiling set for this year'
+                    : ($allocation['is_over'] ? 'More spent than allotted' : 'Still available to spend') }}
+            </span>
+        </div>
+
+        @if ($allocation['allotted'] !== null)
+            <div
+                class="allotment-summary__progress"
+                role="progressbar"
+                aria-label="Allotment used"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-valuenow="{{ min(100, $allocation['percent']) }}"
+            >
+                <span
+                    class="allotment-summary__progress-bar{{ $allocation['is_over'] ? ' is-over' : '' }}"
+                    style="width: {{ min(100, max(0, $allocation['percent'])) }}%"
+                ></span>
+            </div>
+            <p class="allotment-summary__note">
+                {{ number_format($allocation['percent'], 2) }}% of the allotted budget consumed.
+                Each month tab shows the running balance after that month.
+            </p>
+        @else
+            <p class="allotment-summary__note">
+                No allotment budget has been set for CY {{ $matrix->year }} yet.
+                The Budget office sets it in School Allotments; this month’s lines are recorded either way.
+            </p>
+        @endif
+    </section>
 
     {{-- MONTH NAVIGATION — the twelve months of this matrix's year, so moving
          through the year never means going back to the list. The month being
@@ -36,7 +107,8 @@
          progress reads at a glance; a month whose matrix was deleted is
          inactive. Each tab also carries that month's total — the same figure as
          the monthly total at the bottom — so the year's spending reads without
-         opening the months one by one. --}}
+         opening the months one by one. When the Budget office has set an annual
+         allotment, the tab also carries the running balance after that month. --}}
     <nav class="mem-month-tabs" aria-label="Months of CY {{ $matrix->year }}">
         @foreach ($this->months as $tab)
             @php($tabTotal = $tab['total'] !== null ? number_format($tab['total'], 2) : null)
@@ -56,6 +128,12 @@
                             <span aria-hidden="true">—</span>
                         @endif
                     </span>
+                    @if ($tab['balance'] !== null)
+                        <span @class(['mem-month-tab__balance', 'is-over' => $tab['balance'] < 0])
+                              title="{{ $tab['balance'] < 0 ? 'Over allotment by ' : 'Balance after '.$tab['label'].': ' }}{{ number_format(abs($tab['balance']), 2) }}">
+                            {{ $tab['balance'] < 0 ? 'Over ' : 'Bal. ' }}{{ number_format(abs($tab['balance']), 2) }}
+                        </span>
+                    @endif
                 </span>
             @elseif ($tab['id'] !== null)
                 <a
@@ -77,6 +155,12 @@
                             <span aria-hidden="true">—</span>
                         @endif
                     </span>
+                    @if ($tab['balance'] !== null)
+                        <span @class(['mem-month-tab__balance', 'is-over' => $tab['balance'] < 0])
+                              title="{{ $tab['balance'] < 0 ? 'Over allotment by ' : 'Balance after '.$tab['label'].': ' }}{{ number_format(abs($tab['balance']), 2) }}">
+                            {{ $tab['balance'] < 0 ? 'Over ' : 'Bal. ' }}{{ number_format(abs($tab['balance']), 2) }}
+                        </span>
+                    @endif
                 </a>
             @else
                 <span class="mem-month-tab is-empty" title="{{ $tab['label'] }} — no matrix yet">
@@ -84,6 +168,12 @@
                         <span class="mem-month-tab__abbr">{{ $tab['abbr'] }}</span>
                     </span>
                     <span class="mem-month-tab__total" aria-hidden="true">—</span>
+                    @if ($tab['balance'] !== null)
+                        <span @class(['mem-month-tab__balance', 'is-over' => $tab['balance'] < 0])
+                              title="{{ $tab['balance'] < 0 ? 'Over allotment by ' : 'Balance after '.$tab['label'].': ' }}{{ number_format(abs($tab['balance']), 2) }}">
+                            {{ $tab['balance'] < 0 ? 'Over ' : 'Bal. ' }}{{ number_format(abs($tab['balance']), 2) }}
+                        </span>
+                    @endif
                 </span>
             @endif
         @endforeach
@@ -103,7 +193,11 @@
     <div class="card">
         <div class="card-head users-toolbar">
             <p class="mem-toolbar-copy">
-                Lines are grouped by section. Drag a row's grip to reorder it — the new order saves automatically. The pencil edits a line; totals update as you go.
+                @if ($this->canEdit())
+                    Lines are grouped by section. Drag a row's grip to reorder it — the new order saves automatically. The pencil edits a line; totals update as you go.
+                @else
+                    Read-only — the School Head edits these lines. Read them here to check their account titles and codes.
+                @endif
             </p>
 
 
@@ -117,20 +211,25 @@
                     <x-icon name="file-spreadsheet" :size="16" />
                     <span>Export XLSX</span>
                 </a>
-               <a
-                    href="{{ route('wfp.matrices.template') }}"
-                    class="ac-import-btn"
-                    download
-                    title="Download a CSV template"
-                >
-                    <x-icon name="download" :size="16" />
-                    <span>Template</span>
-                </a>
 
-                <button type="button" class="ac-import-btn" wire:click="openImport">
-                    <x-icon name="upload" :size="16" />
-                    <span>Import CSV</span>
-                </button>
+               {{-- The template and the CSV import exist to bring lines in —
+                    writing work, so only a writing account is offered them. --}}
+                @if ($this->canEdit())
+                    <a
+                        href="{{ route('wfp.matrices.template') }}"
+                        class="ac-import-btn"
+                        download
+                        title="Download a CSV template"
+                    >
+                        <x-icon name="download" :size="16" />
+                        <span>Template</span>
+                    </a>
+
+                    <button type="button" class="ac-import-btn" wire:click="openImport">
+                        <x-icon name="upload" :size="16" />
+                        <span>Import CSV</span>
+                    </button>
+                @endif
             </div>
         </div>
 
@@ -166,66 +265,117 @@
                     month from a CSV.
                 </p>
 
-                <div class="mem-empty__actions">
-                    <button type="button" class="users-add-btn" wire:click="openLineModal('operations')">
-                        <x-icon name="plus" :size="16" />
-                        <span>Add the first line</span>
-                    </button>
+                @if ($this->canEdit())
+                    <div class="mem-empty__actions">
+                        <button type="button" class="users-add-btn" wire:click="openLineModal('operations')">
+                            <x-icon name="plus" :size="16" />
+                            <span>Add the first line</span>
+                        </button>
 
-                    <button type="button" class="ac-import-btn" wire:click="openImport">
-                        <x-icon name="upload" :size="16" />
-                        <span>Import CSV</span>
-                    </button>
-                </div>
-
-                <p class="mem-empty__hint">
-                    Not sure of the CSV format?
-                    <a href="{{ route('wfp.matrices.template') }}" class="ac-import-template-link" download>Download the CSV template</a>.
-                </p>
-            </div>
-        @else
-            @foreach (['operations' => 'Operations', 'project' => 'Project'] as $sectionKey => $sectionLabel)
-                @php($sectionRows = $this->rowsForSection($sectionKey))
-
-                {{-- ONE SECTION of the matrix. The lines are grouped here rather
-                     than marked by a dropdown in every row, so Operations and
-                     Project read as two lists, each with its own subtotal and
-                     its own add button. --}}
-                <section class="mem-section" aria-label="{{ $sectionLabel }} lines">
-                    <div class="mem-section__head">
-                        <div class="mem-section__title">
-                            <span class="mem-group__section">{{ $sectionLabel }}</span>
-                            <span class="mem-section__count">
-                                {{ count($sectionRows) }} {{ count($sectionRows) === 1 ? 'line' : 'lines' }}
-                            </span>
-                        </div>
-
-                        <div class="mem-section__aside">
-                            <span class="mem-section__subtotal">
-                                Subtotal <strong>{{ number_format($this->totals[$sectionKey], 2) }}</strong>
-                            </span>
-
-                            <button type="button" class="ac-import-btn" wire:click="openLineModal('{{ $sectionKey }}')">
-                                <x-icon name="plus" :size="15" />
-                                <span>Add {{ \Illuminate\Support\Str::lower($sectionLabel) }} line</span>
-                            </button>
-                        </div>
+                        <button type="button" class="ac-import-btn" wire:click="openImport">
+                            <x-icon name="upload" :size="16" />
+                            <span>Import CSV</span>
+                        </button>
                     </div>
 
+                    <p class="mem-empty__hint">
+                        Not sure of the CSV format?
+                        <a href="{{ route('wfp.matrices.template') }}" class="ac-import-template-link" download>Download the CSV template</a>.
+                    </p>
+                @endif
+            </div>
+        @else
+            @foreach (['operations' => 'Operations', 'project' => 'Project'] as $sectionKey => $sectionShort)
+                @php($sectionRows = $this->rowsForSection($sectionKey))
+                @php($sectionLabel = $sectionShort.'-Related Expenditures')
+
+                {{-- ONE SECTION of the matrix, drawn as the printed form draws it:
+                     the section banner, the official column headings, then the
+                     section's lines. The lines are grouped here rather than
+                     marked by a dropdown in every row, so Operations and Project
+                     read as two lists, each with its own subtotal and add button. --}}
+                <section class="mem-section" aria-label="{{ $sectionLabel }}">
                     <div class="table-wrap">
                         <table class="data-table mem-list">
+                            {{-- Explicit column ruler: table-layout: fixed uses these
+                                 shares instead of each cell's content, so the eleven
+                                 printed-form columns divide the page width and the
+                                 table never spills into a horizontal scrollbar. --}}
+                            <colgroup>
+                                <col class="mem-col mem-col--line">
+                                <col class="mem-col mem-col--objective">
+                                <col class="mem-col mem-col--activity">
+                                <col class="mem-col mem-col--kind">
+                                <col class="mem-col mem-col--quantity">
+                                <col class="mem-col mem-col--unit">
+                                <col class="mem-col mem-col--unit-cost">
+                                <col class="mem-col mem-col--total">
+                                <col class="mem-col mem-col--account-title">
+                                <col class="mem-col mem-col--account-code">
+                                <col class="mem-col mem-col--actions">
+                            </colgroup>
                             <thead>
+                                {{-- The section banner heads the table, as on the
+                                     printed form. It is a row of the table (not a
+                                     loose element above it), so it spans the same
+                                     width as the columns and scrolls with them:
+                                     label and line count on the left, subtotal and
+                                     add button on the right. --}}
+                                <tr class="mem-list__banner">
+                                    <td colspan="11">
+                                        <div class="mem-list__banner-bar">
+                                            <span class="mem-list__banner-title">
+                                                <span>{{ $sectionLabel }}</span>
+                                                <span class="mem-list__banner-count">
+                                                    {{ count($sectionRows) }} {{ count($sectionRows) === 1 ? 'line' : 'lines' }}
+                                                </span>
+                                            </span>
+
+                                            <span class="mem-list__banner-aside">
+                                                <span class="mem-list__banner-subtotal">
+                                                    Subtotal <strong>{{ number_format($this->totals[$sectionKey], 2) }}</strong>
+                                                </span>
+
+                                                @if ($this->canEdit())
+                                                    <button type="button" class="ac-import-btn" wire:click="openLineModal('{{ $sectionKey }}')">
+                                                        <x-icon name="plus" :size="15" />
+                                                        <span>Add {{ \Illuminate\Support\Str::lower($sectionShort) }} line</span>
+                                                    </button>
+                                                @endif
+                                            </span>
+                                        </div>
+                                    </td>
+                                </tr>
                                 <tr>
-                                    <th scope="col">#</th>
-                                    <th scope="col">Activity</th>
-                                    <th scope="col">Account</th>
-                                    <th scope="col" class="mem-num">Qty</th>
-                                    <th scope="col" class="mem-num">Unit Cost</th>
-                                    <th scope="col" class="mem-num">Total</th>
+                                    <th scope="col" class="mem-list__gutter"><span class="sr-only">Line</span></th>
+                                    <th scope="col">Objectives</th>
+                                    <th scope="col">Project/<wbr>Activity/<wbr>Expenditure</th>
+                                    <th scope="colgroup" colspan="4">Resources Needed</th>
+                                    <th scope="col" class="mem-num">Total Estimated Cost</th>
+                                    <th scope="col">Account Title</th>
+                                    <th scope="col">Account Code</th>
                                     <th scope="col" class="users-actions-col">Actions</th>
                                 </tr>
+                                <tr>
+                                    <th scope="col" class="mem-list__gutter" aria-hidden="true"></th>
+                                    <th scope="col" class="mem-list__subhead" aria-hidden="true"></th>
+                                    <th scope="col" class="mem-list__subhead" aria-hidden="true"></th>
+                                    <th scope="col">Kind</th>
+                                    <th scope="col" class="mem-num mem-list__quantity">Quantity</th>
+                                    <th scope="col">Unit</th>
+                                    <th scope="col" class="mem-num">Unit Cost</th>
+                                    <th scope="col" class="mem-list__subhead" aria-hidden="true"></th>
+                                    <th scope="col" class="mem-list__subhead" aria-hidden="true"></th>
+                                    <th scope="col" class="mem-list__subhead" aria-hidden="true"></th>
+                                    <th scope="col" class="users-actions-col" aria-hidden="true"></th>
+                                </tr>
                             </thead>
-                            <tbody wire:sort="reorderRow">
+                            {{-- Drag-reordering is a write, so only a writing
+                                 account's list is wired for it. --}}
+                            <tbody @if ($this->canEdit()) wire:sort="reorderRow" @endif>
+
+                               
+
                                 @forelse ($sectionRows as $entry)
                                     {{-- A read-only LIST row. The line is changed in the
                                          modal (the pencil), not by typing into the grid,
@@ -242,28 +392,33 @@
                                     @php($quantity = trim((string) ($row['quantity'] ?? '')))
                                     @php($unit = trim((string) ($row['unit'] ?? '')))
                                     @php($unitCost = trim((string) ($row['unit_cost'] ?? '')))
-                                    <tr wire:key="row-{{ $row['_key'] }}" wire:sort:item="{{ $row['_key'] }}">
-                                        <td class="mem-rownum">
+                                    <tr wire:key="row-{{ $row['_key'] }}" @if ($this->canEdit()) wire:sort:item="{{ $row['_key'] }}" @endif>
+                                        <td class="mem-rownum mem-list__gutter">
                                             <span class="mem-rownum__inner">
-                                                <span
-                                                    class="mem-drag-handle"
-                                                    wire:sort:handle
-                                                    title="Drag to reorder"
-                                                    aria-hidden="true"
-                                                >
-                                                    <x-icon name="grip-lines" :size="16" />
-                                                </span>
+                                                @if ($this->canEdit())
+                                                    <span
+                                                        class="mem-drag-handle"
+                                                        wire:sort:handle
+                                                        title="Drag to reorder"
+                                                        aria-hidden="true"
+                                                    >
+                                                        <x-icon name="grip-lines" :size="16" />
+                                                    </span>
+                                                @endif
                                                 <span>{{ $i + 1 }}</span>
                                             </span>
                                         </td>
-                                        <td>
-                                            <span class="cell-strong">{{ $row['activity_description'] !== '' ? $row['activity_description'] : '—' }}</span>
+                                        <td class="mem-list__objective" data-label="Objectives">
                                             @if ($objective !== '')
-                                                <span class="cell-sub">{{ \Illuminate\Support\Str::limit($objective, 140) }}</span>
+                                                <span title="{{ $objective }}">{{ \Illuminate\Support\Str::limit($objective, 200) }}</span>
+                                            @else
+                                                <span class="mem-list__muted">—</span>
                                             @endif
-                                            @if ($resourceKind !== '' || $funding !== '' || $org !== '')
+                                        </td>
+                                        <td data-label="Project/Activity/Expenditure">
+                                            <span class="cell-strong">{{ $row['activity_description'] !== '' ? $row['activity_description'] : '—' }}</span>
+                                            @if ($funding !== '' || $org !== '')
                                                 <div class="mem-list__meta">
-                                                    @if ($resourceKind !== '') <span class="mem-chip">{{ $resourceKind }}</span> @endif
                                                     @if ($funding !== '') <span class="mem-list__meta-item">Funding: {{ $funding }}</span> @endif
                                                     @if ($org !== '') <span class="mem-list__meta-item">{{ $org }}</span> @endif
                                                 </div>
@@ -272,75 +427,97 @@
                                                 <div class="mem-list__movs">MOVs: {{ \Illuminate\Support\Str::limit($movs, 100) }}</div>
                                             @endif
                                         </td>
-                                        <td>
-                                            @if ($accountTitle !== '' || $accountCode !== '')
-                                                <span class="cell-strong">{{ $accountTitle !== '' ? $accountTitle : '—' }}</span>
-                                                @if ($accountCode !== '') <span class="cell-sub ac-code">{{ $accountCode }}</span> @endif
+                                        <td data-label="Kind">
+                                            @if ($resourceKind !== '')
+                                                {{ $resourceKind }}
                                             @else
                                                 <span class="mem-list__muted">—</span>
                                             @endif
                                         </td>
-                                        <td class="mem-num">
+                                        <td class="mem-num" data-label="Quantity">
                                             @if ($quantity !== '')
-                                                {{ $quantity }}@if ($unit !== '') <span class="mem-unit">{{ $unit }}</span>@endif
+                                                {{ $quantity }}
                                             @else
                                                 <span class="mem-list__muted">—</span>
                                             @endif
                                         </td>
-                                        <td class="mem-num">
+                                        <td data-label="Unit">
+                                            @if ($unit !== '')
+                                                {{ $unit }}
+                                            @else
+                                                <span class="mem-list__muted">—</span>
+                                            @endif
+                                        </td>
+                                        <td class="mem-num" data-label="Unit Cost">
                                             @if ($unitCost !== '')
                                                 {{ number_format((float) $unitCost, 2) }}
                                             @else
                                                 <span class="mem-list__muted">—</span>
                                             @endif
                                         </td>
-                                        <td class="mem-num mem-linetotal--cell">
+                                        <td class="mem-num mem-linetotal--cell" data-label="Total Estimated Cost">
                                             {{ number_format(\App\Livewire\MemEditor::lineTotal($row), 2) }}
                                         </td>
+                                        <td data-label="Account Title">
+                                            @if ($accountTitle !== '')
+                                                <span class="cell-strong">{{ $accountTitle }}</span>
+                                            @else
+                                                <span class="mem-list__muted">—</span>
+                                            @endif
+                                        </td>
+                                        <td data-label="Account Code">
+                                            @if ($accountCode !== '')
+                                                <span class="ac-code">{{ $accountCode }}</span>
+                                            @else
+                                                <span class="mem-list__muted">—</span>
+                                            @endif
+                                        </td>
                                         <td class="users-actions-col">
-                                            <div class="users-actions-row">
-                                                <button
-                                                    type="button"
-                                                    class="mem-row-action"
-                                                    wire:click="openEditModal('{{ $row['_key'] }}')"
-                                                    title="Edit this line"
-                                                >
-                                                    <x-icon name="pencil" :size="15" />
-                                                </button>
+                                            @if ($this->canEdit())
+                                                <div class="users-actions-row">
+                                                    <button
+                                                        type="button"
+                                                        class="mem-row-action"
+                                                        wire:click="openEditModal('{{ $row['_key'] }}')"
+                                                        title="Edit this line"
+                                                    >
+                                                        <x-icon name="pencil" :size="15" />
+                                                    </button>
 
-                                                <button
-                                                    type="button"
-                                                    class="mem-row-action"
-                                                    wire:click="duplicateRow('{{ $row['_key'] }}')"
-                                                    title="Duplicate this line"
-                                                >
-                                                    <x-icon name="copy" :size="15" />
-                                                </button>
+                                                    <button
+                                                        type="button"
+                                                        class="mem-row-action"
+                                                        wire:click="duplicateRow('{{ $row['_key'] }}')"
+                                                        title="Duplicate this line"
+                                                    >
+                                                        <x-icon name="copy" :size="15" />
+                                                    </button>
 
-                                                <button
-                                                    type="button"
-                                                    class="mem-row-action"
-                                                    wire:click="moveRow('{{ $row['_key'] }}')"
-                                                    title="Move to {{ $sectionKey === 'operations' ? 'Project' : 'Operations' }}"
-                                                >
-                                                    <x-icon name="arrow-right-left" :size="15" />
-                                                </button>
+                                                    <button
+                                                        type="button"
+                                                        class="mem-row-action"
+                                                        wire:click="moveRow('{{ $row['_key'] }}')"
+                                                        title="Move to {{ $sectionKey === 'operations' ? 'Project' : 'Operations' }}"
+                                                    >
+                                                        <x-icon name="arrow-right-left" :size="15" />
+                                                    </button>
 
-                                                <button
-                                                    type="button"
-                                                    class="mem-row-remove"
-                                                    wire:click="removeRow('{{ $row['_key'] }}')"
-                                                    title="Remove this line"
-                                                >
-                                                    <x-icon name="trash" :size="15" />
-                                                </button>
-                                            </div>
+                                                    <button
+                                                        type="button"
+                                                        class="mem-row-remove"
+                                                        wire:click="removeRow('{{ $row['_key'] }}')"
+                                                        title="Remove this line"
+                                                    >
+                                                        <x-icon name="trash" :size="15" />
+                                                    </button>
+                                                </div>
+                                            @endif
                                         </td>
                                     </tr>
                                 @empty
-                                    <tr>
-                                        <td colspan="7" class="table-empty">
-                                            No {{ \Illuminate\Support\Str::lower($sectionLabel) }} lines yet — add one below, or import a CSV.
+                                    <tr class="mem-list__empty-row">
+                                        <td colspan="11" class="table-empty">
+                                            No {{ \Illuminate\Support\Str::lower($sectionKey) }} lines yet — add one above, or import a CSV.
                                         </td>
                                     </tr>
                                 @endforelse
@@ -373,31 +550,12 @@
             </div>
         @endif
 
-        <div class="mem-actions">
-            <div class="mem-actions__group">
-                <button type="button" class="btn-ghost" wire:click="saveDraft" wire:loading.attr="disabled" wire:target="saveDraft">
-                    <span wire:loading.remove wire:target="saveDraft">Save Draft</span>
-                    <span wire:loading wire:target="saveDraft">Saving…</span>
-                </button>
-                <button type="button" class="ac-import-btn" wire:click="validateMatrix" wire:loading.attr="disabled" wire:target="validateMatrix">
-                    Validate
-                </button>
-                <button type="button" class="ac-import-btn" wire:click="finalizeMatrix" wire:loading.attr="disabled" wire:target="finalizeMatrix">
-                    Finalize
-                </button>
-
-                <span class="mem-actions__hint">
-                    Save keeps your lines; Validate and Finalize record this month's status.
-                </span>
-            </div>
-
-            <button type="button" class="btn-primary" wire:click="generateWfp" wire:loading.attr="disabled" wire:target="generateWfp">
-                <span wire:loading.remove wire:target="generateWfp">Generate WFP</span>
-                <span wire:loading wire:target="generateWfp">Generating…</span>
-            </button>
-        </div>
     </div>
 
+    {{-- The writing modals exist for a writing account only: a read-only
+         reader (the Bookkeeper) is never offered a trigger, and each action
+         behind them refuses a crafted call. --}}
+    @if ($this->canEdit())
     {{-- ADD / EDIT A LINE --}}
     {{-- One focused form is used for both: opened empty from an "Add … line"
          button, or pre-filled from a row's pencil. The section is chosen here
@@ -412,12 +570,100 @@
             </div>
 
             <form wire:submit="saveLineFromModal" class="modal-form">
+                {{-- TEMPLATE PICKER: choose a reusable activity template to
+                     pre-fill the line. The user can review and adjust every
+                     field before adding the line. --}}
+                @if ($pendingTemplateId !== null)
+                    @php($pendingTemplate = \App\Models\WfpLineTemplate::query()->active()->find($pendingTemplateId))
+                    <div class="field mem-line-span ac-import-error mem-banner" role="alert">
+                        You’ve edited this line. Apply <strong>{{ $pendingTemplate?->name }}</strong> and replace
+                        your edits, or keep your edits?
+                        <button type="button" class="btn-primary" wire:click="confirmTemplateReplace" style="margin-left:10px">Replace</button>
+                        <button type="button" class="btn-ghost" wire:click="keepTemplateEdits" style="margin-left:6px">Keep edits</button>
+                        <button type="button" class="btn-ghost" wire:click="dismissTemplate" style="margin-left:6px">Cancel</button>
+                    </div>
+                @endif
+
+                @if ($appliedTemplateId !== null && $pendingTemplateId === null)
+                    <div class="field mem-line-span wfp-template-applied">
+                        <span class="wfp-template-applied__label">Filled from template <strong>{{ $appliedTemplateName }}</strong></span>
+                        <button type="button" class="wfp-template-applied__clear" wire:click="clearTemplate" title="Clear template">Clear template</button>
+                    </div>
+                @endif
+
+                <div class="field mem-line-span">
+                    <label for="memLineTemplate">Start from a template <span class="field-optional">(optional)</span></label>
+
+                    <div class="mem-combo" x-data="{ open: false }" @click.outside="open = false">
+                        <span class="mem-combo__search" aria-hidden="true">
+                            <x-icon name="search" :size="15" />
+                        </span>
+
+                        <input
+                            id="memLineTemplate"
+                            type="text"
+                            autocomplete="off"
+                            role="combobox"
+                            aria-autocomplete="list"
+                            aria-controls="memTemplateOptions"
+                            :aria-expanded="String(open)"
+                            wire:model.live.debounce.300ms="templateSearch"
+                            placeholder="Search templates…"
+                            @focus="open = true"
+                            @keydown.escape="open = false"
+                        >
+
+                        @if (trim($templateSearch) !== '')
+                            <button
+                                type="button"
+                                class="mem-combo__clear"
+                                wire:click="$set('templateSearch', '')"
+                                aria-label="Clear template search"
+                                title="Clear"
+                            >
+                                <x-icon name="x" :size="14" />
+                            </button>
+                        @endif
+
+                        <div
+                            id="memTemplateOptions"
+                            class="mem-combo__menu"
+                            role="listbox"
+                            :class="open ? 'open' : ''"
+                        >
+                            @forelse ($this->templateOptions as $option)
+                                <button
+                                    type="button"
+                                    role="option"
+                                    class="mem-combo__option"
+                                    wire:key="tmpl-opt-{{ $option->id }}"
+                                    wire:click="chooseTemplate({{ $option->id }})"
+                                    @click="open = false"
+                                >
+                                    <span class="mem-combo__option-title">{{ $option->name }}</span>
+                                    <span class="mem-combo__option-meta">
+                                        <span class="badge">{{ $option->lineTypeLabel() }}</span>
+                                        @if ($option->accountClassification?->uacs_object_code)
+                                            <span class="mem-combo__rca">[{{ $option->accountClassification->uacs_object_code }}]</span>
+                                        @endif
+                                    </span>
+                                </button>
+                            @empty
+                                <div class="mem-combo__empty">No matching templates.</div>
+                            @endforelse
+                        </div>
+                    </div>
+
+                    @error('templateSearch') <div class="error-text">{{ $message }}</div> @enderror
+                    <div class="field-hint">Pick a reusable template to pre-fill the line, then adjust any field before adding it.</div>
+                </div>
+
                 {{-- Two-column grid (.mem-line-fields) so the whole line fits
                      on screen without scrolling; a few fields span both
                      columns. See dashboard.css. --}}
                 <div class="mem-line-fields">
                     <div class="mem-line-sections mem-line-span" role="group" aria-label="Section">
-                        @foreach (['operations' => 'Operations', 'project' => 'Project'] as $key => $label)
+                        @foreach (['operations' => 'Operations-Related Expenditures', 'project' => 'Project-Related Expenditures'] as $key => $label)
                             <label class="mem-line-section">
                                 <input type="radio" wire:model.live="lineSection" value="{{ $key }}">
                                 <span>{{ $label }}</span>
@@ -426,7 +672,7 @@
                     </div>
 
                     <div class="field">
-                        <label for="memLineObjective">Objective</label>
+                        <label for="memLineObjective">Objectives</label>
                         <textarea
                             id="memLineObjective"
                             rows="2"
@@ -437,7 +683,7 @@
                     </div>
 
                      <div class="field mem-line-span">
-                        <label for="memLineActivity">Activity description <span class="field-required">required</span></label>
+                        <label for="memLineActivity">Project/Activity/Expenditure <span class="field-required">required</span></label>
                         <input
                             id="memLineActivity"
                             type="text"
@@ -449,39 +695,43 @@
                         @error('lineForm.activity_description') <div class="error-text">{{ $message }}</div> @enderror
                     </div>
 
-                    <div class="field">
-                        <label for="memLineKind">Resource kind</label>
-                        <input id="memLineKind" type="text" wire:model="lineForm.resource_kind" placeholder="e.g. MOOE">
-                        @error('lineForm.resource_kind') <div class="error-text">{{ $message }}</div> @enderror
-                    </div>
-                    
+                    {{-- What the line buys, in one labeled group: kind, quantity,
+                         unit and unit cost are one thought, and the total is
+                         their product. Quantity and unit cost are live so the
+                         total recalculates while typing instead of waiting for
+                         a blur or a save. --}}
+                    <div class="mem-line-resource mem-line-span" role="group" aria-labelledby="memLineResourceLabel">
+                        <span id="memLineResourceLabel" class="mem-line-resource__label">Resource Needed</span>
 
-                    {{-- Quantity, unit, unit cost and the computed line total sit
-                         on one row — they are read together. Quantity and unit
-                         cost are live so the total recalculates while typing
-                         instead of waiting for a blur or a save. --}}
-                    <div class="mem-line-money mem-line-span">
-                        <div class="field">
-                            <label for="memLineQty">Quantity</label>
-                            <input id="memLineQty" type="number" step="0.01" min="0" inputmode="decimal" wire:model.live.debounce.300ms="lineForm.quantity" placeholder="0">
-                            @error('lineForm.quantity') <div class="error-text">{{ $message }}</div> @enderror
-                        </div>
+                        <div class="mem-line-resource__fields">
+                            <div class="field">
+                                <label for="memLineKind">Kind</label>
+                                <input id="memLineKind" type="text" wire:model="lineForm.resource_kind" placeholder="e.g. MOOE">
+                                @error('lineForm.resource_kind') <div class="error-text">{{ $message }}</div> @enderror
+                            </div>
 
-                        <div class="field">
-                            <label for="memLineUnit">Unit</label>
-                            <input id="memLineUnit" type="text" wire:model="lineForm.unit" placeholder="e.g. ream">
-                            @error('lineForm.unit') <div class="error-text">{{ $message }}</div> @enderror
-                        </div>
+                            <div class="field">
+                                <label for="memLineQty">Quantity</label>
+                                <input id="memLineQty" type="number" step="0.01" min="0" inputmode="decimal" wire:model.live.debounce.300ms="lineForm.quantity" placeholder="0">
+                                @error('lineForm.quantity') <div class="error-text">{{ $message }}</div> @enderror
+                            </div>
 
-                        <div class="field">
-                            <label for="memLineCost">Unit cost</label>
-                            <input id="memLineCost" type="number" step="0.01" min="0" inputmode="decimal" wire:model.live.debounce.300ms="lineForm.unit_cost" placeholder="0.00">
-                            @error('lineForm.unit_cost') <div class="error-text">{{ $message }}</div> @enderror
-                        </div>
+                            <div class="field">
+                                <label for="memLineUnit">Unit</label>
+                                <input id="memLineUnit" type="text" wire:model="lineForm.unit" placeholder="e.g. ream">
+                                @error('lineForm.unit') <div class="error-text">{{ $message }}</div> @enderror
+                            </div>
 
-                        <div class="mem-line-total" aria-live="polite">
-                            <span class="mem-line-total__label">Line total</span>
-                            <span class="mem-line-total__value">{{ number_format(\App\Livewire\MemEditor::lineTotal($lineForm), 2) }}</span>
+                            <div class="field">
+                                <label for="memLineCost">Unit cost</label>
+                                <input id="memLineCost" type="number" step="0.01" min="0" inputmode="decimal" wire:model.live.debounce.300ms="lineForm.unit_cost" placeholder="0.00">
+                                @error('lineForm.unit_cost') <div class="error-text">{{ $message }}</div> @enderror
+                            </div>
+
+                            <div class="mem-line-total" aria-live="polite">
+                                <span class="mem-line-total__label">Total Estimated Cost</span>
+                                <span class="mem-line-total__value">{{ number_format(\App\Livewire\MemEditor::lineTotal($lineForm), 2) }}</span>
+                            </div>
                         </div>
                     </div>
 
@@ -491,7 +741,7 @@
                          the classification link. Free text still works — if
                          nothing is picked, what was typed becomes the title. --}}
                     <div class="field">
-                        <label for="memLineAccount">Account title / code</label>
+                        <label for="memLineAccount">Account title / Account code</label>
 
                         <div class="mem-combo" x-data="{ open: false }" @click.outside="open = false">
                             <span class="mem-combo__search" aria-hidden="true">
@@ -715,4 +965,5 @@
             </div>
         </div>
     </div>
+    @endif
 </div>

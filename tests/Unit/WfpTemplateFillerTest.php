@@ -2,6 +2,7 @@
 
 namespace Tests\Unit;
 
+use App\Support\PurePhpZipWriter;
 use App\Support\WfpTemplateFiller;
 use RuntimeException;
 use Tests\Concerns\BuildsWfpTemplates;
@@ -68,13 +69,15 @@ class WfpTemplateFillerTest extends TestCase
         // The written cell keeps the column's style.
         $this->assertSame('5', $this->wfpCellStyle($sheet, 'C4'));
 
-        // The TOTAL formula still spans the whole data band…
-        $this->assertSame('SUM(F4:F6)', $this->wfpCellFormula($sheet, 'F7'));
-        $this->assertSame('SUM(H4:H6)', $this->wfpCellFormula($sheet, 'H7'));
+        // The TOTAL formula still spans the surviving data band…
+        $this->assertSame('SUM(F4:F5)', $this->wfpCellFormula($sheet, 'F6'));
+        $this->assertSame('SUM(H4:H5)', $this->wfpCellFormula($sheet, 'H6'));
 
-        // …the merge outside the band is intact, and the dimension is present.
+        // …the unused third line has been trimmed, the merge outside the band
+        // is intact, and the dimension covers what is left.
+        $this->assertStringNotContainsString('<row r="7"', $sheet);
         $this->assertStringContainsString('<mergeCell ref="A1:M1"/>', $sheet);
-        $this->assertStringContainsString('<dimension ref="A1:M7"/>', $sheet);
+        $this->assertStringContainsString('<dimension ref="A1:M6"/>', $sheet);
     }
 
     public function test_it_clones_rows_past_the_blank_band_and_extends_the_total(): void
@@ -185,11 +188,13 @@ class WfpTemplateFillerTest extends TestCase
         $this->assertSame('', $this->wfpCellText($sheet, 'G6'));
         $this->assertSame('', $this->wfpCellText($sheet, 'H6'));
 
-        // The header block and TOTAL row are untouched.
+        // The header block is untouched; the TOTAL row moved up under the two
+        // filled lines and its range shrank to match.
         $this->assertSame('Financial Target (2025)', $this->wfpCellText($sheet, 'G3'));
         $this->assertSame('Object Code', $this->wfpCellText($sheet, 'H4'));
         $this->assertSame('Jan', $this->wfpCellText($sheet, 'C5'));
-        $this->assertSame('SUM(G6:G8)', $this->wfpCellFormula($sheet, 'G9'));
+        $this->assertSame('SUM(G6:G7)', $this->wfpCellFormula($sheet, 'G8'));
+        $this->assertStringNotContainsString('<row r="9"', $sheet);
     }
 
     public function test_a_monthless_row_writes_its_code_into_every_monthly_column(): void
@@ -216,20 +221,40 @@ class WfpTemplateFillerTest extends TestCase
         $bytes = $this->wfpMonthlyTemplateBytes(3);
         $layout = WfpTemplateFiller::locate(WfpTemplateFiller::readParts($bytes));
 
-        // One month-grained row: only row 6 is written, so row 8 — which
-        // carries K8's row-total formula — is cleared by the blank-out pass.
-        $filled = WfpTemplateFiller::fill($bytes, [
-            ['month' => 1, 'financial_target' => 250, 'account_code' => '5020301000'],
-        ], $layout);
-
+        // No lines: the band is trimmed to its one working row, and that row
+        // is cleared by the blank-out pass — except for the template's own
+        // computed cell, which must survive rather than be hard-coded away.
+        $filled = WfpTemplateFiller::fill($bytes, [], $layout);
         $sheet = $this->wfpSheetXml($filled);
 
-        // The written row is filled…
-        $this->assertSame('250.00', $this->wfpCellText($sheet, 'G6'));
+        $this->assertSame('SUM(G6:J6)', $this->wfpCellFormula($sheet, 'K6'));
+        $this->assertSame('', $this->wfpCellText($sheet, 'G6'));
+    }
 
-        // …and the template's own computed cell survives the blank-out.
-        $this->assertSame('SUM(K6:K7)', $this->wfpCellFormula($sheet, 'K8'));
-        $this->assertSame('', $this->wfpCellText($sheet, 'G8'));
+    public function test_a_hidden_template_line_is_shown_when_it_carries_data(): void
+    {
+        $bytes = $this->wfpMonthlyTemplateBytes(3);
+
+        // The shipped template hides some of its blank lines (row 15, where
+        // the first generated line lands, is hidden), so a fill must lift the
+        // flag on any line it writes into.
+        $parts = WfpTemplateFiller::readParts($bytes);
+        $parts['xl/worksheets/sheet1.xml'] = str_replace(
+            '<row r="6">',
+            '<row r="6" hidden="1">',
+            $parts['xl/worksheets/sheet1.xml'],
+        );
+        $bytes = PurePhpZipWriter::create($parts);
+        $layout = WfpTemplateFiller::locate(WfpTemplateFiller::readParts($bytes));
+
+        $filled = WfpTemplateFiller::fill($bytes, [
+            ['month' => 1, 'program_activity' => 'Pay rent', 'financial_target' => 8000, 'account_code' => '5020301000'],
+        ], $layout);
+        $sheet = $this->wfpSheetXml($filled);
+
+        $this->assertDoesNotMatchRegularExpression('/<row\b(?=[^>]*\br="6")[^>]*\bhidden="1"/', $sheet);
+        $this->assertSame('Pay rent', $this->wfpCellText($sheet, 'B6'));
+        $this->assertSame('8000.00', $this->wfpCellText($sheet, 'G6'));
     }
 
     public function test_the_shipped_template_layout_is_recognised(): void
@@ -279,13 +304,28 @@ class WfpTemplateFillerTest extends TestCase
         $this->assertSame('Pay rent', $this->wfpCellText($sheet, 'B14'));
         $this->assertSame('5020101000', $this->wfpCellText($sheet, 'S14'));
 
-        // The Title block, the header block and the Total row are the form's
-        // own and must survive a fill.
+        // The Title block and the header block are the form's own and must
+        // survive a fill.
         $this->assertSame('CY 2026 Work and Financial Plan', $this->wfpCellText($sheet, 'A9'));
         $this->assertSame('Major Outputs', $this->wfpCellText($sheet, 'C11'));
         $this->assertSame('Object Code', $this->wfpCellText($sheet, 'S12'));
-        $this->assertSame('SUM(R14:R177)', $this->wfpCellFormula($sheet, 'R178'));
-        $this->assertSame('SUM(R178:AN178)', $this->wfpCellFormula($sheet, 'AP178'));
+
+        // The form is trimmed to the two lines written: the TOTAL row sits
+        // under them, its ranges cover exactly them, the template's hidden
+        // flags are gone from what is left, and the signature block moved up
+        // with the cut.
+        $this->assertSame('Total', $this->wfpCellText($sheet, 'A16'));
+        $this->assertSame('SUM(R14:R15)', $this->wfpCellFormula($sheet, 'R16'));
+        $this->assertSame('SUM(R16:AN16)', $this->wfpCellFormula($sheet, 'AP16'));
+        $this->assertDoesNotMatchRegularExpression('/<row\b[^>]*\bhidden="1"/', $sheet);
+        $this->assertSame('Prepared by:', $this->wfpCellText($sheet, 'B19'));
+
+        // The print area shrank with the sheet, so the form prints only what
+        // it actually holds instead of the template's 190-row band.
+        $this->assertStringContainsString(
+            'WFP!$A$1:$AV$28',
+            WfpTemplateFiller::readParts($filled)['xl/workbook.xml'],
+        );
     }
 
     public function test_cloned_rows_total_their_own_months(): void
@@ -312,6 +352,15 @@ class WfpTemplateFillerTest extends TestCase
         // The Total row moved below the clone and still spans the whole band.
         $this->assertSame('Total', $this->wfpCellText($sheet, 'A'.($layout['total_row'] + 1)));
         $this->assertSame('SUM(R14:R'.$cloneRow.')', $this->wfpCellFormula($sheet, 'R'.($layout['total_row'] + 1)));
+
+        // The print area grew with the sheet, so the clone is on the printout.
+        $this->assertStringContainsString(
+            'WFP!$A$1:$AV$'.(190 + 1),
+            WfpTemplateFiller::readParts($filled)['xl/workbook.xml'],
+        );
+
+        // Clones of a hidden template line are shown too.
+        $this->assertDoesNotMatchRegularExpression('/<row\b[^>]*\bhidden="1"/', $sheet);
     }
 
     public function test_it_writes_single_cells_and_keeps_their_style(): void
@@ -359,6 +408,186 @@ class WfpTemplateFillerTest extends TestCase
         $this->assertSame('', (string) $this->wfpCellText($sheet, 'A5'));
         $this->assertSame('', (string) $this->wfpCellText($sheet, 'A7'));
         $this->assertSame('CY 2026 Work and Financial Plan', $this->wfpCellText($sheet, 'A9'));
+    }
+
+    public function test_generated_lines_are_white_unbold_and_wrapped_but_the_account_title_stays_gray(): void
+    {
+        $bytes = $this->shippedBytes();
+        $layout = $this->shippedLayout($bytes);
+
+        $filled = WfpTemplateFiller::fill($bytes, [
+            [
+                '__account_title__' => true,
+                'account_title' => 'Training Expense',
+                'account_code' => '5020301000',
+            ],
+            [
+                'program_activity' => 'To provide snacks for the training participants of the school-based training on action research',
+                'financial_target' => 2500,
+                'account_code' => '5020301000',
+            ],
+        ], $layout);
+
+        $parts = WfpTemplateFiller::readParts($filled);
+        $sheet = $parts['xl/worksheets/sheet1.xml'] ?? '';
+        $styles = $parts['xl/styles.xml'] ?? '';
+
+        $this->assertNotFalse(simplexml_load_string($styles));
+
+        // The account-title row keeps the template's gray, bold section style.
+        $titleStyle = (string) $this->wfpCellStyle($sheet, 'A14');
+
+        $this->assertTrue($this->wfpStyleIsBold($styles, $titleStyle));
+        $this->assertSame('10', $this->wfpStyleFill($styles, $titleStyle));
+        $this->assertStringContainsString('FFB7B7B7', $this->wfpStyleFillXml($styles, $titleStyle));
+
+        // The activity line is white, not bold and wrapped.
+        $dataStyle = (string) $this->wfpCellStyle($sheet, 'B15');
+
+        $this->assertFalse($this->wfpStyleIsBold($styles, $dataStyle));
+        $this->assertSame('0', $this->wfpStyleFill($styles, $dataStyle));
+        $this->assertTrue($this->wfpStyleWraps($styles, $dataStyle));
+
+        // Nor do any other cells on that line: the template's yellow and gray
+        // fills and bold columns must not leak into a generated line.
+        preg_match('/<row\b[^>]*\br="15"[^>]*>(.*?)<\/row>/s', $sheet, $row);
+
+        $this->assertArrayHasKey(1, $row);
+
+        preg_match_all('/<c\b[^>]*\bs="(\d+)"/', $row[1], $cellStyles);
+
+        $this->assertNotEmpty($cellStyles[1]);
+
+        foreach ($cellStyles[1] as $styleId) {
+            $this->assertSame('0', $this->wfpStyleFill($styles, $styleId), 'cell style '.$styleId.' carries a fill');
+            $this->assertFalse($this->wfpStyleIsBold($styles, $styleId), 'cell style '.$styleId.' is bold');
+        }
+
+        // A formula the template owns survives, but its bold print does not.
+        $this->assertSame('SUM(R15:AN15)', $this->wfpCellFormula($sheet, 'AP15'));
+        $this->assertFalse($this->wfpStyleIsBold($styles, (string) $this->wfpCellStyle($sheet, 'AP15')));
+
+        // The long description wraps over several lines; the row height was set
+        // to fit it, without pinning `customHeight` (Excel may re-fit an edit).
+        preg_match('/<row\b(?=[^>]*\br="15")[^>]*\bht="([0-9.]+)"/', $sheet, $height);
+
+        $this->assertArrayHasKey(1, $height);
+        $this->assertGreaterThan(21.0, (float) $height[1]);
+        $this->assertLessThanOrEqual(409.0, (float) $height[1]);
+        $this->assertDoesNotMatchRegularExpression('/<row\b(?=[^>]*\br="15")[^>]*\bcustomHeight=/', $sheet);
+    }
+
+    public function test_a_section_row_landing_on_a_tall_template_row_is_reset_to_one_line(): void
+    {
+        $bytes = $this->shippedBytes();
+        $layout = $this->shippedLayout($bytes);
+
+        $filled = WfpTemplateFiller::fill($bytes, [
+            ['__account_title__' => true, 'account_title' => 'Electricity Expense', 'account_code' => '5020402000'],
+            ['program_activity' => 'One'],
+            ['program_activity' => 'Two'],
+            ['program_activity' => 'Three'],
+            ['program_activity' => 'Four'],
+            ['__account_title__' => true, 'account_title' => 'Water Expense', 'account_code' => '5020403000'],
+            ['program_activity' => 'Five'],
+        ], $layout);
+
+        $parts = WfpTemplateFiller::readParts($filled);
+        $sheet = $parts['xl/worksheets/sheet1.xml'] ?? '';
+        $styles = $parts['xl/styles.xml'] ?? '';
+
+        // Row 19 shipped in the template at 102pt for a one-line section.
+        preg_match('/<row\b[^>]*\br="19"[^>]*>/', $sheet, $row);
+
+        $this->assertArrayHasKey(0, $row);
+        $this->assertStringNotContainsString('customHeight', $row[0]);
+        $this->assertMatchesRegularExpression('/\bht="([0-9.]+)"/', $row[0], 'the section row has a height');
+
+        preg_match('/\bht="([0-9.]+)"/', $row[0], $height);
+        $this->assertLessThan(22.0, (float) $height[1]);
+
+        // It is still the gray, bold section row.
+        $titleStyle = (string) $this->wfpCellStyle($sheet, 'A19');
+
+        $this->assertSame('Water Expense', $this->wfpCellText($sheet, 'A19'));
+        $this->assertTrue($this->wfpStyleIsBold($styles, $titleStyle));
+        $this->assertSame('10', $this->wfpStyleFill($styles, $titleStyle));
+
+        // Its preserved totals are painted with the same gray, not left yellow.
+        foreach (['AP19', 'AQ19', 'AT19'] as $ref) {
+            $this->assertSame($titleStyle, (string) $this->wfpCellStyle($sheet, $ref));
+        }
+
+        $this->assertSame('SUM(R19:AN19)', $this->wfpCellFormula($sheet, 'AP19'));
+        $this->assertNull($this->wfpCellFormula($sheet, 'AQ19'));
+        $this->assertSame('AP19', $this->wfpCellFormula($sheet, 'AT19'));
+
+        // The line after it is a normal generated line again.
+        $this->assertFalse($this->wfpStyleIsBold($styles, (string) $this->wfpCellStyle($sheet, 'B20')));
+        $this->assertSame('0', $this->wfpStyleFill($styles, (string) $this->wfpCellStyle($sheet, 'B20')));
+    }
+
+    /** The style's full `<xf>` element from the workbook's styles.xml. */
+    private function wfpStyleXf(string $styles, string $styleId): string
+    {
+        if (preg_match('/<cellXfs\b[^>]*>(.*?)<\/cellXfs>/s', $styles, $block) !== 1) {
+            return '';
+        }
+
+        if (preg_match_all('/<xf\b[^>]*\/>|<xf\b[^>]*>.*?<\/xf>/s', $block[1], $xfs) === 0) {
+            return '';
+        }
+
+        return $xfs[0][(int) $styleId] ?? '';
+    }
+
+    private function wfpStyleIsBold(string $styles, string $styleId): bool
+    {
+        $xf = $this->wfpStyleXf($styles, $styleId);
+
+        if (preg_match('/\bfontId="(\d+)"/', $xf, $fontId) !== 1) {
+            return false;
+        }
+
+        if (preg_match('/<fonts\b[^>]*>(.*?)<\/fonts>/s', $styles, $block) !== 1) {
+            return false;
+        }
+
+        if (preg_match_all('/<font\b[^>]*>.*?<\/font>|<font\b[^>]*\/>/s', $block[1], $fonts) === 0) {
+            return false;
+        }
+
+        $font = $fonts[0][(int) $fontId[1]] ?? '';
+
+        return preg_match('/<b\b(?![^>]*\bval="(?:0|false)")/i', $font) === 1;
+    }
+
+    private function wfpStyleFill(string $styles, string $styleId): string
+    {
+        return preg_match('/\bfillId="(\d+)"/', $this->wfpStyleXf($styles, $styleId), $fill) === 1
+            ? $fill[1]
+            : '';
+    }
+
+    /** The style's full `<fill>` element, for asserting the actual colour. */
+    private function wfpStyleFillXml(string $styles, string $styleId): string
+    {
+        $fillId = $this->wfpStyleFill($styles, $styleId);
+
+        if ($fillId === '' || preg_match('/<fills\b[^>]*>(.*?)<\/fills>/s', $styles, $block) !== 1) {
+            return '';
+        }
+
+        if (preg_match_all('/<fill\b[^>]*>.*?<\/fill>/s', $block[1], $fills) === 0) {
+            return '';
+        }
+
+        return $fills[0][(int) $fillId] ?? '';
+    }
+
+    private function wfpStyleWraps(string $styles, string $styleId): bool
+    {
+        return str_contains($this->wfpStyleXf($styles, $styleId), 'wrapText="1"');
     }
 
     /** The shipped template's bytes, or a skip when it is not present. */

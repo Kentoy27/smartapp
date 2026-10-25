@@ -222,10 +222,18 @@
                             </label>
 
                             <label class="role-option">
+                                <input type="radio" name="selectedRole" value="bookkeeper" wire:model="selectedRole">
+                                <span class="role-option-body">
+                                    <strong>Bookkeeper</strong>
+                                    <small>Check account titles and codes on the school’s WFP</small>
+                                </span>
+                            </label>
+
+                            <label class="role-option">
                                 <input type="radio" name="selectedRole" value="budget" wire:model="selectedRole">
                                 <span class="role-option-body">
                                     <strong>Budget</strong>
-                                    <small>Review submitted WFP and AIP plans only</small>
+                                    <small>Review submitted plans, set and certify school allotments</small>
                                 </span>
                             </label>
 
@@ -339,12 +347,25 @@
                                 <input
                                     type="radio"
                                     name="role"
+                                    value="bookkeeper"
+                                    wire:model.live="role"
+                                >
+                                <span class="role-option-body">
+                                    <strong>Bookkeeper</strong>
+                                    <small>Check account titles and codes on the school’s WFP</small>
+                                </span>
+                            </label>
+
+                            <label class="role-option">
+                                <input
+                                    type="radio"
+                                    name="role"
                                     value="budget"
                                     wire:model.live="role"
                                 >
                                 <span class="role-option-body">
                                     <strong>Budget</strong>
-                                    <small>Review submitted WFP and AIP plans only</small>
+                                    <small>Review submitted plans, set and certify school allotments</small>
                                 </span>
                             </label>
 
@@ -367,10 +388,11 @@
                     </div>
                 @endif
 
-                {{-- SCHOOL ASSIGNMENT (SH only): division → school → School ID
-                     (read only — it comes from the selected school's record)
-                     → the same ID fills the login below. --}}
-                @if ($this->isSchoolHead())
+                {{-- SCHOOL ASSIGNMENT (SH and Bookkeeper): division → school →
+                     School ID (read only — it comes from the selected school's
+                     record) → for an SH the same ID fills the login below; a
+                     Bookkeeper signs in with a login of their own. --}}
+                @if ($this->belongsToSchool())
                     <div class="field">
                         <label for="formSchoolDivision">School Division</label>
                         <select

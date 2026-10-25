@@ -153,6 +153,10 @@ class WfpGenerator
      * carries a column per month): emit one row per WFP line, keeping its month
      * so the filler writes the target into the right column.
      *
+     * Account-title section rows are interleaved ahead of each account group
+     * so the WFP reads as titled sections rather than a flat list. Every
+     * account renders a title row, including the first one.
+     *
      * @return array<int, array<string, mixed>>
      */
     public static function buildExportRows(WfpPlan $plan, bool $monthly): array
@@ -160,22 +164,68 @@ class WfpGenerator
         $items = $plan->items()->get();
 
         if ($monthly) {
-            return $items->map(fn (WfpItem $item): array => array_merge(self::exportRow($item), ['month' => $item->month]))->all();
+            $rows = $items->map(fn (WfpItem $item): array => array_merge(self::exportRow($item), ['month' => $item->month]))->all();
+
+            return self::withAccountTitleRows($rows);
         }
 
-        return $items
-            ->groupBy('group_key')
-            ->map(static function ($group): array {
-                /** @var WfpItem $first */
-                $first = $group->first();
+        return self::withAccountTitleRows(
+            $items
+                ->groupBy('group_key')
+                ->map(static function ($group): array {
+                    /** @var WfpItem $first */
+                    $first = $group->first();
 
-                return array_merge(self::exportRow($first), [
-                    'physical_target' => round((float) $group->sum(fn (WfpItem $i): float => (float) $i->physical_target), 2),
-                    'financial_target' => round((float) $group->sum(fn (WfpItem $i): float => (float) $i->financial_target), 2),
-                ]);
-            })
-            ->values()
-            ->all();
+                    return array_merge(self::exportRow($first), [
+                        'physical_target' => round((float) $group->sum(fn (WfpItem $i): float => (float) $i->physical_target), 2),
+                        'financial_target' => round((float) $group->sum(fn (WfpItem $i): float => (float) $i->financial_target), 2),
+                    ]);
+                })
+                ->values()
+                ->all(),
+        );
+    }
+
+    /**
+     * Insert an account-title header row ahead of each group of rows that share
+     * an account code, so each account renders its own titled section. Rows
+     * without an account code (or title) get no section row.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private static function withAccountTitleRows(array $rows): array
+    {
+        $out = [];
+        $lastKey = null;
+
+        foreach ($rows as $row) {
+            $key = self::accountTitleKey($row);
+
+            if ($key !== '' && $key !== $lastKey) {
+                $out[] = [
+                    '__account_title__' => true,
+                    'account_title' => $row['account_title'] ?? '',
+                    'account_code' => $row['account_code'] ?? '',
+                ];
+            }
+
+            $out[] = $row;
+            $lastKey = $key;
+        }
+
+        return $out;
+    }
+
+    /**
+     * The grouping key for an account-title section: the account code when
+     * present, otherwise the account title. Rows sharing a key form one
+     * section under a single title row.
+     */
+    private static function accountTitleKey(array $row): string
+    {
+        $code = trim((string) ($row['account_code'] ?? ''));
+
+        return $code !== '' ? $code : trim((string) ($row['account_title'] ?? ''));
     }
 
     /**
@@ -300,12 +350,10 @@ class WfpGenerator
 
     /**
      * Order two lines: known account codes before unknown ones, then by the
-     * master list's sort order, then by the code itself, then by the first
-     * month the line appears in, then by activity A→Z.
-     *
-     * The code is compared with strcmp rather than PHP's `<`, because two
-     * numeric-looking code strings ("5020301000") would otherwise be compared
-     * as numbers, losing the fixed-width order the UACS codes are built on.
+     * master list's sort order, then by the code itself compared as
+     * hierarchical numeric segments (so fixed-width UACS codes keep their
+     * natural order instead of alphabetical), then by the first month the
+     * line appears in, then by activity A→Z.
      *
      * @param  array<string, mixed>  $fa
      * @param  array<string, mixed>  $fb
@@ -318,7 +366,7 @@ class WfpGenerator
 
         return ((int) ! $ka['known'] <=> (int) ! $kb['known'])
             ?: ($ka['order'] <=> $kb['order'])
-            ?: strcmp($ka['code'], $kb['code'])
+            ?: self::compareAccountCodes($ka['code'], $kb['code'])
             ?: ((int) ($fa['month'] ?? 0) <=> (int) ($fb['month'] ?? 0))
             ?: strcasecmp((string) ($fa['program_activity'] ?? ''), (string) ($fb['program_activity'] ?? ''));
     }
@@ -377,6 +425,46 @@ class WfpGenerator
     private static function codeKey(string $code): string
     {
         return preg_replace('/\D/', '', $code) ?? '';
+    }
+
+    /**
+     * Compare two account codes as hierarchical numeric segments: split each
+     * into 2-digit chunks and compare chunk-by-chunk numerically, so fixed
+     * width UACS codes keep their natural order ("5020301000" before
+     * "5020402000") instead of alphabetical order. When one code is a prefix
+     * of the other, the shorter code sorts first.
+     */
+    private static function compareAccountCodes(string $a, string $b): int
+    {
+        $sa = self::accountCodeSegments($a);
+        $sb = self::accountCodeSegments($b);
+        $limit = min(count($sa), count($sb));
+
+        for ($i = 0; $i < $limit; $i++) {
+            if ($sa[$i] !== $sb[$i]) {
+                return $sa[$i] <=> $sb[$i];
+            }
+        }
+
+        return count($sa) <=> count($sb);
+    }
+
+    /**
+     * Split an account code into its 2-digit numeric segments, the longest
+     * trailing chunk kept as-is.
+     *
+     * @return array<int, int>
+     */
+    private static function accountCodeSegments(string $code): array
+    {
+        $digits = preg_replace('/\D/', '', $code);
+        $segments = [];
+
+        for ($i = 0; $i < strlen($digits); $i += 2) {
+            $segments[] = (int) substr($digits, $i, 2);
+        }
+
+        return $segments;
     }
 
     private static function normalize(string $value): string

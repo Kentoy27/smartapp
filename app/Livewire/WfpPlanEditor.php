@@ -39,7 +39,9 @@ class WfpPlanEditor extends Component
 
     public function mount(?WfpPlan $plan = null): void
     {
-        abort_unless($plan !== null && $plan->managedBy(Auth::user()), 404);
+        // The page OPENS for a read-only reader; every write goes through
+        // guard(), which keeps the SH-only managedBy() gate.
+        abort_unless($plan !== null && $plan->canBeViewedBy(Auth::user()), 404);
 
         $this->planId = $plan->id;
         $this->loadItems($plan);
@@ -51,6 +53,16 @@ class WfpPlanEditor extends Component
         abort_unless($plan->managedBy(Auth::user()), 404);
 
         return $plan;
+    }
+
+    /**
+     * Whether the signed-in account may edit this plan. The Blade hides the
+     * write controls for a read-only reader; each action re-checks the same
+     * gate server-side (see guard()).
+     */
+    public function canEdit(): bool
+    {
+        return Auth::user()?->canManageWfp() === true;
     }
 
     private function loadItems(WfpPlan $plan): void
