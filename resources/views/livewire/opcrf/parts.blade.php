@@ -19,7 +19,7 @@
     @endif
 
     <div class="opcrf-parts-head">
-        <h2 class="opcrf-parts-title">OPCRF {{ $year }}</h2>
+        <h2 class="opcrf-parts-title">Office Performance Commitment and Review Form (OPCRF) {{ $year }}</h2>
         <p class="opcrf-parts-sub">
             @if ($readOnly)
                 Part details are available to School Heads only.
