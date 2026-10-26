@@ -317,13 +317,38 @@ class WfpTemplateFillerTest extends TestCase
         $this->assertSame('Total', $this->wfpCellText($sheet, 'A16'));
         $this->assertSame('SUM(R14:R15)', $this->wfpCellFormula($sheet, 'R16'));
         $this->assertSame('SUM(R16:AN16)', $this->wfpCellFormula($sheet, 'AP16'));
+
+        // Q, AP and AT were shared-formula DEPENDENTS in the template, whose
+        // masters sat in the band that was removed. They must come out as
+        // ordinary formulas at the TOTAL row's new position: a dependent whose
+        // master is gone makes Excel repair the workbook (and discard cell
+        // information with it).
+        $this->assertSame('SUM(E16:P16)', $this->wfpCellFormula($sheet, 'Q16'));
+        $this->assertSame('AP16', $this->wfpCellFormula($sheet, 'AT16'));
+        $this->assertStringNotContainsString('t="shared"', $sheet);
+        $this->assertSheetCellsAreConsistent($sheet);
+
         $this->assertDoesNotMatchRegularExpression('/<row\b[^>]*\bhidden="1"/', $sheet);
         $this->assertSame('Prepared by:', $this->wfpCellText($sheet, 'B19'));
+
+        // The template's saved view points at row 32 of the blank band that
+        // was just removed. With rows 1-13 frozen, Excel would reopen the
+        // form on an empty grid and hide the filled line above the viewport,
+        // so the view must open on the first data row instead.
+        $this->assertMatchesRegularExpression('/<pane\b[^>]*\bySplit="13"[^>]*\btopLeftCell="A14"/', $sheet);
+        $this->assertMatchesRegularExpression('/<selection\b[^>]*\bpane="bottomLeft"[^>]*\bsqref="A14"/', $sheet);
 
         // The print area shrank with the sheet, so the form prints only what
         // it actually holds instead of the template's 190-row band.
         $this->assertStringContainsString(
             'WFP!$A$1:$AV$28',
+            WfpTemplateFiller::readParts($filled)['xl/workbook.xml'],
+        );
+
+        // The template's cached totals predate this fill; without a calcChain
+        // Excel must be told to recalculate them on open.
+        $this->assertStringContainsString(
+            'fullCalcOnLoad="1"',
             WfpTemplateFiller::readParts($filled)['xl/workbook.xml'],
         );
     }
@@ -352,6 +377,16 @@ class WfpTemplateFillerTest extends TestCase
         // The Total row moved below the clone and still spans the whole band.
         $this->assertSame('Total', $this->wfpCellText($sheet, 'A'.($layout['total_row'] + 1)));
         $this->assertSame('SUM(R14:R'.$cloneRow.')', $this->wfpCellFormula($sheet, 'R'.($layout['total_row'] + 1)));
+
+        // Its per-month row totals moved with it: the formulas used to be
+        // shared-formula dependents, which Excel resolved by position. Expanded
+        // formulas must be shifted to the TOTAL row's new place instead.
+        $totalRow = $layout['total_row'] + 1;
+        $this->assertSame('SUM(E'.$totalRow.':P'.$totalRow.')', $this->wfpCellFormula($sheet, 'Q'.$totalRow));
+        $this->assertSame('SUM(R'.$totalRow.':AN'.$totalRow.')', $this->wfpCellFormula($sheet, 'AP'.$totalRow));
+        $this->assertSame('AP'.$totalRow, $this->wfpCellFormula($sheet, 'AT'.$totalRow));
+        $this->assertStringNotContainsString('t="shared"', $sheet);
+        $this->assertSheetCellsAreConsistent($sheet);
 
         // The print area grew with the sheet, so the clone is on the printout.
         $this->assertStringContainsString(
@@ -403,11 +438,24 @@ class WfpTemplateFillerTest extends TestCase
 
         $this->assertSame('BALISONG ELEMENTARY SCHOOL', $this->wfpCellText($sheet, 'A6'));
 
-        // The lines around it are the form's own and stay as shipped: the
-        // region/division/address rows are blank, the title is not touched.
+        // The lines around it are the form's own and stay as shipped: a bare
+        // cell write does not stamp the generated form's letterhead, and the
+        // title is not touched.
         $this->assertSame('', (string) $this->wfpCellText($sheet, 'A5'));
         $this->assertSame('', (string) $this->wfpCellText($sheet, 'A7'));
         $this->assertSame('CY 2026 Work and Financial Plan', $this->wfpCellText($sheet, 'A9'));
+    }
+
+    public function test_the_title_cells_compose_the_letterhead_school_and_year(): void
+    {
+        $cells = WfpTemplateFiller::titleCells('BALISONG ELEMENTARY SCHOOL', 2027);
+
+        $this->assertSame('Negros Island Region', $cells['A4'] ?? null);
+        $this->assertSame('Schools Division Office of Kabankalan City', $cells['A5'] ?? null);
+        $this->assertSame('BALISONG ELEMENTARY SCHOOL', $cells['A6'] ?? null);
+        $this->assertSame('CY 2027 Work and Financial Plan', $cells['A9'] ?? null);
+        $this->assertSame('Physical Target (2027)', $cells['E11'] ?? null);
+        $this->assertSame('Financial Target (2027)', $cells['R11'] ?? null);
     }
 
     public function test_generated_lines_are_white_unbold_and_wrapped_but_the_account_title_stays_gray(): void
@@ -438,7 +486,6 @@ class WfpTemplateFillerTest extends TestCase
         $titleStyle = (string) $this->wfpCellStyle($sheet, 'A14');
 
         $this->assertTrue($this->wfpStyleIsBold($styles, $titleStyle));
-        $this->assertSame('10', $this->wfpStyleFill($styles, $titleStyle));
         $this->assertStringContainsString('FFB7B7B7', $this->wfpStyleFillXml($styles, $titleStyle));
 
         // The activity line is white, not bold and wrapped.
@@ -511,7 +558,7 @@ class WfpTemplateFillerTest extends TestCase
 
         $this->assertSame('Water Expense', $this->wfpCellText($sheet, 'A19'));
         $this->assertTrue($this->wfpStyleIsBold($styles, $titleStyle));
-        $this->assertSame('10', $this->wfpStyleFill($styles, $titleStyle));
+        $this->assertStringContainsString('FFB7B7B7', $this->wfpStyleFillXml($styles, $titleStyle));
 
         // Its preserved totals are painted with the same gray, not left yellow.
         foreach (['AP19', 'AQ19', 'AT19'] as $ref) {
@@ -525,6 +572,31 @@ class WfpTemplateFillerTest extends TestCase
         // The line after it is a normal generated line again.
         $this->assertFalse($this->wfpStyleIsBold($styles, (string) $this->wfpCellStyle($sheet, 'B20')));
         $this->assertSame('0', $this->wfpStyleFill($styles, (string) $this->wfpCellStyle($sheet, 'B20')));
+    }
+
+    /**
+     * Every cell reference must be unique and must sit in the row element that
+     * owns it: Excel treats a duplicate or a mismatched reference as unreadable
+     * content and repairs the whole sheet.
+     */
+    private function assertSheetCellsAreConsistent(string $sheet): void
+    {
+        preg_match_all('/<row\b[^>]*\br="(\d+)"[^>]*>.*?<\/row>/s', $sheet, $rows, PREG_SET_ORDER);
+
+        $seen = [];
+
+        foreach ($rows as $row) {
+            $number = (int) $row[1];
+            preg_match_all('/<c\b[^>]*\br="([A-Z]+)(\d+)"/', $row[0], $cells, PREG_SET_ORDER);
+
+            foreach ($cells as $cell) {
+                $ref = $cell[1].$cell[2];
+
+                $this->assertSame($number, (int) $cell[2], 'cell '.$ref.' sits inside row '.$number);
+                $this->assertArrayNotHasKey($ref, $seen, 'cell '.$ref.' is repeated');
+                $seen[$ref] = true;
+            }
+        }
     }
 
     /** The style's full `<xf>` element from the workbook's styles.xml. */

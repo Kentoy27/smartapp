@@ -39,12 +39,12 @@
         >
             <div class="modal modal--opcr-upload" role="dialog" aria-modal="true" aria-labelledby="wfpUploadTitle" @click.stop>
                 <div class="modal-head">
-                    <h2 id="wfpUploadTitle">Upload your WFP in here</h2>
+                    <h2 id="wfpUploadTitle">Upload your Work and Financial Plan in here</h2>
                     <button type="button" class="modal-close" wire:click="closeUpload" aria-label="Close" title="Close">×</button>
                 </div>
 
                 <p class="opcrf-review-note">
-                    Choose your completed <strong>WFP.xlsx</strong>. It is checked
+                    Choose your completed <strong>Work and Financial Plan.xlsx</strong>. It is checked
                     against the WFP structure across every worksheet before saving.
                     The full workbook analysis and sheet contents will appear below.
                 </p>

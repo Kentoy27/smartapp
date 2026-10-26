@@ -168,6 +168,11 @@ class WfpTemplateFiller
         $parts = self::readParts($templateBytes);
         $sheetPath = $layout['sheet_path'];
 
+        // A shared formula is positional: its dependents hold only an index
+        // and are resolved against where the master sits. Row surgery moves
+        // and deletes rows, so expand them into ordinary formulas first.
+        $parts[$sheetPath] = self::expandSharedFormulas($parts[$sheetPath]);
+
         // Title rows paint the template's gray section colour; resolve it once
         // only when at least one row is an account-title section header.
         $titleStyle = null;
@@ -190,6 +195,14 @@ class WfpTemplateFiller
 
         $parts[$sheetPath] = $sheetXml;
 
+        // The template is saved scrolled deep into its blank band. After the
+        // fill trims that band, that saved position shows empty rows below
+        // the frozen header and hides the lines the form carries.
+        $parts[$sheetPath] = self::focusSheetView(
+            $parts[$sheetPath],
+            (int) ($layout['data_start_row'] ?? (($layout['header_row'] ?? 1) + 1)),
+        );
+
         if (isset($parts['xl/styles.xml'])) {
             $parts['xl/styles.xml'] = $stylesXml;
         }
@@ -200,7 +213,173 @@ class WfpTemplateFiller
             $parts[$sheetPath],
         );
 
+        self::dropCalcChain($parts);
+
         return PurePhpZipWriter::create($parts);
+    }
+
+    /**
+     * Point a frozen sheet at its first data line when it opens.
+     *
+     * The template is saved scrolled deep into its blank band, with the
+     * letterhead and table header frozen above it. A fill trims that band, so
+     * the saved row no longer exists: Excel reopens the workbook showing the
+     * frozen header above an empty grid, and the filled lines are above the
+     * viewport until the reader scrolls up. Move the bottom pane's top-left
+     * cell — and its selection, which the template leaves in the top pane — to
+     * the first data line, so the form opens on the content it carries.
+     */
+    private static function focusSheetView(string $sheetXml, int $firstDataRow): string
+    {
+        if (preg_match('/<pane\b[^>]*\bySplit="(\d+)"[^>]*\/>/', $sheetXml, $pane) !== 1) {
+            return $sheetXml;
+        }
+
+        // A frozen pane's scroll position must be below the frozen rows.
+        $target = 'A'.max(1, $firstDataRow, (int) $pane[1] + 1);
+
+        $sheetXml = (string) preg_replace_callback(
+            '/<pane\b([^>]*\bySplit="\d+"[^>]*)\/>/',
+            static function (array $m) use ($target): string {
+                if (preg_match('/\btopLeftCell="[^"]*"/', $m[1]) === 1) {
+                    return '<pane'.((string) preg_replace('/\btopLeftCell="[^"]*"/', 'topLeftCell="'.$target.'"', $m[1], 1)).'/>';
+                }
+
+                return '<pane'.$m[1].' topLeftCell="'.$target.'"/>';
+            },
+            $sheetXml,
+            1
+        );
+
+        return (string) preg_replace_callback(
+            '/<selection\b[^>]*\bpane="bottomLeft"[^>]*\/>/',
+            static function (array $m) use ($target): string {
+                $tag = $m[0];
+
+                if (preg_match('/\bsqref="[^"]*"/', $tag) === 1) {
+                    $tag = (string) preg_replace('/\bsqref="[^"]*"/', 'sqref="'.$target.'"', $tag, 1);
+                } else {
+                    $tag = (string) preg_replace('/\s*\/>$/', ' sqref="'.$target.'"/>', $tag, 1);
+                }
+
+                if (preg_match('/\bactiveCell="[^"]*"/', $tag) === 1) {
+                    $tag = (string) preg_replace('/\bactiveCell="[^"]*"/', 'activeCell="'.$target.'"', $tag, 1);
+                }
+
+                return $tag;
+            },
+            $sheetXml
+        );
+    }
+
+    /**
+     * Drop the workbook's calcChain (xl/calcChain.xml) and its relationship
+     * and content-type override. Row surgery (shifting and cloning rows)
+     * rewrites cell references but leaves the formula index describing cells
+     * that moved or no longer exist, so Excel treats the workbook as corrupt
+     * and repairs away shared formulas. Dropping it lets Excel recalculate on
+     * open instead — the same approach OpcrfWorkbookTrim uses.
+     *
+     * @param  array<string, string>  $parts
+     */
+    private static function dropCalcChain(array &$parts): void
+    {
+        $rels = $parts['xl/_rels/workbook.xml.rels'] ?? '';
+        $part = null;
+        $rid = null;
+
+        if (preg_match('/<Relationship\s[^>]*\bType="[^"]*\/calcChain"[^>]*\bId="([^"]*)"/u', $rels, $m)
+            || preg_match('/<Relationship\s[^>]*\bId="([^"]*)"[^>]*\bType="[^"]*\/calcChain"/u', $rels, $m)) {
+            $rid = $m[1];
+            $target = self::relationshipTarget($rels, $rid);
+            if ($target !== null) {
+                $part = self::resolve('xl/', $target);
+            }
+        }
+
+        if ($part !== null && isset($parts[$part])) {
+            unset($parts[$part]);
+        }
+
+        if ($rid !== null) {
+            $parts['xl/_rels/workbook.xml.rels'] = (string) preg_replace(
+                '/<Relationship\s[^>]*\bId="'.preg_quote($rid, '/').'"[^>]*\/>\s*/u',
+                '',
+                $rels
+            ) ?? $rels;
+        }
+
+        if ($part !== null) {
+            $contentTypes = $parts['[Content_Types].xml'] ?? '';
+            $parts['[Content_Types].xml'] = (string) preg_replace(
+                '#<Override\s[^>]*PartName="/'.preg_quote($part, '#').'"[^>]*/>#u',
+                '',
+                $contentTypes
+            ) ?? $contentTypes;
+        }
+
+        // Without a calcChain, Excel only knows to rebuild the formulas when
+        // the workbook asks for a full calculation. The cached values in the
+        // template predate the rows this fill wrote, so they must be replaced.
+        $parts['xl/workbook.xml'] = self::markForFullRecalculation($parts['xl/workbook.xml'] ?? '');
+    }
+
+    /**
+     * Ask Excel to recalculate every formula when the workbook opens.
+     */
+    private static function markForFullRecalculation(string $workbookXml): string
+    {
+        if ($workbookXml === '') {
+            return $workbookXml;
+        }
+
+        if (preg_match('/<calcPr\b/', $workbookXml) !== 1) {
+            return str_replace('</workbook>', '<calcPr fullCalcOnLoad="1"/></workbook>', $workbookXml);
+        }
+
+        if (preg_match('/\bfullCalcOnLoad="[^"]*"/', $workbookXml) === 1) {
+            return (string) preg_replace('/\bfullCalcOnLoad="[^"]*"/', 'fullCalcOnLoad="1"', $workbookXml, 1);
+        }
+
+        return (string) preg_replace('/<calcPr\b/', '<calcPr fullCalcOnLoad="1"', $workbookXml, 1);
+    }
+
+    /**
+     * The Target a workbook-level relationship id points at, or null.
+     */
+    private static function relationshipTarget(string $rels, string $rid): ?string
+    {
+        if (preg_match('/<Relationship\s[^>]*\bId="'.preg_quote($rid, '/').'"[^>]*\bTarget="([^"]*)"/u', $rels, $m)
+            || preg_match('/<Relationship\s[^>]*\bTarget="([^"]*)"[^>]*\bId="'.preg_quote($rid, '/').'"/u', $rels, $m)) {
+            return $m[1];
+        }
+
+        return null;
+    }
+
+    /**
+     * Resolve a relationship Target against the directory of the part that
+     * carries it.
+     */
+    private static function resolve(string $baseDirectory, string $target): string
+    {
+        $segments = [];
+
+        foreach (explode('/', $baseDirectory.$target) as $segment) {
+            if ($segment === '' || $segment === '.') {
+                continue;
+            }
+
+            if ($segment === '..') {
+                array_pop($segments);
+
+                continue;
+            }
+
+            $segments[] = $segment;
+        }
+
+        return implode('/', $segments);
     }
 
     /**
@@ -244,10 +423,11 @@ class WfpTemplateFiller
     }
 
     /**
-     * The title-block cells that identify a generated form: the school's name
-     * in its own cell, and the planning year in the form's title and its two
-     * target headings. Both are pinned in config, so a template revision that
-     * moves them is a config change rather than a code change.
+     * The title-block cells that identify a generated form: the letterhead's
+     * region and division lines, the school's name in its own cell, and the
+     * planning year in the form's title and its two target headings. All are
+     * pinned in config, so a template revision that moves them is a config
+     * change rather than a code change.
      *
      * The year matters: the shipped template is headed for one year, and a
      * workbook generated for another must not keep the template's year.
@@ -257,6 +437,17 @@ class WfpTemplateFiller
     public static function titleCells(?string $school, ?int $year): array
     {
         $cells = [];
+
+        // The static letterhead first, so a misconfigured cell can never
+        // overwrite the school name or the year stamped below.
+        foreach ((array) config('wfp.template.letterhead_cells', []) as $ref => $text) {
+            $ref = trim((string) $ref);
+            $text = trim((string) $text);
+
+            if ($ref !== '' && $text !== '') {
+                $cells[$ref] = $text;
+            }
+        }
 
         $schoolCell = trim((string) config('wfp.template.school_name_cell', 'A6'));
         $school = trim((string) $school);
@@ -1052,6 +1243,177 @@ class WfpTemplateFiller
     }
 
     /**
+     * Rewrite the template's shared formulas as ordinary ones, before any row
+     * is moved or deleted.
+     *
+     * A shared formula is stored once, on a master cell; every other cell in
+     * its range carries only `<f t="shared" si="n"/>` and is resolved against
+     * where that master SITS. Row surgery breaks the contract: trimming the
+     * blank band can delete a master whose dependents survive in the TOTAL
+     * row, and Excel then repairs the workbook and reports "Removed Records:
+     * Shared formula". Expanding each dependent to the formula it stands for
+     * (the master's formula shifted to the dependent's offset) leaves every
+     * formula self-contained, so the rows may then be moved freely.
+     */
+    private static function expandSharedFormulas(string $sheetXml): string
+    {
+        if (! str_contains($sheetXml, 't="shared"')) {
+            return $sheetXml;
+        }
+
+        // si => the master's position and the formula it stores.
+        $masters = [];
+
+        if (preg_match_all('/<c\b[^>]*\/>|<c\b[^>]*>.*?<\/c>/s', $sheetXml, $cells) !== false) {
+            foreach ($cells[0] as $cell) {
+                if (preg_match('/\br="([A-Z]+)(\d+)"/', $cell, $ref) !== 1
+                    || preg_match('/<f\b([^>]*)>(.*?)<\/f>/s', $cell, $formula) !== 1
+                    || preg_match('/\bt="shared"/', $formula[1]) !== 1
+                    || preg_match('/\bsi="(\d+)"/', $formula[1], $si) !== 1) {
+                    continue;
+                }
+
+                $masters[$si[1]] = [
+                    'column' => self::columnIndex($ref[1]),
+                    'row' => (int) $ref[2],
+                    'formula' => $formula[2],
+                ];
+            }
+        }
+
+        if ($masters === []) {
+            return $sheetXml;
+        }
+
+        return (string) preg_replace_callback(
+            '/<c\b[^>]*\/>|<c\b[^>]*>.*?<\/c>/s',
+            static function (array $m) use ($masters): string {
+                $cell = $m[0];
+
+                if (preg_match('/\br="([A-Z]+)(\d+)"/', $cell, $ref) !== 1) {
+                    return $cell;
+                }
+
+                $column = self::columnIndex($ref[1]);
+                $row = (int) $ref[2];
+
+                // The master keeps its formula but loses the shared markers:
+                // once every dependent is expanded, nothing refers to it.
+                $cell = (string) preg_replace_callback(
+                    '/<f\b([^>]*)>(.*?)<\/f>/s',
+                    static function (array $f): string {
+                        if (preg_match('/\bt="shared"/', $f[1]) !== 1) {
+                            return $f[0];
+                        }
+
+                        return '<f'.self::withoutSharedAttributes($f[1]).'>'.$f[2].'</f>';
+                    },
+                    $cell,
+                    1
+                );
+
+                // A dependent becomes the master's formula translated to this
+                // cell: relative columns and rows move, `$`-anchored ones stay.
+                return (string) preg_replace_callback(
+                    '/<f\b([^>]*)\bsi="(\d+)"([^>]*)\/>/',
+                    static function (array $f) use ($column, $row, $masters): string {
+                        $attributes = $f[1].$f[3];
+                        $master = $masters[$f[2]] ?? null;
+
+                        if ($master === null || preg_match('/\bt="shared"/', $attributes) !== 1) {
+                            return $f[0];
+                        }
+
+                        $formula = self::translateFormula(
+                            $master['formula'],
+                            $row - $master['row'],
+                            $column - $master['column'],
+                        );
+
+                        return '<f'.self::withoutSharedAttributes($attributes).'>'.$formula.'</f>';
+                    },
+                    $cell
+                );
+            },
+            $sheetXml
+        );
+    }
+
+    /** An `<f>` tag's attributes minus the shared-formula bookkeeping. */
+    private static function withoutSharedAttributes(string $attributes): string
+    {
+        return rtrim((string) preg_replace(
+            '/\s+(?:t="shared"|ref="[^"]*"|si="\d+")/',
+            '',
+            $attributes
+        ));
+    }
+
+    /**
+     * Shift every relative A1 reference in a formula by the given offsets.
+     * Quoted strings and `$`-anchored parts of a reference are left alone, and
+     * a function name (`LOG10(`, `DAYS360(`) is not mistaken for a reference.
+     */
+    private static function translateFormula(string $formula, int $rowOffset, int $columnOffset): string
+    {
+        if ($rowOffset === 0 && $columnOffset === 0) {
+            return $formula;
+        }
+
+        // Only the text outside double-quoted string literals is a formula.
+        $parts = preg_split('/("(?:[^"]|"")*")/', $formula, -1, PREG_SPLIT_DELIM_CAPTURE);
+
+        if ($parts === false) {
+            return $formula;
+        }
+
+        foreach ($parts as $index => $part) {
+            if ($index % 2 === 1) {
+                continue;
+            }
+
+            $parts[$index] = (string) preg_replace_callback(
+                '/(?<![A-Za-z0-9_.])(\$?)([A-Z]{1,3})(\$?)(\d+)(?![0-9A-Za-z_(!])/',
+                static function (array $m) use ($rowOffset, $columnOffset): string {
+                    $column = self::columnIndex($m[2]) + ($m[1] === '' ? $columnOffset : 0);
+                    $row = (int) $m[4] + ($m[3] === '' ? $rowOffset : 0);
+
+                    return $m[1].self::columnLetter(max(1, $column)).$m[3].max(1, $row);
+                },
+                $part
+            );
+        }
+
+        return implode('', $parts);
+    }
+
+    /**
+     * Rewrite the row numbers inside every formula element, self-closing ones
+     * included, through $map.
+     *
+     * The self-closing alternative must come FIRST: `/<f\b[^>]*>.*?<\/f>/s`
+     * treats a `<f t="shared" si="…"/>` as an opening tag and pairs it with the
+     * NEXT formula's closing tag, swallowing the cells in between — whose
+     * `r="…"` references are then rewritten as if they were part of the
+     * formula. That is what turned a TOTAL row's cell references into
+     * references to the deleted data rows.
+     *
+     * @param  callable(int): int  $map
+     */
+    private static function rewriteFormulaRows(string $xml, callable $map): string
+    {
+        return (string) preg_replace_callback(
+            '/<f\b[^>]*\/>|<f\b[^>]*>.*?<\/f>/s',
+            static fn (array $m): string => (string) preg_replace_callback(
+                '/(\$?[A-Z]{1,3}\$?)(\d+)(?!\d)/',
+                static fn (array $c): string => $c[1].$map((int) $c[2]),
+                $m[0]
+            ),
+            $xml
+        );
+    }
+
+    /**
      * Shift every row number greater than $greaterThan down by $delta (and the
      * row's own cell references with it).
      */
@@ -1076,10 +1438,18 @@ class WfpTemplateFiller
 
                 $row = (string) preg_replace('/<row\b([^>]*?)\br="'.$number.'"/', '<row$1r="'.$new.'"', $row, 1);
 
-                return (string) preg_replace_callback(
+                $row = (string) preg_replace_callback(
                     '/\br="([A-Z]+)'.$number.'"/',
                     static fn (array $c): string => 'r="'.$c[1].$new.'"',
                     $row
+                );
+
+                // A formula that points at or below the insertion point moves
+                // with the rows it names (the TOTAL row's own-row range, for
+                // one); one that points into the band above does not.
+                return self::rewriteFormulaRows(
+                    $row,
+                    static fn (int $target): int => $target > $greaterThan ? $target + $delta : $target,
                 );
             },
             $sheetXml
@@ -1099,14 +1469,9 @@ class WfpTemplateFiller
         $newLast = $oldLastDataRow + $delta;
         $row = $m[0];
 
-        $updated = (string) preg_replace_callback(
-            '/<f\b[^>]*>.*?<\/f>/s',
-            static fn (array $f): string => (string) preg_replace(
-                '/(\$?[A-Z]+\$?)'.$oldLastDataRow.'(?!\d)/',
-                '${1}'.$newLast,
-                $f[0]
-            ),
-            $row
+        $updated = self::rewriteFormulaRows(
+            $row,
+            static fn (int $target): int => $target === $oldLastDataRow ? $newLast : $target,
         );
 
         return (string) preg_replace_callback(self::rowPattern($rowNumber), static fn (): string => $updated, $sheetXml, 1);
@@ -1138,14 +1503,9 @@ class WfpTemplateFiller
 
             // A per-row formula the template carries (Q = SUM(E177:P177)) must
             // total the CLONE's own months, not the row it was copied from.
-            $clone = (string) preg_replace_callback(
-                '/<f\b[^>]*>.*?<\/f>/s',
-                static fn (array $f): string => (string) preg_replace(
-                    '/(\$?[A-Z]+\$?)'.$lastDataRow.'(?!\d)/',
-                    '${1}'.$new,
-                    $f[0]
-                ),
-                $clone
+            $clone = self::rewriteFormulaRows(
+                $clone,
+                static fn (int $target): int => $target === $lastDataRow ? $new : $target,
             );
 
             $clones .= $clone;
@@ -1235,28 +1595,19 @@ class WfpTemplateFiller
      */
     private static function shiftFormulaRows(string $row, int $lastRemoved, int $lastKept, int $removed): string
     {
-        return (string) preg_replace_callback(
-            '/<f\b[^>]*>.*?<\/f>/s',
-            static function (array $f) use ($lastRemoved, $lastKept, $removed): string {
-                return (string) preg_replace_callback(
-                    '/(\$?[A-Z]{1,3}\$?)(\d+)(?!\d)/',
-                    static function (array $c) use ($lastRemoved, $lastKept, $removed): string {
-                        $number = (int) $c[2];
+        return self::rewriteFormulaRows(
+            $row,
+            static function (int $number) use ($lastRemoved, $lastKept, $removed): int {
+                if ($number > $lastRemoved) {
+                    return $number - $removed;
+                }
 
-                        if ($number > $lastRemoved) {
-                            return $c[1].($number - $removed);
-                        }
+                if ($number > $lastKept) {
+                    return $lastKept;
+                }
 
-                        if ($number > $lastKept) {
-                            return $c[1].$lastKept;
-                        }
-
-                        return $c[0];
-                    },
-                    $f[0]
-                );
+                return $number;
             },
-            $row
         );
     }
 

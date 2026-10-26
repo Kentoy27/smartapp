@@ -6,7 +6,7 @@
     @unless (auth()->user()?->canManageWfp())
         <div class="card">
             <div class="card-head">
-                <div class="card-title">WFP — read-only</div>
+                <div class="card-title">Work and Financial Plan — read-only</div>
             </div>
             <p class="card-text">
                 Your school’s Work and Financial Plan. The School Head generates and
@@ -21,7 +21,7 @@
          download it. The generate button names the source and the year. --}}
     <div class="card">
         <div class="card-head">
-            <div class="card-title">WFP Template</div>
+            <div class="card-title">Work and Financial Plan Template</div>
         </div>
         <div class="opcr-template-row">
             <span class="opcr-file-badge" aria-hidden="true">

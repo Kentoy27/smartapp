@@ -48,7 +48,7 @@
             >
                 <span wire:loading.remove wire:target="download">
                     <x-icon name="download" :size="16" />
-                    <span>Generate and Download WFP</span>
+                    <span>Generate and Download Work and Financial Plan</span>
                 </span>
                 <span wire:loading wire:target="download">
                     <x-icon name="file-spreadsheet" :size="16" />
@@ -63,7 +63,7 @@
                 title="Read-only — only the School Head generates the WFP"
             >
                 <x-icon name="download" :size="16" />
-                <span>Generate and Download WFP</span>
+                <span>Generate and Download Work and Financial Plan</span>
             </button>
         @endif
     </div>

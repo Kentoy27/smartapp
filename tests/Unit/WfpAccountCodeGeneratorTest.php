@@ -200,7 +200,7 @@ class WfpAccountCodeGeneratorTest extends TestCase
         $school = School::create(['district_id' => $district->id, 'name' => 'Smoke School']);
         $user = User::factory()->create(['role' => 'user', 'is_superadmin' => false, 'school_id' => $school->id]);
 
-        $this->assertSame('WFP_2026_Smoke_School.xlsx', WfpAccountCodeGenerator::downloadName($user, 2026));
-        $this->assertSame('WFP_2026.xlsx', WfpAccountCodeGenerator::downloadName(null, 2026));
+        $this->assertSame('Work and Financial Plan_2026_Smoke_School.xlsx', WfpAccountCodeGenerator::downloadName($user, 2026));
+        $this->assertSame('Work and Financial Plan_2026.xlsx', WfpAccountCodeGenerator::downloadName(null, 2026));
     }
 }

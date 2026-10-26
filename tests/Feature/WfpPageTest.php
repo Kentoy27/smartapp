@@ -198,9 +198,11 @@ class WfpPageTest extends TestCase
         $bytes = base64_decode((string) data_get($component->effects, 'download.content'));
         $sheet = $this->wfpSheetXml($bytes);
 
-        // The school's own copy: named in the title block, headed for the year
-        // it is generated for, its account named and coded on the first line
-        // of the table.
+        // The school's own copy: named in the title block under its region
+        // and division, headed for the year it is generated for, its account
+        // named and coded on the first line of the table.
+        $this->assertSame('Negros Island Region', $this->wfpCellText($sheet, 'A4'));
+        $this->assertSame('Schools Division Office of Kabankalan City', $this->wfpCellText($sheet, 'A5'));
         $this->assertSame('Smoke School', $this->wfpCellText($sheet, 'A6'));
         $this->assertSame('CY '.now()->year.' Work and Financial Plan', $this->wfpCellText($sheet, 'A9'));
         $this->assertSame('Travelling Expenses-Local', $this->wfpCellText($sheet, 'A14'));

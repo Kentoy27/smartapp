@@ -136,8 +136,9 @@ final class WfpAccountCodeGenerator
     }
 
     /**
-     * The download's file name: `WFP_{year}_{School}.xlsx`. The school segment
-     * is dropped (no dangling underscore) when the account has no school.
+     * The download's file name: `Work and Financial Plan_{year}_{School}.xlsx`.
+     * The school segment is dropped (no dangling underscore) when the account
+     * has no school.
      */
     public static function downloadName(?User $user, ?int $year = null): string
     {
@@ -146,8 +147,8 @@ final class WfpAccountCodeGenerator
         $school = self::slugSegment((string) ($user?->school?->name ?? ''));
 
         return $school === ''
-            ? 'WFP_'.$year.'.xlsx'
-            : 'WFP_'.$year.'_'.$school.'.xlsx';
+            ? 'Work and Financial Plan_'.$year.'.xlsx'
+            : 'Work and Financial Plan_'.$year.'_'.$school.'.xlsx';
     }
 
     /**

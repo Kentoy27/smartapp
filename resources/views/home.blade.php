@@ -10,8 +10,9 @@
                     ? 'ADMIN WORKSPACE'
                     : ($isBudgetReviewer
                         ? 'BUDGET REVIEW WORKSPACE'
-                        : ($user->canAccessOpcrfTemplate() ? 'STAFF WORKSPACE' : 'VIEWER WORKSPACE')) }}
-                        : ($isBookkeeper ? 'WFP CHECKING WORKSPACE' : 'STAFF WORKSPACE')) }}
+                        : ($isBookkeeper
+                            ? 'WFP CHECKING WORKSPACE'
+                            : ($user->canAccessOpcrfTemplate() ? 'STAFF WORKSPACE' : 'VIEWER WORKSPACE'))) }}
             </span>
             <h1>Welcome back, {{ $user->username }}</h1>
             <p>
@@ -22,14 +23,6 @@
                         : ($user->canAccessOpcrfTemplate()
                             ? 'Your performance plan and financial plan, together in one place.'
                             : 'View OPCRF part schedules and status.')) }}
-            </p>
-        </div>
-        @if ($user->canAccessOpcrfTemplate())
-            <a href="{{ route('mov.index') }}" class="dashboard-welcome__link" wire:navigate.hover>
-                        ? 'Review submitted plans and keep the schools’ allotments certified.'
-                        : ($isBookkeeper
-                            ? 'Read the schools’ expenditure lines and check their account titles and codes.'
-                            : 'Your performance plan and financial plan, together in one place.')) }}
             </p>
         </div>
         @if (! $user->hasAdminAccess() && ! $isBudgetReviewer && ! $isBookkeeper)

@@ -86,6 +86,18 @@ return [
         'school_name_cell' => env('WFP_TEMPLATE_SCHOOL_CELL', 'A6'),
 
         /*
+         * The static letterhead lines stamped above the school's name. The
+         * shipped template leaves these two rows blank (but styled) so the
+         * generated form can name its own region and division; an installation
+         * outside this division overrides the values, and a blank value leaves
+         * that row as the template has it.
+         */
+        'letterhead_cells' => [
+            'A4' => env('WFP_TEMPLATE_REGION', 'Negros Island Region'),
+            'A5' => env('WFP_TEMPLATE_DIVISION', 'Schools Division Office of Kabankalan City'),
+        ],
+
+        /*
          * The title-block cells that name the form's PLANNING YEAR, as sprintf
          * patterns with one `%d`. The shipped template hard-codes its own year
          * in the title and in the two target headings ("CY 2026 …", "Physical
