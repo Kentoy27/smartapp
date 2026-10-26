@@ -12,6 +12,13 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
+        // Cloudflare sits in front of XAMPP, terminates TLS, and forwards the
+        // request over plain HTTP with an X-Forwarded-Proto header. Trust the
+        // direct peer so Laravel sees it as HTTPS; otherwise URL generation
+        // (Livewire's /update endpoint, auth redirects) falls back to http://
+        // and the browser blocks it as mixed content on the HTTPS page.
+        $middleware->trustProxies(at: '*');
+
         // Logging out is safe to repeat and must still work when a long-lived
         // Livewire page has an expired CSRF token.
         $middleware->validateCsrfTokens(except: ['logout']);
