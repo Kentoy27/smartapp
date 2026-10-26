@@ -37,7 +37,7 @@ class WfpTemplate
      */
     public static function fileName(): string
     {
-        return (string) config('wfp.file_name', 'WFP.xlsx');
+        return (string) config('wfp.file_name', 'Work and Financial Plan.xlsx');
     }
 
     public static function description(): string

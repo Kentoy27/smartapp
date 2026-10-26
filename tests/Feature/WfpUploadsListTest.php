@@ -205,7 +205,7 @@ class WfpUploadsListTest extends TestCase
         $this->actingAs($this->superadmin())
             ->get(route('wfp.submission.download', $submission))
             ->assertOk()
-            ->assertDownload('Completed Plan - WFP.xlsx');
+            ->assertDownload('Completed Plan - Work and Financial Plan.xlsx');
     }
 
     public function test_the_owner_can_download_their_own_upload(): void
@@ -217,7 +217,7 @@ class WfpUploadsListTest extends TestCase
         $this->actingAs($head)
             ->get(route('wfp.submission.download', $submission))
             ->assertOk()
-            ->assertDownload('own-plan - WFP.xlsx');
+            ->assertDownload('own-plan - Work and Financial Plan.xlsx');
     }
 
     public function test_the_admin_sidebar_links_the_wfp_uploads_page(): void
@@ -265,7 +265,7 @@ class WfpUploadsListTest extends TestCase
 
         $this->get(route('wfp.submission.download', $submission))
             ->assertOk()
-            ->assertDownload('budget-review-wfp - WFP.xlsx');
+            ->assertDownload('budget-review-wfp - Work and Financial Plan.xlsx');
 
         $this->get(route('wfp.index'))->assertNotFound();
     }
@@ -292,7 +292,7 @@ class WfpUploadsListTest extends TestCase
 
         $this->get(route('wfp.submission.download', $submission))
             ->assertOk()
-            ->assertDownload('viewer-review-wfp - WFP.xlsx');
+            ->assertDownload('viewer-review-wfp - Work and Financial Plan.xlsx');
 
         $this->get(route('wfp.index'))->assertNotFound();
     }

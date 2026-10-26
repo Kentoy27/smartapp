@@ -65,14 +65,15 @@ class WfpSubmission extends Model
 
     /**
      * The name the file is served under — the original name, sanitized, with
-     * a "- WFP" suffix so it is recognisable in the downloads folder.
+     * a "- Work and Financial Plan" suffix so it is recognisable in the
+     * downloads folder.
      */
     public function fileDownloadName(): string
     {
         $base = pathinfo((string) $this->original_file_name, PATHINFO_FILENAME);
         $name = trim(preg_replace('#[\\\\/]+#', ' ', (string) $base) ?? '');
 
-        return ($name !== '' ? $name : 'WFP').' - WFP.xlsx';
+        return ($name !== '' ? $name : 'Work and Financial Plan').' - Work and Financial Plan.xlsx';
     }
 
     /**

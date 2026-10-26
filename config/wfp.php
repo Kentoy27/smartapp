@@ -14,7 +14,7 @@ return [
      */
     'template_file' => env('WFP_TEMPLATE_FILE', 'WFP-Template.xlsx'),
 
-    'file_name' => env('WFP_FILE_NAME', 'WFP.xlsx'),
+    'file_name' => env('WFP_FILE_NAME', 'Work and Financial Plan.xlsx'),
 
     // The card's short description.
     'description' => env(
