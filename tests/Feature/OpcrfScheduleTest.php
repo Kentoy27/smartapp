@@ -163,12 +163,12 @@ class OpcrfScheduleTest extends TestCase
 
         // All four Parts are LISTED — a locked Part is never hidden.
         $this->assertStringContainsString('OPCRF Commitment', $html);
-        $this->assertStringContainsString('Parts 2–4', $html);
+        $this->assertStringContainsString('Full OPCRF', $html);
 
         $this->assertStringContainsString('OPCRF Commitment is now open.', $html);
         $this->assertStringContainsString('Access OPCRF Commitment', $html);
         // And the others say what is true, not nothing.
-        $this->assertStringContainsString('Parts 2–4 locked', $html);
+        $this->assertStringContainsString('Full OPCRF locked', $html);
     }
 
     public function test_a_user_cannot_access_a_part_before_its_start_date(): void
@@ -331,7 +331,7 @@ class OpcrfScheduleTest extends TestCase
 
         Livewire::actingAs($admin)
             ->test(\App\Livewire\OpcrfScheduleManager::class)
-            ->assertSee('Parts 2–4 (End-of-year term)')
+            ->assertSee('Full OPCRF (End-of-year term)')
             ->assertDontSee('Part 3</strong>')
             ->assertDontSee('Part 4</strong>');
 
@@ -351,8 +351,8 @@ class OpcrfScheduleTest extends TestCase
         $html = $this->actingAs($staff)->get(route('opcrf.index'))->assertOk()->getContent();
 
         $this->assertStringContainsString('OPCRF Commitment is now open.', $html);
-        $this->assertStringContainsString('Parts 2–4 locked', $html);
-        $this->assertStringContainsString('Parts 2–4 share the end-of-year term.', $html);
+        $this->assertStringContainsString('Full OPCRF locked', $html);
+        $this->assertStringContainsString('Full OPCRF is available during the end-of-year term', $html);
         $this->assertSame(2, substr_count($html, 'class="opcrf-part-card opcrf-part-card--'));
     }
 
@@ -368,7 +368,7 @@ class OpcrfScheduleTest extends TestCase
             $this->assertStringContainsString(route('opcrf.part', ['part' => $part]), $html);
         }
         $this->assertSame(1, substr_count($html, 'class="opcrf-part-action opcrf-parts-menu-trigger"'));
-        $this->assertStringContainsString('Access Parts 2–4', $html);
+        $this->assertStringContainsString('Access Full OPCRF', $html);
         $this->assertSame(2, substr_count($html, 'class="opcrf-part-card opcrf-part-card--'));
     }
 
