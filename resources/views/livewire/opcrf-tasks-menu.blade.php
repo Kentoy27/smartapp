@@ -78,6 +78,18 @@
                         <p class="opcrf-taskbar-empty">Open this revision to review the Superadmin's instructions.</p>
                     @endforelse
 
+                    @if (count($group['tasks']) > $group['completed'])
+                        <button
+                            type="button"
+                            class="opcrf-taskbar-finish"
+                            wire:click="completeTasks({{ $submission->id }})"
+                            wire:loading.attr="disabled"
+                            wire:target="completeTasks"
+                        >
+                            Mark all as finished
+                        </button>
+                    @endif
+
                     <a
                         class="opcrf-taskbar-revise"
                         href="{{ route('opcrf.index', ['revision' => $submission->id]) }}"

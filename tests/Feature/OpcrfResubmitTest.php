@@ -200,6 +200,32 @@ class OpcrfResubmitTest extends TestCase
         ], $submission->fresh()->reviewer_task_completion);
     }
 
+    public function test_school_head_can_mark_all_topbar_tasks_finished_at_once(): void
+    {
+        $admin = $this->superadmin();
+        $staff = $this->staffUser();
+        $submission = $this->createSubmission($staff, [
+            'reviewer_id' => $admin->id,
+            'reviewer_remarks' => [
+                0 => [0 => 'Clarify the target measurement.', 2 => 'Update the supporting evidence.'],
+            ],
+        ]);
+        $submission->returnForRevision($admin, 'Correct the timeline.');
+
+        Livewire::actingAs($staff)
+            ->test(OpcrfTasksMenu::class)
+            ->assertSee('Mark all as finished')
+            ->call('completeTasks', $submission->id)
+            ->assertDontSee('Mark all as finished')
+            ->assertSee('Resubmission required')
+            ->assertSee('Revise &amp; Resubmit', false);
+
+        $this->assertSame([
+            'general' => true,
+            'objectives' => [0 => [0 => true, 2 => true]],
+        ], $submission->fresh()->reviewer_task_completion);
+    }
+
     public function test_returning_again_resets_revision_task_completion(): void
     {
         $admin = $this->superadmin();

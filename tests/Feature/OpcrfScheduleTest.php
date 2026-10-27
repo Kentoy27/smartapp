@@ -162,10 +162,11 @@ class OpcrfScheduleTest extends TestCase
         $html = $this->actingAs($staff)->get(route('opcrf.index'))->assertOk()->getContent();
 
         // All four Parts are LISTED — a locked Part is never hidden.
-        $this->assertStringContainsString('Part 1', $html);
+        $this->assertStringContainsString('OPCRF Commitment', $html);
         $this->assertStringContainsString('Parts 2–4', $html);
 
-        $this->assertStringContainsString('Part 1 is now open.', $html);
+        $this->assertStringContainsString('OPCRF Commitment is now open.', $html);
+        $this->assertStringContainsString('Access OPCRF Commitment', $html);
         // And the others say what is true, not nothing.
         $this->assertStringContainsString('Parts 2–4 locked', $html);
     }
@@ -180,7 +181,7 @@ class OpcrfScheduleTest extends TestCase
         $response = $this->actingAs($staff)->get(route('opcrf.part', ['part' => 1]));
 
         $response->assertRedirect(route('opcrf.index'));
-        $response->assertSessionHas('opcrfPartNotice.message', 'Part 1 is not yet available. Available starting June 22, 2026 8:00 AM.');
+        $response->assertSessionHas('opcrfPartNotice.message', 'OPCRF Commitment is not yet available. Available starting June 22, 2026 8:00 AM.');
 
         $this->assertFalse(OpcrfAccess::canAccess($staff, 1));
     }
@@ -234,7 +235,7 @@ class OpcrfScheduleTest extends TestCase
         $this->actingAs($staff)
             ->get(route('opcrf.part', ['part' => 1]))
             ->assertRedirect(route('opcrf.index'))
-            ->assertSessionHas('opcrfPartNotice.message', 'Part 1 is currently unavailable.');
+            ->assertSessionHas('opcrfPartNotice.message', 'OPCRF Commitment is currently unavailable.');
     }
 
     /* ==================================================================
@@ -349,7 +350,7 @@ class OpcrfScheduleTest extends TestCase
 
         $html = $this->actingAs($staff)->get(route('opcrf.index'))->assertOk()->getContent();
 
-        $this->assertStringContainsString('Part 1 is now open.', $html);
+        $this->assertStringContainsString('OPCRF Commitment is now open.', $html);
         $this->assertStringContainsString('Parts 2–4 locked', $html);
         $this->assertStringContainsString('Parts 2–4 share the end-of-year term.', $html);
         $this->assertSame(2, substr_count($html, 'class="opcrf-part-card opcrf-part-card--'));
@@ -915,7 +916,7 @@ class OpcrfScheduleTest extends TestCase
 
         // And it completes that Part on the grid.
         $html = $this->actingAs($staff)->get(route('opcrf.index'))->assertOk()->getContent();
-        $this->assertStringContainsString('Part 1 is complete', $html);
+        $this->assertStringContainsString('OPCRF Commitment is complete', $html);
     }
 
     public function test_a_returned_submission_does_not_count_as_a_completed_part(): void

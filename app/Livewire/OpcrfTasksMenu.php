@@ -111,6 +111,36 @@ class OpcrfTasksMenu extends Component
         unset($this->returnedTasks);
     }
 
+    public function completeTasks(int $submissionId): void
+    {
+        $submission = OpcrfSubmission::query()
+            ->where('user_id', Auth::id())
+            ->whereNull('archived_at')
+            ->where('status', OpcrfSubmission::STATUS_RETURNED)
+            ->with('latestReview')
+            ->findOrFail($submissionId);
+
+        $completion = $submission->reviewer_task_completion ?? [];
+
+        if (
+            $submission->latestReview?->action === OpcrfReview::ACTION_RETURN
+            && trim((string) $submission->latestReview?->remarks) !== ''
+        ) {
+            $completion['general'] = true;
+        }
+
+        foreach ($submission->reviewer_remarks ?? [] as $partIndex => $objectives) {
+            foreach ($objectives as $objectiveIndex => $remark) {
+                if (is_string($remark) && trim($remark) !== '') {
+                    $completion['objectives'][$partIndex][$objectiveIndex] = true;
+                }
+            }
+        }
+
+        $submission->forceFill(['reviewer_task_completion' => $completion])->save();
+        unset($this->returnedTasks);
+    }
+
     public function render()
     {
         return view('livewire.opcrf-tasks-menu');

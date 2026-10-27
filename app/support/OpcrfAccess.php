@@ -135,7 +135,7 @@ class OpcrfAccess
 
         return [
             'part' => $part,
-            'label' => 'Part '.$part,
+            'label' => self::partLabel($part),
             'year' => $year,
             'status' => $status,
             'open' => $open,
@@ -267,7 +267,7 @@ class OpcrfAccess
      */
     public static function messageFor(string $status, int $part, ?OpcrfSchedule $schedule): string
     {
-        $label = 'Part '.$part;
+        $label = self::partLabel($part);
 
         return match ($status) {
             OpcrfSchedule::STATUS_OPEN => $label.' is now open.',
@@ -279,6 +279,13 @@ class OpcrfAccess
             OpcrfSchedule::STATUS_DISABLED => $label.' is currently unavailable.',
             default => $label.' is currently unavailable.',
         };
+    }
+
+    private static function partLabel(int $part): string
+    {
+        return $part === OpcrfSchedule::PART_ONE
+            ? 'OPCRF Commitment'
+            : 'Part '.$part;
     }
 
     /**

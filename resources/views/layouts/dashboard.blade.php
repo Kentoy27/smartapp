@@ -6933,6 +6933,30 @@
             text-decoration: underline;
         }
 
+        .opcrf-taskbar-finish {
+            display: block;
+            width: 100%;
+            margin-top: 6px;
+            padding: 7px 10px;
+            border: 1px solid var(--border);
+            border-radius: 7px;
+            background: var(--bg-panel);
+            color: var(--text-strong);
+            font-size: 0.75rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .opcrf-taskbar-finish:hover {
+            border-color: var(--primary);
+            color: var(--primary-strong);
+        }
+
+        .opcrf-taskbar-finish:disabled {
+            cursor: wait;
+            opacity: 0.65;
+        }
+
         .opcrf-taskbar-revise {
             display: inline-flex;
             align-items: center;
