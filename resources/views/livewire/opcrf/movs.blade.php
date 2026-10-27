@@ -17,58 +17,6 @@
         ></div>
     @endif
 
-    {{-- ACTION REQUIRED: a returned submission sits at the top of the
-         table — the reviewer's remarks front and center, with the
-         Revise & Resubmit entry point. --}}
-    @php($returned = $this->submissions->firstWhere('status', \App\Models\OpcrfSubmission::STATUS_RETURNED))
-    @if ($returned !== null)
-        <div class="card opcrf-action-required" wire:key="action-required-{{ $returned->id }}">
-            <div class="opcrf-action-required-head">
-                <span class="opcrf-action-required-icon" aria-hidden="true">
-                    <x-icon name="undo-2" :size="16" />
-                </span>
-                <span class="opcrf-action-required-title">Action Required — Revision Needed</span>
-                <span class="badge badge--warn">{{ $returned->statusLabelFor(auth()->user()) }}</span>
-            </div>
-
-            <p class="opcrf-action-required-text">
-                <strong>Your OPCRF has been returned for revision.</strong>
-                Please review the Superadmin's remarks, make the necessary
-                corrections, and resubmit your OPCRF.
-            </p>
-
-            <div class="opcrf-action-required-remarks">
-                <div class="opcrf-action-required-remarks-label">
-                    Superadmin Remarks @if ($returned->latestReview?->reviewer)
-                        — {{ $returned->latestReview->reviewer->username }}@endif
-                </div>
-                <p class="opcrf-action-required-remarks-text">
-                    {{ $returned->latestReview?->remarks !== null && trim((string) $returned->latestReview?->remarks) !== ''
-                        ? $returned->latestReview->remarks
-                        : 'No remarks were provided — please review your submission and correct any missing or inconsistent details.' }}
-                </p>
-            </div>
-
-            <div class="opcrf-action-required-foot">
-                <span class="opcrf-review-owner">
-                    Returned {{ $returned->latestReview?->reviewed_at?->format('M j, Y g:i A') ?? '' }}
-                    @if ($returned->latestReview?->reviewer)
-                        by {{ $returned->latestReview->reviewer->username }}@endif
-                </span>
-                <button
-                    type="button"
-                    class="btn-primary"
-                    wire:click="openRevise({{ $returned->id }})"
-                    wire:loading.attr="disabled"
-                    wire:target="openRevise"
-                >
-                    <x-icon name="pen-line" :size="14" />
-                    <span>Revise &amp; Resubmit</span>
-                </button>
-            </div>
-        </div>
-    @endif
-
     {{-- SUBMISSIONS TABLE ----}}
     <div class="card">
         <div class="card-head">
@@ -137,6 +85,21 @@
                                     @endif
                                 </td>
                                 <td class="users-actions-col">
+                                    @if ($submission->hasFile())
+                                        <button
+                                            type="button"
+                                            class="users-action"
+                                            wire:click="openSubmission({{ $submission->id }})"
+                                            wire:loading.attr="disabled"
+                                            wire:target="openSubmission"
+                                            title="View this submitted OPCRF and Superadmin remarks"
+                                        >
+                                            <span class="users-action-inner">
+                                                <x-icon name="eye" :size="14" />
+                                                <span>View OPCRF</span>
+                                            </span>
+                                        </button>
+                                    @endif
                                     @if ($submission->status === \App\Models\OpcrfSubmission::STATUS_RETURNED)
                                         <button
                                             type="button"
@@ -220,6 +183,19 @@
                                 : 'No remarks were provided — please review your submission and correct any missing or inconsistent details.' }}
                         </p>
                     </div>
+
+                    @foreach ($this->resubmitSubmission->reviewer_remarks ?? [] as $partIndex => $objectives)
+                        @foreach ($objectives as $objectiveIndex => $remark)
+                            @if (is_string($remark) && trim($remark) !== '')
+                                <div class="opcrf-action-required-remarks opcrf-revise-remarks">
+                                    <div class="opcrf-action-required-remarks-label">
+                                        Part {{ (int) $partIndex + 1 }} — Objective {{ (int) $objectiveIndex + 1 }}
+                                    </div>
+                                    <p class="opcrf-action-required-remarks-text">{{ $remark }}</p>
+                                </div>
+                            @endif
+                        @endforeach
+                    @endforeach
 
                     <p class="opcrf-review-note">
                         Attach your corrected <strong>OPCRF .xlsx</strong> below
@@ -321,6 +297,21 @@
                                                 </span>
                                             </td>
                                             <td class="users-actions-col">
+                                                @if ($submission->hasFile())
+                                                    <button
+                                                        type="button"
+                                                        class="users-action"
+                                                        wire:click="openSubmission({{ $submission->id }})"
+                                                        wire:loading.attr="disabled"
+                                                        wire:target="openSubmission"
+                                                        title="View this submitted OPCRF and Superadmin remarks"
+                                                    >
+                                                        <span class="users-action-inner">
+                                                            <x-icon name="eye" :size="14" />
+                                                            <span>View OPCRF</span>
+                                                        </span>
+                                                    </button>
+                                                @endif
                                                 @if ($submission->isApproved() && $submission->hasFile())
                                                     <a
                                                         class="users-action"
@@ -393,6 +384,55 @@
                             <span wire:loading.remove wire:target="confirmArchive">Archive submission</span>
                             <span wire:loading wire:target="confirmArchive">Archiving…</span>
                         </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    @endif
+
+    @if ($this->viewingSubmission !== null)
+        <div
+            class="modal-backdrop is-open"
+            x-data
+            @keydown.escape.window="$wire.closeSubmission()"
+            @click.self="$wire.closeSubmission()"
+            role="presentation"
+        >
+            <div class="modal modal--opcrf-review modal--opcrf-sheet" role="dialog" aria-modal="true" aria-labelledby="myOpcrfTitle" @click.stop>
+                <div class="modal-head">
+                    <h2 id="myOpcrfTitle">Your submitted OPCRF</h2>
+                    <button type="button" class="modal-close" wire:click="closeSubmission" aria-label="Close" title="Close">×</button>
+                </div>
+
+                <p class="opcrf-review-note">
+                    {{ $this->viewingSubmission->partLabel() }}
+                    · {{ $this->viewingSubmission->review_period !== '' ? $this->viewingSubmission->review_period : '—' }}
+                    · {{ $this->viewingSubmission->statusLabelFor(auth()->user()) }}
+                </p>
+
+                <div class="modal-form opcrf-review-body">
+                    <div class="opcrf-review-summary opcrf-review-summary--sheet">
+                        <div class="opcrf-review-sheetblock">
+                            <div class="opcrf-review-card-head">
+                                <span>Submitted form and Superadmin remarks</span>
+                            </div>
+
+                            @if ($this->viewingSheet !== null)
+                                @include('livewire.opcrf.partials.opcrf-excelwin', [
+                                    'sheet' => $this->viewingSheet,
+                                    'rating' => (string) $this->viewingSubmission->self_rating,
+                                    'full' => false,
+                                    'rateeSignature' => $this->viewingSubmission->rateeSignature(),
+                                    'reviewSignatures' => $this->viewingSubmission->reviewerSignatures(),
+                                    'reviewerRemarks' => $this->viewingSubmission->reviewer_remarks ?? [],
+                                    'canEditObjectiveRemarks' => false,
+                                    'workbook' => $this->viewingWorkbook ?? ['tabs' => [], 'part_two' => ['sections' => [], 'total_rows' => [], 'signers' => [], 'scale' => ['title' => '', 'levels' => []]], 'part_three' => ['components' => [], 'agreement' => [], 'overall' => null, 'rating' => '', 'rating_table' => [], 'signatures' => []], 'part_four' => ['office_plan' => [], 'office_feedback' => '', 'development_plan' => [], 'development_feedback' => '', 'signers' => [], 'sections' => []], 'extra_sheets' => []],
+                                    'uid' => 'my-opcrf',
+                                ])
+                            @else
+                                <p class="card-text">The submitted workbook is unavailable or cannot be displayed.</p>
+                            @endif
+                        </div>
                     </div>
                 </div>
             </div>

@@ -22,8 +22,8 @@ use Livewire\WithPagination;
  *
  * Lists all OPCRF submissions (newest first) with the submitting staff
  * member, and opens a review modal per row: the submitted OPCR details
- * (the complete workbook, read in-app), and the attached MOVs as a
- * view-only record.
+ * (the complete workbook, read in-app), per-objective remarks, and the
+ * attached MOVs as a view-only record.
  *
  * The modal's write actions are the review-and-routing workflow: the
  * superadmin adds remarks and either marks the submission
@@ -58,6 +58,13 @@ class OpcrfReview extends Component
      * (compliance, forward, or return-for-revision).
      */
     public string $reviewRemarks = '';
+
+    /**
+     * Superadmin notes keyed by workbook part and numbered objective row.
+     *
+     * @var array<int, array<int, string>>
+     */
+    public array $objectiveRemarks = [];
 
     /**
      * Success toast after a review action (clearSuccess pattern).
@@ -206,8 +213,8 @@ class OpcrfReview extends Component
 
     /**
      * Open the review modal for a submission (row button). The modal shows
-     * the recorded summary, the MOVs, and the approval step — the full
-     * submitted workbook itself is reviewed by downloading it.
+     * the submitted workbook, the MOVs, per-objective remarks, and the
+     * approval step.
      */
     public function openReview(int $submissionId): void
     {
@@ -222,6 +229,8 @@ class OpcrfReview extends Component
 
         $this->reviewId = $submissionId;
         $this->reviewRemarks = '';
+        $submission = OpcrfSubmission::visibleTo(Auth::user())->findOrFail($submissionId);
+        $this->objectiveRemarks = $submission->reviewer_remarks ?? [];
         $this->resetValidation();
         $this->showReview = true;
 
@@ -233,6 +242,7 @@ class OpcrfReview extends Component
         $this->showReview = false;
         $this->reviewId = null;
         $this->reviewRemarks = '';
+        $this->objectiveRemarks = [];
         $this->resetValidation();
 
         unset($this->reviewSheet, $this->reviewSheetRating, $this->reviewWorkbook, $this->reviewHistory);
@@ -294,6 +304,10 @@ class OpcrfReview extends Component
         // visible, but read-only.
         abort_unless($submission->isAssignedTo(Auth::user()), 403);
 
+        $submission->forceFill([
+            'reviewer_remarks' => $this->validatedObjectiveRemarks(),
+        ])->save();
+
         $remarks = trim($this->reviewRemarks) !== '' ? trim($this->reviewRemarks) : null;
 
         // Route onward to the workflow's next superadmin. If there is no next
@@ -314,6 +328,7 @@ class OpcrfReview extends Component
         $this->showReview = false;
         $this->reviewId = null;
         $this->reviewRemarks = '';
+        $this->objectiveRemarks = [];
         $this->resetValidation();
 
         // Recomputed on the next render.
@@ -364,11 +379,16 @@ class OpcrfReview extends Component
             'reviewRemarks' => 'remarks',
         ]);
 
+        $submission->forceFill([
+            'reviewer_remarks' => $this->validatedObjectiveRemarks(),
+        ])->save();
+
         $submission->returnForRevision(Auth::user(), trim($this->reviewRemarks));
 
         $this->showReview = false;
         $this->reviewId = null;
         $this->reviewRemarks = '';
+        $this->objectiveRemarks = [];
         $this->resetValidation();
 
         unset($this->submissions, $this->reviewSubmission, $this->reviewMovs, $this->reviewSheet, $this->reviewSheetRating, $this->reviewWorkbook, $this->reviewHistory);
@@ -410,6 +430,41 @@ class OpcrfReview extends Component
             ->where('username', $configured)
             ->where('id', '!=', $submission->assigned_to ?? $submission->reviewer_id)
             ->first();
+    }
+
+    /**
+     * Validate comments against the objective rows in the archived workbook.
+     *
+     * @return array<int, array<int, string>>
+     */
+    private function validatedObjectiveRemarks(): array
+    {
+        $this->validate([
+            'objectiveRemarks' => ['array'],
+            'objectiveRemarks.*' => ['array'],
+            'objectiveRemarks.*.*' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $validRows = [];
+        foreach ($this->reviewSheet['parts'] ?? [] as $partIndex => $part) {
+            foreach ($part['rows'] as $rowIndex => $row) {
+                $validRows[$partIndex][$rowIndex] = true;
+            }
+        }
+
+        $remarks = [];
+        foreach ($this->objectiveRemarks as $partIndex => $rows) {
+            foreach ($rows as $rowIndex => $comment) {
+                abort_unless(isset($validRows[$partIndex][$rowIndex]), 422);
+
+                $comment = trim((string) $comment);
+                if ($comment !== '') {
+                    $remarks[$partIndex][$rowIndex] = $comment;
+                }
+            }
+        }
+
+        return $remarks;
     }
 
     public function clearSuccess(): void

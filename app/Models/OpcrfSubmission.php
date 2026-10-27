@@ -53,6 +53,8 @@ class OpcrfSubmission extends Model
         'accomplishments',
         'self_rating',
         'remarks',
+        'reviewer_remarks',
+        'reviewer_task_completion',
         'file_path',
         'file_original_name',
         'file_updated_at',
@@ -73,6 +75,8 @@ class OpcrfSubmission extends Model
         'approved_at' => 'datetime',
         'archived_at' => 'datetime',
         'self_rating' => 'float',
+        'reviewer_remarks' => 'array',
+        'reviewer_task_completion' => 'array',
     ];
 
     /**
@@ -576,12 +580,9 @@ class OpcrfSubmission extends Model
                 $fileSays !== '' ? $fileSays : 'blank',
                 $accountSays !== '' ? $accountSays : 'blank'
             ),
-            OpcrfTemplatePersonalizer::UNREADABLE
-                => 'No name could be read from the uploaded file’s header block.',
-            OpcrfTemplatePersonalizer::ACCOUNT_UNNAMED
-                => 'The account carried no name at upload time, so the file could not be matched.',
-            OpcrfTemplatePersonalizer::STAMP_MISMATCH
-                => 'This workbook was downloaded from another user’s account, so its name may not belong to this submission.',
+            OpcrfTemplatePersonalizer::UNREADABLE => 'No name could be read from the uploaded file’s header block.',
+            OpcrfTemplatePersonalizer::ACCOUNT_UNNAMED => 'The account carried no name at upload time, so the file could not be matched.',
+            OpcrfTemplatePersonalizer::STAMP_MISMATCH => 'This workbook was downloaded from another user’s account, so its name may not belong to this submission.',
             default => null,
         };
     }
@@ -923,6 +924,7 @@ class OpcrfSubmission extends Model
         $previousStatus = (string) $this->status;
 
         $this->status = self::STATUS_RETURNED;
+        $this->reviewer_task_completion = [];
         // Back with the staff member: nobody holds the review step while
         // they revise (resubmission reassigns it to the returning reviewer).
         $this->assigned_to = null;
@@ -967,9 +969,11 @@ class OpcrfSubmission extends Model
             $this->file_path = $newFilePath;
             $this->file_original_name = $newOriginalName;
             $this->file_updated_at = now();
+            $this->reviewer_remarks = null;
         }
 
         $this->status = self::STATUS_RESUBMITTED;
+        $this->reviewer_task_completion = [];
         // Route back to the superadmin who returned it — via the current
         // assignment; reviewer_id keeps pointing at the original reviewer.
         $this->assigned_to = $this->returningReviewer()?->id ?? ($this->assigned_to ?? $this->reviewer_id);
@@ -1007,6 +1011,7 @@ class OpcrfSubmission extends Model
 
         $this->archiveCurrentFileAsVersion();
         $this->forgetSignedCopy();
+        $this->reviewer_remarks = null;
         $this->fill($attributes);
         $this->file_path = $newFilePath;
         $this->file_original_name = $newOriginalName;

@@ -242,6 +242,37 @@ class OpcrfReviewTest extends TestCase
         }
     }
 
+    public function test_superadmin_can_save_remarks_for_numbered_objectives(): void
+    {
+        Storage::fake('local');
+
+        $admin = $this->superadmin();
+        $staff = $this->staffUser();
+        $submission = $this->createSubmission($staff);
+        $workbookPath = $this->buildThreePartOpcrf();
+        Storage::disk('local')->put(
+            'opcrf-submissions/'.$staff->id.'/remarks.xlsx',
+            file_get_contents($workbookPath)
+        );
+        $submission->update([
+            'file_path' => 'opcrf-submissions/'.$staff->id.'/remarks.xlsx',
+            'file_original_name' => 'OPCRF-TEMPLATE.xlsx',
+        ]);
+
+        Livewire::actingAs($admin)
+            ->test(OpcrfReview::class)
+            ->call('openReview', $submission->id)
+            ->assertSee('Superadmin Remarks')
+            ->assertSee('wire:model.defer="objectiveRemarks.0.0"', false)
+            ->set('objectiveRemarks.0.0', 'Clarify the target measurement.')
+            ->call('approveSubmission');
+
+        $this->assertSame(
+            [0 => [0 => 'Clarify the target measurement.']],
+            $submission->fresh()->reviewer_remarks
+        );
+    }
+
     public function test_the_review_shows_an_empty_field_as_empty_instead_of_inventing_one(): void
     {
         Storage::fake('local');
@@ -430,11 +461,8 @@ class OpcrfReviewTest extends TestCase
     }
 
     /**
-     * The reviewer reads the submission through the IDENTICAL partial the
-     * submitter saw on their own screen — the same Excel-window component,
-     * the same sheet partial, the same tab strip. Nothing can be approved in
-     * review that was not visible at submission, and the two views cannot
-     * quietly drift apart again.
+     * The reviewer and submitter share the same workbook rendering; only the
+     * reviewer sees the extra editable objective-remarks column.
      */
     public function test_the_review_renders_the_workbook_exactly_as_the_upload_review_did(): void
     {
@@ -481,11 +509,8 @@ class OpcrfReviewTest extends TestCase
         // presentation — is gone; the reviewer sees the sheet, not an essay.
         $this->assertStringNotContainsString('opcrf-doc', $reviewHtml);
 
-        // And the sheet body itself is identical between the two modals:
-        // everything inside the shared component, from the title banner
-        // down to the signer block. wire:key is dropped first — it exists
-        // only to namespace DOM ids per modal instance, and the two are
-        // deliberately suffixed differently.
+        // Both views use the same workbook renderer and share the submitted
+        // content, while only the review view has editable remarks.
         $sheetOf = function (string $html): string {
             $start = strpos($html, '<div class="opcrf-sheet">');
             $end = strpos($html, '<div class="opcrf-excelwin-tabs"');
@@ -494,8 +519,24 @@ class OpcrfReviewTest extends TestCase
             return preg_replace('/ wire:key="[^"]*"/', '', $sheet);
         };
 
-        $this->assertNotSame('', $sheetOf($reviewHtml), 'The review modal renders a sheet body.');
-        $this->assertSame($sheetOf($uploadHtml), $sheetOf($reviewHtml));
+        $reviewSheet = $sheetOf($reviewHtml);
+        $uploadSheet = $sheetOf($uploadHtml);
+        $this->assertNotSame('', $reviewSheet, 'The review modal renders a sheet body.');
+
+        foreach ([
+            'PART I-A',
+            'PART I-B',
+            'PART I-C',
+            'Objective 1: Improved learner outcomes',
+            'Raised MPS by 5 points',
+        ] as $content) {
+            $this->assertStringContainsString($content, $reviewSheet);
+            $this->assertStringContainsString($content, $uploadSheet);
+        }
+
+        $this->assertStringContainsString('Superadmin Remarks', $reviewSheet);
+        $this->assertStringContainsString('wire:model.defer="objectiveRemarks.0.0"', $reviewSheet);
+        $this->assertStringNotContainsString('Superadmin Remarks', $uploadSheet);
     }
 
     public function test_the_review_accepts_no_uploads_at_all(): void

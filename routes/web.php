@@ -73,7 +73,11 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/profile/signature', function () {
         $user = Auth::user();
-        abort_unless($user instanceof User && $user->hasSignature(), 404);
+        if (! ($user instanceof User)) {
+            abort(404);
+        }
+
+        abort_unless($user->hasSignature(), 404);
 
         // The account's own file, via the account: the headers (inline, no
         // shared caching) and the row-only path rule live in
@@ -523,7 +527,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/opcrf-submissions/{submission}/signature', function (OpcrfSubmission $submission) {
         $user = Auth::user();
 
-        if (!$user instanceof User) {
+        if (! ($user instanceof User)) {
             abort(404);
         }
 
@@ -534,7 +538,11 @@ Route::middleware('auth')->group(function () {
         abort_unless($submission->hasSignedFile(), 404);
 
         $ratee = $submission->user;
-        abort_unless($ratee instanceof User && $ratee->hasSignature(), 404);
+        if (! ($ratee instanceof User)) {
+            abort(404);
+        }
+
+        abort_unless($ratee->hasSignature(), 404);
 
         return $ratee->signatureImageResponse();
     })->name('opcrf.submission.signature')->where('submission', '[0-9]+');
@@ -544,7 +552,11 @@ Route::middleware('auth')->group(function () {
     Route::get('/opcrf-submissions/{submission}/review-signature/{review}', function (OpcrfSubmission $submission, \App\Models\OpcrfReview $review) {
         $viewer = Auth::user();
 
-        abort_unless($viewer instanceof User && $viewer->hasAdminAccess(), 404);
+        if (! ($viewer instanceof User)) {
+            abort(404);
+        }
+
+        abort_unless($viewer->hasAdminAccess(), 404);
         abort_unless($submission->canBeReviewedBy($viewer), 404);
         abort_unless((int) $review->opcrf_submission_id === (int) $submission->id, 404);
         abort_unless(in_array($review->action, [
@@ -554,7 +566,11 @@ Route::middleware('auth')->group(function () {
         abort_unless($submission->hasSignedFile(), 404);
 
         $reviewer = $review->reviewer;
-        abort_unless($reviewer instanceof User && $reviewer->hasSignature(), 404);
+        if (! ($reviewer instanceof User)) {
+            abort(404);
+        }
+
+        abort_unless($reviewer->hasSignature(), 404);
 
         return $reviewer->signatureImageResponse();
     })->name('opcrf.review.signature')->where(['submission' => '[0-9]+', 'review' => '[0-9]+']);
@@ -721,7 +737,10 @@ Route::middleware('auth')->group(function () {
         abort_unless($submission->canBeDownloadedBy($user), 404);
         abort_unless($submission->hasFile(), 404);
 
-        return Storage::disk('local')->download(
+        /** @var FilesystemAdapter $disk */
+        $disk = Storage::disk('local');
+
+        return $disk->download(
             $submission->file_path,
             $submission->fileDownloadName()
         );

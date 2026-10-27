@@ -136,7 +136,10 @@
                     reported results, the competency ratings, the summary of
                     ratings and both improvement plans. A field the staff
                     member left empty says so instead of being filled in.
-                    Add remarks, then mark it compliant (the submission then
+                    Enter feedback in the Superadmin Remarks column beside
+                    each numbered objective; the School Head can view those
+                    notes with the submitted OPCRF. Add any decision remarks,
+                    then mark it compliant (the submission then
                     routes onward to the next superadmin automatically) or
                     return it for revision — the submitted file is never
                     replaced.
@@ -212,15 +215,12 @@
                                     // stamped workbook carries it.
                                     'rateeSignature' => $this->reviewSubmission()->rateeSignature(),
                                     'reviewSignatures' => $this->reviewSignatures,
+                                    'reviewerRemarks' => $this->objectiveRemarks,
+                                    'canEditObjectiveRemarks' => $this->reviewSubmission()->isAssignedTo(auth()->user()),
                                     'workbook' => $this->reviewWorkbook ?? ['tabs' => [], 'part_two' => ['sections' => [], 'total_rows' => [], 'signers' => [], 'scale' => ['title' => '', 'levels' => []]], 'part_three' => ['components' => [], 'agreement' => [], 'overall' => null, 'rating' => '', 'rating_table' => [], 'signatures' => []], 'part_four' => ['office_plan' => [], 'office_feedback' => '', 'development_plan' => [], 'development_feedback' => '', 'signers' => [], 'sections' => []], 'extra_sheets' => []],
                                     'uid' => 'rv',
                                 ])
 
-                                @if (trim((string) $this->reviewSubmission()->remarks) !== '')
-                                    <div class="opcrf-sheet-partnote">
-                                        <strong>Remarks:</strong> {{ $this->reviewSubmission()->remarks }}
-                                    </div>
-                                @endif
                             @else
                                 <div class="opcrf-sheet-headerblock opcrf-sheet-headerblock--split">
                                     <div class="opcrf-sheet-headercol">
@@ -270,11 +270,6 @@
                                     </div>
                                 </div>
 
-                                @if (trim((string) $this->reviewSubmission()->remarks) !== '')
-                                    <div class="opcrf-sheet-partnote">
-                                        <strong>Remarks:</strong> {{ $this->reviewSubmission()->remarks }}
-                                    </div>
-                                @endif
                             @endif
                         </div>
 

@@ -9,6 +9,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
+use Tests\Concerns\BuildsOpcrfWorkbooks;
 use Tests\TestCase;
 
 /**
@@ -19,6 +20,7 @@ use Tests\TestCase;
  */
 class OpcrfMovsTest extends TestCase
 {
+    use BuildsOpcrfWorkbooks;
     use RefreshDatabase;
 
     private function staffUser(): User
@@ -93,6 +95,43 @@ class OpcrfMovsTest extends TestCase
         Livewire::actingAs($user)
             ->test(OpcrfMovs::class)
             ->assertDontSee('Teacher I');
+    }
+
+    public function test_the_school_head_can_view_superadmin_remarks_in_their_submitted_workbook(): void
+    {
+        Storage::fake('local');
+
+        $user = $this->staffUser();
+        $submission = $this->createSubmission($user);
+        $workbookPath = $this->buildThreePartOpcrf();
+        Storage::disk('local')->put(
+            'opcrf-submissions/'.$user->id.'/reviewed.xlsx',
+            file_get_contents($workbookPath)
+        );
+        $submission->update([
+            'file_path' => 'opcrf-submissions/'.$user->id.'/reviewed.xlsx',
+            'file_original_name' => 'OPCRF-TEMPLATE.xlsx',
+            'reviewer_remarks' => [0 => [0 => 'Clarify the target measurement.']],
+        ]);
+
+        Livewire::actingAs($user)
+            ->test(OpcrfMovs::class)
+            ->assertSee('View OPCRF')
+            ->call('openSubmission', $submission->id)
+            ->assertSee('Your submitted OPCRF')
+            ->assertSee('Superadmin Remarks')
+            ->assertSee('Clarify the target measurement.');
+    }
+
+    public function test_a_school_head_cannot_open_another_users_submitted_workbook(): void
+    {
+        $user = $this->staffUser();
+        $otherSubmission = $this->createSubmission($this->otherStaffUser());
+
+        Livewire::actingAs($user)
+            ->test(OpcrfMovs::class)
+            ->call('openSubmission', $otherSubmission->id)
+            ->assertNotFound();
     }
 
     public function test_a_submission_can_be_archived_and_restored_from_the_archived_list(): void

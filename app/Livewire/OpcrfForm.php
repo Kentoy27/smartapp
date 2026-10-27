@@ -54,8 +54,6 @@ class OpcrfForm extends Component
 
     public string $self_rating = '';
 
-    public string $remarks = '';
-
     /**
      * Validation rules. Rating is a plain numeric string here because the
      * wire:model input yields strings; the DB column handles the decimals.
@@ -72,7 +70,6 @@ class OpcrfForm extends Component
             'objectives' => ['required', 'string'],
             'accomplishments' => ['required', 'string'],
             'self_rating' => ['required', 'numeric', 'min:1', 'max:5'],
-            'remarks' => ['nullable', 'string', 'max:2000'],
         ];
     }
 
@@ -91,7 +88,6 @@ class OpcrfForm extends Component
             'objectives' => 'objectives',
             'accomplishments' => 'accomplishments',
             'self_rating' => 'self rating',
-            'remarks' => 'remarks',
         ];
     }
 
@@ -124,7 +120,6 @@ class OpcrfForm extends Component
         $this->self_rating = $submission !== null && $submission->self_rating > 0
             ? (string) $submission->self_rating
             : '';
-        $this->remarks = $submission?->remarks ?? '';
     }
 
     /**
@@ -165,7 +160,6 @@ class OpcrfForm extends Component
             'objectives' => $validated['objectives'],
             'accomplishments' => $validated['accomplishments'],
             'self_rating' => (float) $validated['self_rating'],
-            'remarks' => $validated['remarks'] ?: null,
         ];
 
         $submission = DB::transaction(function () use ($attributes): OpcrfSubmission {
@@ -253,7 +247,7 @@ class OpcrfForm extends Component
     {
         $this->reset(
             'employee_name', 'position', 'review_period', 'division_office',
-            'objectives', 'accomplishments', 'self_rating', 'remarks',
+            'objectives', 'accomplishments', 'self_rating',
         );
         // Accounts created in Users no longer carry a real name (it was never used),
         // so fall back to the login — the OPCRF still needs an employee name.
