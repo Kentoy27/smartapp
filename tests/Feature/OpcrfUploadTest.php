@@ -193,7 +193,7 @@ class OpcrfUploadTest extends TestCase
                 ->get(route('opcrf.index'))
                 ->assertOk()
                 ->assertSee('Full OPCRF (Parts I–IV)')
-                ->assertSee('Part 1');
+                ->assertSee('OPCRF Commitment');
 
             Livewire::actingAs($this->reviewer)
                 ->test(OpcrfReview::class)

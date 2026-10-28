@@ -1120,9 +1120,11 @@ class OpcrfSubmission extends Model
      */
     public function partLabel(): string
     {
-        return $this->opcrf_part === self::FULL_WORKBOOK
-            ? 'Full OPCRF (Parts I–IV)'
-            : 'Part '.$this->opcrf_part;
+        return match ($this->opcrf_part) {
+            self::PART_ONE => 'OPCRF Commitment',
+            self::FULL_WORKBOOK => 'Full OPCRF (Parts I–IV)',
+            default => 'Part '.$this->opcrf_part,
+        };
     }
 
     /**
