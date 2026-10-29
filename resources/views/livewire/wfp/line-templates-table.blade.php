@@ -112,12 +112,12 @@
                             <td><span class="badge">{{ $record->lineTypeLabel() }}</span></td>
                             <td>{{ $record->activity_expenditure ?: '—' }}</td>
                             <td>
-                                @if ($record->resourceKind?->name !== '')
+                                @if ($record->resourceKind?->name)
                                     {{ $record->resourceKind->name }}
-                                    @if ($record->unit?->name !== '')
+                                    @if ($record->unit?->name)
                                         <span class="wfp-template__meta">/ {{ $record->unit->name }}</span>
                                     @endif
-                                @elseif ($record->unit?->name !== '')
+                                @elseif ($record->unit?->name)
                                     {{ $record->unit->name }}
                                 @else
                                     <span class="mem-list__muted">—</span>

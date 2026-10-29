@@ -414,6 +414,20 @@ class WfpActivityTemplateTest extends TestCase
             ->assertSee('5020301000');
     }
 
+    public function test_the_template_list_renders_a_template_without_a_resource_kind_or_unit(): void
+    {
+        $admin = $this->administrator();
+        $this->template([
+            'name' => 'Template with no resource details',
+            'resource_kind_id' => null,
+            'unit_id' => null,
+        ]);
+
+        Livewire::actingAs($admin)->test(WfpLineTemplatesTable::class)
+            ->assertOk()
+            ->assertSee('Template with no resource details');
+    }
+
     public function test_only_the_administrator_can_duplicate_a_template(): void
     {
         $template = $this->template();
