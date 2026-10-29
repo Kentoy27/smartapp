@@ -501,11 +501,11 @@ class WfpLineTemplatesTable extends Component
         $errors = [];
 
         $checks = [
-            'resourceKindId' => ['WfpResourceKind', 'Resource Kind'],
-            'unitId' => ['WfpUnit', 'Unit'],
-            'fundingSourceId' => ['WfpFundingSource', 'Funding Source'],
-            'orgClassificationId' => ['WfpOrgClassification', 'Organizational Classification'],
-            'accountClassificationId' => ['AccountClassification', 'Account'],
+            'resourceKindId' => [WfpResourceKind::class, 'Resource Kind'],
+            'unitId' => [WfpUnit::class, 'Unit'],
+            'fundingSourceId' => [WfpFundingSource::class, 'Funding Source'],
+            'orgClassificationId' => [WfpOrgClassification::class, 'Organizational Classification'],
+            'accountClassificationId' => [AccountClassification::class, 'Account'],
         ];
 
         foreach ($checks as $field => $info) {

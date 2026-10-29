@@ -404,6 +404,27 @@ class WfpActivityTemplateTest extends TestCase
         $this->assertDatabaseHas('wfp_line_templates', ['name' => 'Procure office supplies (Copy 2)']);
     }
 
+    public function test_the_administrator_can_save_a_template_that_references_lookup_records(): void
+    {
+        $admin = $this->administrator();
+        $kind = WfpResourceKind::create(['code' => 'SUP', 'name' => 'School Supplies']);
+        $unit = WfpUnit::create(['code' => 'REAM', 'name' => 'Ream']);
+
+        Livewire::actingAs($admin)->test(WfpLineTemplatesTable::class)
+            ->call('openCreate')
+            ->set('name', 'Procure supplies')
+            ->set('activityExpenditure', 'Procure supplies')
+            ->set('resourceKindId', $kind->id)
+            ->set('unitId', $unit->id)
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $template = WfpLineTemplate::query()->where('name', 'Procure supplies')->firstOrFail();
+
+        $this->assertSame($kind->id, $template->resource_kind_id);
+        $this->assertSame($unit->id, $template->unit_id);
+    }
+
     public function test_the_template_list_shows_the_linked_account_code(): void
     {
         $admin = $this->administrator();
