@@ -9,10 +9,13 @@ use App\Models\WfpOrgClassification;
 use App\Models\WfpResourceKind;
 use App\Models\WfpUnit;
 use App\Support\WfpSetupExporter;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 class WfpSetupExporterTest extends TestCase
 {
+    use RefreshDatabase;
+
     private function administrator(): User
     {
         return User::factory()->create(['role' => 'administrator', 'is_superadmin' => false]);
@@ -93,7 +96,7 @@ class WfpSetupExporterTest extends TestCase
         $csv = WfpSetupExporter::templateCsv();
 
         $lines = explode("\n", trim($csv));
-        $this->assertSame('Template Name,Line Type,Description,Objective,Project/Activity/Expenditure,Resource Kind,Suggested Quantity,Unit,Suggested Unit Cost,Account Code,Funding Source,Org. Classification,Major Output,Performance Indicator,Activity MOVs,Tags,Active', $lines[0]);
+        $this->assertSame('Template Name,Line Type,Description,Objective,Project/Activity/Expenditure,Resource Kind,Suggested Quantity,Unit,Suggested Unit Cost,Account Code,Funding Source,Organizational Classification,Major Output,Performance Indicator,Activity MOVs,Tags,Active', $lines[0]);
         $this->assertStringContainsString('Procure office supplies', $lines[1]);
         $this->assertStringContainsString('operations', $lines[1]);
         $this->assertStringContainsString('250', $lines[1]);
@@ -118,8 +121,8 @@ class WfpSetupExporterTest extends TestCase
         $csv = WfpSetupExporter::templateTemplateCsv();
 
         $lines = explode("\n", trim($csv));
-        $this->assertSame('Template Name,Line Type,Description,Objective,Project/Activity/Expenditure,Resource Kind,Suggested Quantity,Unit,Suggested Unit Cost,Account Code,Funding Source,Org. Classification,Major Output,Performance Indicator,Activity MOVs,Tags,Active', $lines[0]);
-        $this->assertSame('Procure office supplies,operations,Delete this example row before filling your own.,Improved learner outcomes,Procure office supplies,MOOE,10,ream,250.00,5020301000,MOOE,School,Supplies procured and distributed,Number of reams procured,PO and RIS,supplies, mooe,Yes', $lines[1]);
+        $this->assertSame('Template Name,Line Type,Description,Objective,Project/Activity/Expenditure,Resource Kind,Suggested Quantity,Unit,Suggested Unit Cost,Account Code,Funding Source,Organizational Classification,Major Output,Performance Indicator,Activity MOVs,Tags,Active', $lines[0]);
+        $this->assertSame('Procure office supplies,operations,Delete this example row before filling your own.,Improved learner outcomes,Procure office supplies,MOOE,10,ream,250.00,5020301000,MOOE,School,Supplies procured and distributed,Number of reams procured,PO and RIS,"supplies, mooe",Yes', $lines[1]);
         $this->assertSame(2, count($lines));
     }
 

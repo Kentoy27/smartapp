@@ -123,7 +123,16 @@
                                     <span class="mem-list__muted">—</span>
                                 @endif
                             </td>
-                            <td>{{ $record->accountClassification?->account_title ?: '—' }}</td>
+                            <td>
+                                @if ($record->accountClassification !== null)
+                                    {{ $record->accountClassification->account_title }}
+                                    @if (trim((string) $record->accountClassification->uacs_object_code) !== '')
+                                        <div class="wfp-template__meta">{{ $record->accountClassification->uacs_object_code }}</div>
+                                    @endif
+                                @else
+                                    —
+                                @endif
+                            </td>
                             <td>{{ $record->fundingSource?->name ?: '—' }}</td>
                             <td>{{ $record->orgClassification?->name ?: '—' }}</td>
                             <td>
@@ -143,6 +152,16 @@
                                     >
                                         <x-icon name="pencil" :size="15" />
                                         <span>Edit</span>
+                                    </x-row-menu-item>
+
+                                    <x-row-menu-item
+                                        wire:click="duplicate({{ $record->id }})"
+                                        wire:loading.attr="disabled"
+                                        wire:target="duplicate"
+                                        title="Duplicate {{ $record->name }}"
+                                    >
+                                        <x-icon name="copy" :size="15" />
+                                        <span>Duplicate</span>
                                     </x-row-menu-item>
 
                                     @if ($record->is_active)

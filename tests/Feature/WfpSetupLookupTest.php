@@ -324,8 +324,12 @@ class WfpSetupLookupTest extends TestCase
         // Nothing is written until the import is confirmed.
         $this->assertSame(0, WfpFundingSource::count());
 
+        // The modal stays open and shows the report so the administrator can
+        // read (or download) the outcome before closing it.
         $component->call('commitImport')
-            ->assertSet('showImport', false)
+            ->assertSet('showImport', true)
+            ->assertSet('importCommitted', true)
+            ->assertSet('lastInserted', 2)
             ->assertSet('successMessage', 'Import complete — 2 inserted, 0 updated, 0 skipped, 0 failed.');
 
         $this->assertSame(2, WfpFundingSource::count());
@@ -406,7 +410,7 @@ class WfpSetupLookupTest extends TestCase
 
         $csv = implode("\n", [
             'Code,Name,Description,Active',
-            ',Bad Row,,Yes', // missing name → fails
+            ',,Bad Row,Yes', // missing name → fails
         ]);
 
         Livewire::actingAs($admin)->test('wfp-lookup-table', ['category' => 'funding-sources'])

@@ -129,6 +129,20 @@
                     @endforeach
                 </select>
             </label>
+
+            {{-- Bulk set: the same amounts one row at a time, for many schools
+                 at once. The single-row Save stays exactly as it is. --}}
+            <div class="ac-toolbar-actions">
+                <button
+                    type="button"
+                    class="ac-import-btn"
+                    wire:click="openBulk"
+                    title="Set or update allotments for many schools from a pasted list or a CSV file"
+                >
+                    <x-icon name="upload" :size="16" />
+                    <span>Bulk Set Allotments</span>
+                </button>
+            </div>
         </div>
 
         <div class="table-wrap">
@@ -298,6 +312,355 @@
             certified amount appears as the certifying officer on the School
             Head’s Per Line Item Expenditure report.
         </p>
+    </div>
+
+    {{-- BULK SET ALLOTMENTS: a pasted list or a CSV, validated row by row
+         before anything is written. The source is analyzed again server-side
+         when the officer confirms, so the preview's figures are never trusted;
+         the apply itself is one transaction. The modal has three screens —
+         input + preview, the confirmation, and the finished apply's report. --}}
+    <div
+        class="modal-backdrop {{ $showBulk ? 'is-open' : '' }}"
+        @if ($showBulk) @click="self && $wire.closeBulk()" @endif
+        role="presentation"
+    >
+        <div
+            class="modal modal--wide"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="allotmentBulkTitle"
+            @click.stop
+        >
+            <div class="modal-head">
+                <h2 id="allotmentBulkTitle">
+                    @if ($bulkResult !== null)
+                        Bulk Set Report — CY {{ $this->year }}
+                    @else
+                        Bulk Set Allotments — CY {{ $this->year }}
+                    @endif
+                </h2>
+                <button type="button" class="modal-close" wire:click="closeBulk" aria-label="Close" title="Close">×</button>
+            </div>
+
+            <div class="modal-form">
+                @if ($bulkResult !== null)
+                    {{-- THE FINISHED APPLY: what landed, what did not, and the
+                         row-level report for what did not. --}}
+                    <div class="ac-import-summary">
+                        @if ($bulkResult['created'] > 0)
+                            <span class="ac-import-pill ac-import-pill--ok">{{ $bulkResult['created'] }} set</span>
+                        @endif
+                        @if ($bulkResult['updated'] > 0)
+                            <span class="ac-import-pill ac-import-pill--ok">{{ $bulkResult['updated'] }} updated</span>
+                        @endif
+                        @if ($bulkResult['cleared'] > 0)
+                            <span class="ac-import-pill ac-import-pill--ok">{{ $bulkResult['cleared'] }} cleared</span>
+                        @endif
+                        @if ($bulkResult['unchanged'] > 0)
+                            <span class="ac-import-pill">{{ $bulkResult['unchanged'] }} unchanged</span>
+                        @endif
+                        @if ($bulkResult['cleared_certification'] > 0)
+                            <span class="ac-import-pill ac-import-pill--warn">{{ $bulkResult['cleared_certification'] }} certification(s) cleared</span>
+                        @endif
+                        @if (count($bulkResult['errors']) > 0)
+                            <span class="ac-import-pill ac-import-pill--bad">{{ count($bulkResult['errors']) }} not applied</span>
+                        @endif
+                    </div>
+
+                    <div class="table-wrap ac-import-preview">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Row</th>
+                                    <th scope="col">School ID</th>
+                                    <th scope="col">Reason</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (array_slice($bulkResult['errors'], 0, 200) as $error)
+                                    <tr wire:key="allotment-bulk-error-{{ $error['line'] }}">
+                                        <td>{{ $error['line'] }}</td>
+                                        <td>
+                                            <span class="cell-strong">
+                                                {{ $error['school_id'] !== '' ? $error['school_id'] : '—' }}
+                                            </span>
+                                        </td>
+                                        <td>{{ $error['error'] }}</td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+
+                    @if (count($bulkResult['errors']) > 200)
+                        <div class="field-hint">
+                            Showing the first 200 of {{ number_format(count($bulkResult['errors'])) }} rows —
+                            the download carries every one.
+                        </div>
+                    @endif
+
+                    <div class="modal-actions">
+                        <button
+                            type="button"
+                            class="ac-import-btn"
+                            wire:click="downloadBulkErrorReport"
+                            title="Download every row that could not be applied, with its reason"
+                        >
+                            <x-icon name="download" :size="16" />
+                            <span>Download error report</span>
+                        </button>
+                        <button type="button" class="btn-primary" wire:click="closeBulk">Done</button>
+                    </div>
+                @elseif ($bulkConfirming)
+                    {{-- THE CONFIRMATION: restates the counts the apply will
+                         write — read fresh from the source, not the browser. --}}
+                    <p class="delete-modal-description">
+                        You are about to set or clear allotments for
+                        <strong>{{ number_format($bulkApplyCount) }}</strong> school(s)
+                        in CY {{ $this->year }}.
+                        @if ($bulkApplyClearCertificationCount > 0)
+                            <strong>{{ number_format($bulkApplyClearCertificationCount) }}</strong>
+                            of them will lose the current certification and must
+                            be re-certified.
+                        @endif
+                        Continue?
+                    </p>
+
+                    <p class="allotment-footnote">
+                        The whole apply is one transaction — if anything fails,
+                        nothing is written. Rows that are unchanged, unchecked,
+                        superseded or invalid are left untouched.
+                    </p>
+
+                    <div class="modal-actions">
+                        <button
+                            type="button"
+                            class="btn-ghost"
+                            wire:click="cancelBulkConfirm"
+                            wire:loading.attr="disabled"
+                            wire:target="commitBulk"
+                        >Back</button>
+                        <button
+                            type="button"
+                            class="btn-primary"
+                            wire:click="commitBulk"
+                            wire:loading.attr="disabled"
+                            wire:target="commitBulk"
+                        >
+                            <span wire:loading.remove wire:target="commitBulk">Apply bulk changes</span>
+                            <span wire:loading wire:target="commitBulk">Applying…</span>
+                        </button>
+                    </div>
+                @else
+                    {{-- THE INPUT + PREVIEW: choose a source, validate it, read
+                         every row's outcome, uncheck what should not be
+                         applied, then confirm. --}}
+                    <div class="field">
+                        <label>Input</label>
+                        <div class="allotment-bulk-modes">
+                            <label class="role-option">
+                                <input type="radio" value="paste" wire:model.live="bulkMode" aria-label="Paste a list">
+                                <span class="role-option-body">
+                                    <strong>Paste list</strong>
+                                    <small>One “School ID, Amount” per line — quick edits from a spreadsheet.</small>
+                                </span>
+                            </label>
+
+                            <label class="role-option">
+                                <input type="radio" value="csv" wire:model.live="bulkMode" aria-label="Upload a CSV">
+                                <span class="role-option-body">
+                                    <strong>Upload CSV</strong>
+                                    <small>Columns: school_id, allotted_budget — for large batches.</small>
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+
+                    @if ($bulkMode === 'csv')
+                        <div class="field">
+                            <label for="allotmentBulkFile">CSV file</label>
+                            <input
+                                id="allotmentBulkFile"
+                                type="file"
+                                accept=".csv,text/csv,.txt"
+                                wire:model="bulkFile"
+                                @class(['error' => $errors->has('bulkFile')])
+                            >
+                            <div class="field-hint">
+                                A header row is optional; the amount may carry ₱, spaces or
+                                thousands separators. Up to
+                                {{ number_format(\App\Support\SchoolAllotmentImporter::MAX_ROWS) }} rows.
+                            </div>
+                            @error('bulkFile') <div class="error-text">{{ $message }}</div> @enderror
+                            <div wire:loading wire:target="bulkFile" class="ac-import-loading">Uploading…</div>
+                        </div>
+                    @else
+                        <div class="field">
+                            <label for="allotmentBulkText">School ID and amount</label>
+                            <textarea
+                                id="allotmentBulkText"
+                                rows="6"
+                                wire:model="bulkText"
+                                placeholder="School ID, Amount&#10;12345, 2000000.00&#10;117833, 1500000"
+                            ></textarea>
+                            <div class="field-hint">
+                                Comma, tab or semicolon separated; a header row is optional;
+                                ₱ and thousands separators are tolerated.
+                            </div>
+                        </div>
+                    @endif
+
+                    <div class="field">
+                        <label class="allotment-bulk-toggle">
+                            <input type="checkbox" wire:model.live="bulkBlankClears">
+                            <span>Treat a blank amount as “clear / not set”</span>
+                        </label>
+                        <div class="field-hint">
+                            Off: a row with no amount is refused, so a lost cell cannot
+                            silently wipe an allotment. On: a blank amount clears the school’s
+                            allotment for the year.
+                        </div>
+                    </div>
+
+                    @if ($bulkError)
+                        <div class="ac-import-error" role="alert">{{ $bulkError }}</div>
+                    @endif
+
+                    @if ($bulkRows !== [])
+                        <div class="ac-import-summary">
+                            <span class="ac-import-pill ac-import-pill--ok">{{ $bulkReadyCount }} ready</span>
+                            @if ($bulkClearCertificationCount > 0)
+                                <span class="ac-import-pill ac-import-pill--warn">{{ $bulkClearCertificationCount }} will lose certification</span>
+                            @endif
+                            @if ($bulkInvalidCount > 0)
+                                <span class="ac-import-pill ac-import-pill--bad">{{ $bulkInvalidCount }} with errors</span>
+                            @endif
+                            @if ($bulkSupersededCount > 0)
+                                <span class="ac-import-pill">{{ $bulkSupersededCount }} superseded</span>
+                            @endif
+                        </div>
+
+                        <div class="table-wrap ac-import-preview">
+                            <table class="data-table allotment-bulk-table">
+                                <thead>
+                                    <tr>
+                                        <th scope="col"><span class="sr-only">Apply</span></th>
+                                        <th scope="col">School ID</th>
+                                        <th scope="col">School</th>
+                                        <th scope="col" class="allotment-money">Current amount</th>
+                                        <th scope="col" class="allotment-money">New amount</th>
+                                        <th scope="col">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach ($bulkRows as $row)
+                                        <tr
+                                            wire:key="allotment-bulk-row-{{ $row['line'] }}"
+                                            @class(['ac-import-row--bad' => ! $row['valid'] && ! $row['superseded']])
+                                        >
+                                            <td>
+                                                <input
+                                                    type="checkbox"
+                                                    wire:model="bulkIncluded.{{ $row['line'] }}"
+                                                    @disabled(! $row['valid'] || $row['superseded'])
+                                                    aria-label="Apply row {{ $row['line'] }}"
+                                                >
+                                            </td>
+                                            <td>
+                                                <span class="cell-strong">{{ $row['school_id'] !== '' ? $row['school_id'] : '—' }}</span>
+                                            </td>
+                                            <td>{{ $row['school_name'] ?? '—' }}</td>
+                                            <td class="allotment-money">
+                                                @if ($row['previous_amount'] === null)
+                                                    <span class="allotment-muted">Not set</span>
+                                                @else
+                                                    {{ number_format($row['previous_amount'], 2) }}
+                                                @endif
+                                            </td>
+                                            <td class="allotment-money">
+                                                @if (! $row['valid'])
+                                                    <span class="allotment-muted">{{ $row['amount_raw'] !== '' ? $row['amount_raw'] : '—' }}</span>
+                                                @elseif ($row['action'] === 'clear')
+                                                    <span class="allotment-muted">Clear</span>
+                                                @else
+                                                    {{ number_format((float) $row['amount'], 2) }}
+                                                @endif
+                                            </td>
+                                            <td>
+                                                @if ($row['superseded'])
+                                                    <span class="badge badge-muted">
+                                                        Superseded by row {{ $row['superseded_line'] }}
+                                                    </span>
+                                                @elseif (! $row['valid'])
+                                                    <span class="badge badge-muted">{{ implode(' ', $row['errors']) }}</span>
+                                                @elseif ($row['action'] === 'create')
+                                                    <span class="badge">New allotment</span>
+                                                @elseif ($row['action'] === 'update')
+                                                    <span class="badge">Will update</span>
+                                                    @if ($row['clears_certification'])
+                                                        <span class="cell-sub">Clears its certification</span>
+                                                    @endif
+                                                @elseif ($row['action'] === 'clear')
+                                                    <span class="badge">Will clear</span>
+                                                    @if ($row['clears_certification'])
+                                                        <span class="cell-sub">Clears its certification</span>
+                                                    @endif
+                                                @else
+                                                    <span class="badge badge-muted">No change</span>
+                                                @endif
+
+                                                @foreach ($row['warnings'] as $warning)
+                                                    <span class="cell-sub">{{ $warning }}</span>
+                                                @endforeach
+                                            </td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+
+                        @if ($bulkTotalRows > count($bulkRows))
+                            <div class="field-hint">
+                                Showing the first {{ count($bulkRows) }} of
+                                {{ number_format($bulkTotalRows) }} rows. Rows beyond the
+                                preview cannot be unchecked here and are applied as validated.
+                            </div>
+                        @endif
+                    @endif
+
+                    <div class="modal-actions">
+                        <button type="button" class="btn-ghost" wire:click="closeBulk">Cancel</button>
+
+                        @if ($bulkRows !== [])
+                            <button
+                                type="button"
+                                class="btn-primary"
+                                wire:click="confirmBulk"
+                                wire:loading.attr="disabled"
+                                wire:target="confirmBulk"
+                                @disabled($bulkSelectedCount === 0)
+                            >
+                                <span wire:loading.remove wire:target="confirmBulk">
+                                    Apply {{ number_format($bulkSelectedCount) }} row(s)…
+                                </span>
+                                <span wire:loading wire:target="confirmBulk">Checking…</span>
+                            </button>
+                        @else
+                            <button
+                                type="button"
+                                class="btn-primary"
+                                wire:click="reviewBulk"
+                                wire:loading.attr="disabled"
+                                wire:target="reviewBulk"
+                            >
+                                <span wire:loading.remove wire:target="reviewBulk">Validate &amp; preview</span>
+                                <span wire:loading wire:target="reviewBulk">Validating…</span>
+                            </button>
+                        @endif
+                    </div>
+                @endif
+            </div>
+        </div>
     </div>
 
     {{-- CERTIFY CONFIRMATION: the certification is a statement the Budget

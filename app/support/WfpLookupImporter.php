@@ -221,12 +221,22 @@ class WfpLookupImporter
                     }
 
                     $before = $match->auditSnapshot();
+                    $wasActive = (bool) $match->is_active;
 
                     $match->fill($attributes);
                     $match->updated_by = $user?->id;
                     $match->save();
 
-                    $match->recordLookupAudit($model::AUDIT_UPDATE, $user, $before, $match->auditSnapshot());
+                    // An import that retires or revives a record is recorded
+                    // as such, not as a plain edit — the same vocabulary the
+                    // lookup screens use.
+                    $auditAction = match (true) {
+                        $wasActive && ! $match->is_active => $model::AUDIT_DEACTIVATE,
+                        ! $wasActive && $match->is_active => $model::AUDIT_ACTIVATE,
+                        default => $model::AUDIT_UPDATE,
+                    };
+
+                    $match->recordLookupAudit($auditAction, $user, $before, $match->auditSnapshot());
                     $updated++;
 
                     continue;

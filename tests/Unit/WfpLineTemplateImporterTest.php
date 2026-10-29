@@ -12,10 +12,13 @@ use App\Models\WfpOrgClassification;
 use App\Models\WfpResourceKind;
 use App\Models\WfpUnit;
 use App\Support\WfpLineTemplateImporter;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 class WfpLineTemplateImporterTest extends TestCase
 {
+    use RefreshDatabase;
+
     private function administrator(): User
     {
         return User::factory()->create(['role' => 'administrator', 'is_superadmin' => false]);
@@ -49,7 +52,7 @@ class WfpLineTemplateImporterTest extends TestCase
 
         $csv = implode("\n", [
             'Template Name,Line Type,Description,Objective,Project/Activity/Expenditure,Resource Kind,Unit,Suggested Quantity,Suggested Unit Cost,Account Code,Funding Source,Org. Classification,Major Output,Performance Indicator,Activity MOVs,Tags,Active',
-            'Procure office supplies,operations,Delete this example row before filling your own.,Improved learner outcomes,Procure office supplies,MOOE,ream,10,250.00,5020301000,MOOE,School,Supplies procured,Number of reams procured,PO and RIS,supplies,mooe,Yes',
+            'Procure office supplies,operations,Delete this example row before filling your own.,Improved learner outcomes,Procure office supplies,MOOE,ream,10,250.00,5020301000,MOOE,School,Supplies procured,Number of reams procured,PO and RIS,"supplies,mooe",Yes',
         ]);
 
         $analysis = WfpLineTemplateImporter::analyzeCsv(
@@ -72,7 +75,7 @@ class WfpLineTemplateImporterTest extends TestCase
 
         $csv = implode("\n", [
             'Template Name,Line Type,Description,Objective,Project/Activity/Expenditure,Resource Kind,Unit,Suggested Quantity,Suggested Unit Cost,Account Code,Funding Source,Org. Classification,Major Output,Performance Indicator,Activity MOVs,Tags,Active',
-            'Procure office supplies,operations,,Improved learner outcomes,Procure office supplies,MOOE,ream,10,250.00,5020301000,MOOE,School,Supplies procured and distributed,Number of reams procured,PO and RIS,supplies,mooe,Yes',
+            'Procure office supplies,operations,,Improved learner outcomes,Procure office supplies,MOOE,ream,10,250.00,5020301000,MOOE,School,Supplies procured and distributed,Number of reams procured,PO and RIS,"supplies,mooe",Yes',
         ]);
 
         $analysis = WfpLineTemplateImporter::analyzeCsv(
@@ -102,7 +105,8 @@ class WfpLineTemplateImporterTest extends TestCase
         $this->assertNotNull($template->accountClassification);
         $this->assertSame('5020301000', $template->accountClassification->uacs_object_code);
         $this->assertNotNull($template->fundingSource);
-        $this->assertSame('MOOE', $template->fundingSource->name);
+        // Matched by its stable code "MOOE"; the record's own name is kept.
+        $this->assertSame('Maintenance and Other Operating Expenses', $template->fundingSource->name);
         $this->assertNotNull($template->orgClassification);
         $this->assertSame('School', $template->orgClassification->name);
         $this->assertSame('Supplies procured and distributed', $template->major_output);
@@ -128,7 +132,7 @@ class WfpLineTemplateImporterTest extends TestCase
         $csv = implode("\n", [
             'Template Name,Line Type,Description,Objective,Project/Activity/Expenditure,Resource Kind,Unit,Suggested Quantity,Suggested Unit Cost,Account Code,Funding Source,Org. Classification,Major Output,Performance Indicator,Activity MOVs,Tags,Active',
             'Valid Template,operations,,Objective,Activity,MOOE,ream,5,100.00,5020301000,MOOE,School,Output,Indicator,MOVs,tags,Yes',
-            ',operations,,,Activity,,,,,,,,,,,,', // missing name
+            ',operations,,,Activity,,,,,,,,,,,', // missing name
         ]);
 
         $analysis = WfpLineTemplateImporter::analyzeCsv(
@@ -158,15 +162,17 @@ class WfpLineTemplateImporterTest extends TestCase
             'is_active' => true,
         ]);
 
-        // Same name and line type → duplicate.
+        // Same name and line type → the existing row's identity: skipped, not
+        // a second template.
         $csv = implode("\n", [
             'Template Name,Line Type,Description,Objective,Project/Activity/Expenditure,Resource Kind,Unit,Suggested Quantity,Suggested Unit Cost,Account Code,Funding Source,Org. Classification,Major Output,Performance Indicator,Activity MOVs,Tags,Active',
             'Procure office supplies,operations,,,New activity,,,,,,,,,,,',
         ]);
         $analysis = WfpLineTemplateImporter::analyzeCsv($this->tempCsv($csv), WfpImportLog::MODE_INSERT);
         $this->assertSame(0, $analysis['validCount']);
-        $this->assertSame(1, $analysis['invalidCount']);
-        $this->assertStringContainsString('Duplicate', implode(' ', $analysis['rows'][1]['errors']));
+        $this->assertSame(0, $analysis['invalidCount']);
+        $this->assertSame(1, $analysis['skippedCount']);
+        $this->assertStringContainsString('already exists', implode(' ', $analysis['rows'][0]['warnings'] ?? []));
 
         // Same name, different line type → NOT a duplicate.
         $csv = implode("\n", [
@@ -214,7 +220,7 @@ class WfpLineTemplateImporterTest extends TestCase
 
         $csv = implode("\n", [
             'Template Name,Line Type,Description,Objective,Project/Activity/Expenditure,Resource Kind,Unit,Suggested Quantity,Suggested Unit Cost,Account Code,Funding Source,Org. Classification,Major Output,Performance Indicator,Activity MOVs,Tags,Active',
-            'Old Name,operations,,New objective,New activity,MOOE,ream,5,100.00,5020301000,MOOE,School,New output,New indicator,New MOVs,new,tags,Yes',
+            'Old Name,operations,,New objective,New activity,MOOE,ream,5,100.00,5020301000,MOOE,School,New output,New indicator,New MOVs,"new,tags",Yes',
         ]);
         $analysis = WfpLineTemplateImporter::analyzeCsv($this->tempCsv($csv), WfpImportLog::MODE_UPDATE);
         $report = WfpLineTemplateImporter::commit($analysis, WfpImportLog::MODE_UPDATE, $admin);
@@ -315,7 +321,8 @@ class WfpLineTemplateImporterTest extends TestCase
         $analysis = WfpLineTemplateImporter::analyzeCsv($this->tempCsv($csv), WfpImportLog::MODE_INSERT);
         $this->assertSame(1, $analysis['validCount']);
         $report = WfpLineTemplateImporter::commit($analysis, WfpImportLog::MODE_INSERT, $admin);
-        $this->assertSame(2, $report['inserted']);
+        $this->assertSame(1, $report['inserted']);
+        $this->assertSame(2, WfpLineTemplate::count());
         $this->assertSame('Travel Expenses', WfpLineTemplate::find(2)->accountClassification->account_title);
     }
 

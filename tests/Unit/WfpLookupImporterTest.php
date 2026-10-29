@@ -10,10 +10,13 @@ use App\Models\WfpOrgClassification;
 use App\Models\WfpResourceKind;
 use App\Models\WfpUnit;
 use App\Support\WfpLookupImporter;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 class WfpLookupImporterTest extends TestCase
 {
+    use RefreshDatabase;
+
     private function administrator(): User
     {
         return User::factory()->create(['role' => 'administrator', 'is_superadmin' => false]);
@@ -101,7 +104,7 @@ class WfpLookupImporterTest extends TestCase
         $csv = implode("\n", [
             'Code,Name,Description,Active',
             'GF,General Fund,General fund,Yes',
-            ',Missing Name,,Yes', // missing required name
+            ',,Missing Name,Yes', // a description but no name → required field missing
         ]);
 
         $analysis = WfpLookupImporter::analyzeCsv(
@@ -127,19 +130,23 @@ class WfpLookupImporterTest extends TestCase
         $admin = $this->administrator();
         WfpFundingSource::create(['code' => 'MOOE', 'name' => 'Maintenance and Other Operating Expenses', 'is_active' => true]);
 
-        // Same name, different code → duplicate by name.
+        // A row that carries a code is matched by that code alone: the known
+        // name under a different code is a new record (the importer never
+        // guesses by name when a stable code is present).
         $csv = implode("\n", ['Code,Name,Description,Active', 'OTHER,Maintenance and Other Operating Expenses,Duplicate name,Yes']);
         $analysis = WfpLookupImporter::analyzeCsv($this->tempCsv($csv), 'funding-sources', WfpImportLog::MODE_INSERT);
-        $this->assertSame(0, $analysis['validCount']);
-        $this->assertSame(1, $analysis['invalidCount']);
-        $this->assertStringContainsString('Duplicate', implode(' ', $analysis['rows'][1]['errors']));
+        $this->assertSame(1, $analysis['validCount']);
+        $this->assertSame(1, $analysis['insertCount']);
+        $this->assertSame(0, $analysis['skippedCount']);
+        $this->assertSame(0, $analysis['invalidCount']);
 
-        // Same code, different name → duplicate by code.
+        // Same code, different name → the same record; insert mode skips it.
         $csv = implode("\n", ['Code,Name,Description,Active', 'MOOE,Something Else,Duplicate code,Yes']);
         $analysis = WfpLookupImporter::analyzeCsv($this->tempCsv($csv), 'funding-sources', WfpImportLog::MODE_INSERT);
         $this->assertSame(0, $analysis['validCount']);
-        $this->assertSame(1, $analysis['invalidCount']);
-        $this->assertStringContainsString('Duplicate', implode(' ', $analysis['rows'][1]['errors']));
+        $this->assertSame(0, $analysis['invalidCount']);
+        $this->assertSame(1, $analysis['skippedCount']);
+        $this->assertStringContainsString('Already exists', implode(' ', $analysis['rows'][0]['warnings'] ?? []));
 
         $this->assertSame(1, WfpFundingSource::count());
     }

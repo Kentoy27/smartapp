@@ -6,9 +6,13 @@ use App\Models\AccountClassification;
 use App\Models\MonthlyExpenditureItem;
 use App\Models\MonthlyExpenditureMatrix;
 use App\Models\User;
+use App\Models\WfpFundingSource;
 use App\Models\WfpLineTemplate;
+use App\Models\WfpOrgClassification;
 use App\Models\WfpPlan;
 use App\Models\WfpReportCheck;
+use App\Models\WfpResourceKind;
+use App\Models\WfpUnit;
 use App\Support\MemImporter;
 use App\Support\WfpAllotment;
 use App\Support\WfpGenerator;
@@ -81,9 +85,15 @@ class MemEditor extends Component
     /** Search term for the template picker (name / activity / account). */
     public string $templateSearch = '';
 
-    /** The template last applied to the line being encoded, or null. */
+    /**
+     * The template last applied to the line being encoded, or null. Locked:
+     * only chooseTemplate()/applyTemplate() may set it, so a crafted request
+     * cannot claim a line was filled from a template it never applied.
+     */
+    #[Locked]
     public ?int $appliedTemplateId = null;
 
+    #[Locked]
     public string $appliedTemplateName = '';
 
     /**
@@ -93,10 +103,20 @@ class MemEditor extends Component
      *
      * @var array<string, mixed>
      */
+    #[Locked]
     public array $appliedTemplateSnapshot = [];
 
     /** A template chosen while the user has edits: awaits replace or keep. */
     public ?int $pendingTemplateId = null;
+
+    /**
+     * Per-request memo for the master records normalisation looks up, so
+     * saving a matrix with many lines does not re-query the same account or
+     * lookup row once per line.
+     *
+     * @var array<string, mixed>
+     */
+    private array $normalisationCache = [];
 
     /* CSV import. */
     public $importFile;
@@ -178,6 +198,10 @@ class MemEditor extends Component
             'major_output' => (string) ($item->major_output ?? ''),
             'performance_indicator' => (string) ($item->performance_indicator ?? ''),
             'wfp_line_template_id' => $item->wfp_line_template_id,
+            'resource_kind_id' => $item->resource_kind_id,
+            'unit_id' => $item->unit_id,
+            'funding_source_id' => $item->funding_source_id,
+            'org_classification_id' => $item->org_classification_id,
         ];
     }
 
@@ -202,6 +226,10 @@ class MemEditor extends Component
             'major_output' => '',
             'performance_indicator' => '',
             'wfp_line_template_id' => null,
+            'resource_kind_id' => null,
+            'unit_id' => null,
+            'funding_source_id' => null,
+            'org_classification_id' => null,
         ];
     }
 
@@ -228,6 +256,11 @@ class MemEditor extends Component
             'items.*.activity_movs' => ['nullable', 'string', 'max:2000'],
             'items.*.major_output' => ['nullable', 'string', 'max:2000'],
             'items.*.performance_indicator' => ['nullable', 'string', 'max:2000'],
+            'items.*.wfp_line_template_id' => ['nullable', 'integer'],
+            'items.*.resource_kind_id' => ['nullable', 'integer'],
+            'items.*.unit_id' => ['nullable', 'integer'],
+            'items.*.funding_source_id' => ['nullable', 'integer'],
+            'items.*.org_classification_id' => ['nullable', 'integer'],
         ];
     }
 
@@ -247,6 +280,9 @@ class MemEditor extends Component
             'items.*.major_output' => 'major output',
             'items.*.performance_indicator' => 'performance indicator',
             'items.*.activity_movs' => 'activity MOVs',
+            'items.*.resource_kind' => 'resource kind',
+            'items.*.funding_source' => 'funding source',
+            'items.*.organizational_classification' => 'organizational classification',
         ];
     }
 
@@ -313,8 +349,10 @@ class MemEditor extends Component
 
             // If this line was encoded from a template, remember it so the
             // form can show "filled from template" and guard edits on switch.
+            // A retired template is loaded too: it is provenance for this
+            // saved line, and editing the line must not quietly erase it.
             if (! empty($row['wfp_line_template_id'] ?? null)) {
-                $template = WfpLineTemplate::query()->active()->find((int) $row['wfp_line_template_id']);
+                $template = WfpLineTemplate::find((int) $row['wfp_line_template_id']);
 
                 if ($template !== null) {
                     $this->appliedTemplateId = $template->id;
@@ -325,6 +363,8 @@ class MemEditor extends Component
                         'account_classification_id', 'funding_source',
                         'organizational_classification', 'major_output',
                         'performance_indicator', 'activity_movs',
+                        'resource_kind_id', 'unit_id', 'funding_source_id',
+                        'org_classification_id',
                     ]));
                 }
             } else {
@@ -373,6 +413,17 @@ class MemEditor extends Component
         if (trim((string) ($this->lineForm['account_title'] ?? '')) === '' && trim($this->accountSearch) !== '') {
             $this->lineForm['account_title'] = $this->accountSearch;
         }
+
+        $existing = ! empty($this->lineForm['id'])
+            ? MonthlyExpenditureItem::query()
+                ->where('matrix_id', $this->matrixId)
+                ->find((int) $this->lineForm['id'])
+            : null;
+
+        // Account title/code and lookup links are derived on the server, never
+        // trusted from the browser: a crafted request cannot pair one account
+        // title with another account's code.
+        $this->lineForm = $this->normaliseRow($this->lineForm, $existing);
 
         $this->validate($this->lineRules(), $this->lineAttributes());
 
@@ -658,6 +709,20 @@ class MemEditor extends Component
         // Drop rows the SH added but never filled, then validate what remains.
         $this->items = array_values(array_filter($this->items, fn (array $row): bool => ! self::isBlank($row)));
 
+        // Re-derive every linked account and lookup from its id (or match a
+        // typed name to an active lookup) before validating. The stored line
+        // therefore always carries the master record's wording, even if the
+        // request body was edited.
+        foreach ($this->items as $index => $row) {
+            $existing = ! empty($row['id'])
+                ? MonthlyExpenditureItem::query()
+                    ->where('matrix_id', $matrix->id)
+                    ->find((int) $row['id'])
+                : null;
+
+            $this->items[$index] = $this->normaliseRow($row, $existing);
+        }
+
         $this->validate();
 
         // Optimistic lock: only save if nobody else has written this matrix.
@@ -711,6 +776,10 @@ class MemEditor extends Component
                     'major_output' => self::nullIfBlank($row['major_output'] ?? null),
                     'performance_indicator' => self::nullIfBlank($row['performance_indicator'] ?? null),
                     'wfp_line_template_id' => ! empty($row['wfp_line_template_id']) ? (int) $row['wfp_line_template_id'] : null,
+                    'resource_kind_id' => ! empty($row['resource_kind_id']) ? (int) $row['resource_kind_id'] : null,
+                    'unit_id' => ! empty($row['unit_id']) ? (int) $row['unit_id'] : null,
+                    'funding_source_id' => ! empty($row['funding_source_id']) ? (int) $row['funding_source_id'] : null,
+                    'org_classification_id' => ! empty($row['org_classification_id']) ? (int) $row['org_classification_id'] : null,
                 ]);
                 $item->syncTotal();
                 $item->save();
@@ -758,6 +827,209 @@ class MemEditor extends Component
         $value = trim((string) $value);
 
         return $value === '' ? null : $value;
+    }
+
+    /**
+     * Re-derive a row's linked master values on the server:
+     *
+     * - a chosen account classification owns both the title and the code;
+     * - a chosen lookup id owns the matching text;
+     * - a typed lookup name is matched to one active lookup so it gains a link;
+     * - a retired record may stay attached to the line it was already on, but
+     *   can never be newly attached (or claimed from a crafted request).
+     *
+     * @param  array<string, mixed>  $row
+     * @return array<string, mixed>
+     */
+    private function normaliseRow(array $row, ?MonthlyExpenditureItem $existing): array
+    {
+        $row = $this->normaliseAccount($row, $existing);
+        $row = $this->normaliseLookup(
+            $row,
+            'resource_kind',
+            'resource_kind_id',
+            WfpResourceKind::class,
+            $existing?->resource_kind_id,
+        );
+        $row = $this->normaliseLookup(
+            $row,
+            'unit',
+            'unit_id',
+            WfpUnit::class,
+            $existing?->unit_id,
+        );
+        $row = $this->normaliseLookup(
+            $row,
+            'funding_source',
+            'funding_source_id',
+            WfpFundingSource::class,
+            $existing?->funding_source_id,
+        );
+        $row = $this->normaliseLookup(
+            $row,
+            'organizational_classification',
+            'org_classification_id',
+            WfpOrgClassification::class,
+            $existing?->org_classification_id,
+        );
+
+        // The template is provenance only. It may be retained on the line it
+        // already belongs to after retirement, but a new line can never be
+        // stamped with an inactive (or invented) template id.
+        $templateId = ! empty($row['wfp_line_template_id']) ? (int) $row['wfp_line_template_id'] : null;
+
+        if ($templateId !== null) {
+            $template = WfpLineTemplate::find($templateId);
+            $alreadyOnLine = $existing !== null
+                && (int) $existing->wfp_line_template_id === $templateId;
+
+            if ($template === null || (! $template->is_active && ! $alreadyOnLine)) {
+                $templateId = null;
+            }
+        }
+
+        $row['wfp_line_template_id'] = $templateId;
+
+        return $row;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     * @return array<string, mixed>
+     */
+    private function normaliseAccount(array $row, ?MonthlyExpenditureItem $existing): array
+    {
+        $id = ! empty($row['account_classification_id']) ? (int) $row['account_classification_id'] : null;
+        $title = trim((string) ($row['account_title'] ?? ''));
+        $code = trim((string) ($row['account_code'] ?? ''));
+
+        if ($id !== null) {
+            $classification = $this->findAccount($id);
+
+            if ($classification === null) {
+                $id = null;
+            } elseif ($classification->is_active) {
+                // One authority for title and code: they cannot drift apart.
+                $title = (string) $classification->account_title;
+                $code = (string) $classification->uacs_object_code;
+            } elseif ((int) $existing?->account_classification_id !== $id) {
+                $id = null; // a retired account cannot be newly attached
+            }
+            // An unchanged retired link keeps the line's own saved wording.
+        }
+
+        if ($id === null && $title !== '') {
+            $classification = $this->findAccountByTitle($title);
+
+            if ($classification !== null) {
+                $id = (int) $classification->getKey();
+                $title = (string) $classification->account_title;
+                $code = (string) $classification->uacs_object_code;
+            }
+        }
+
+        $row['account_classification_id'] = $id;
+        $row['account_title'] = $title;
+        $row['account_code'] = $code;
+
+        return $row;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     * @param  class-string  $modelClass
+     * @return array<string, mixed>
+     */
+    private function normaliseLookup(
+        array $row,
+        string $nameField,
+        string $idField,
+        string $modelClass,
+        ?int $existingId,
+    ): array {
+        $id = ! empty($row[$idField]) ? (int) $row[$idField] : null;
+        $name = trim((string) ($row[$nameField] ?? ''));
+
+        if ($id !== null) {
+            $record = $this->findLookup($modelClass, $id);
+
+            if ($record === null) {
+                $id = null;
+            } elseif ($record->is_active) {
+                $name = (string) $record->name;
+            } elseif ($existingId !== $id) {
+                $id = null; // a retired lookup cannot be newly attached
+            }
+            // An unchanged retired link keeps the line's own saved wording.
+        }
+
+        if ($id === null && $name !== '') {
+            $record = $this->findLookupByName($modelClass, $name);
+
+            if ($record !== null) {
+                $id = (int) $record->getKey();
+                $name = (string) $record->name;
+            }
+        }
+
+        $row[$nameField] = $name;
+        $row[$idField] = $id;
+
+        return $row;
+    }
+
+    private function findAccount(int $id): ?AccountClassification
+    {
+        $key = 'account#'.$id;
+
+        if (! array_key_exists($key, $this->normalisationCache)) {
+            $this->normalisationCache[$key] = AccountClassification::find($id);
+        }
+
+        return $this->normalisationCache[$key];
+    }
+
+    private function findAccountByTitle(string $title): ?AccountClassification
+    {
+        $key = 'account-title@'.mb_strtolower($title);
+
+        if (! array_key_exists($key, $this->normalisationCache)) {
+            $this->normalisationCache[$key] = AccountClassification::query()
+                ->active()
+                ->whereRaw('LOWER(TRIM(account_title)) = ?', [mb_strtolower($title)])
+                ->orderBy('id')
+                ->first();
+        }
+
+        return $this->normalisationCache[$key];
+    }
+
+    /**
+     * @param  class-string  $modelClass
+     */
+    private function findLookup(string $modelClass, int $id): mixed
+    {
+        $key = $modelClass.'#'.$id;
+
+        if (! array_key_exists($key, $this->normalisationCache)) {
+            $this->normalisationCache[$key] = $modelClass::query()->find($id);
+        }
+
+        return $this->normalisationCache[$key];
+    }
+
+    /**
+     * @param  class-string  $modelClass
+     */
+    private function findLookupByName(string $modelClass, string $name): mixed
+    {
+        $key = $modelClass.'@'.mb_strtolower($name);
+
+        if (! array_key_exists($key, $this->normalisationCache)) {
+            $this->normalisationCache[$key] = $modelClass::resolveActive($name);
+        }
+
+        return $this->normalisationCache[$key];
     }
 
     /* ------------------------------------------------------------ generate */
@@ -815,6 +1087,10 @@ class MemEditor extends Component
 
         $classification = AccountClassification::findOrFail($classificationId);
 
+        // New selections may only come from the active master list; the line's
+        // existing (possibly retired) link is preserved by normaliseAccount().
+        abort_unless($classification->is_active, 404);
+
         $this->lineForm['account_title'] = (string) $classification->account_title;
         $this->lineForm['account_code'] = (string) $classification->uacs_object_code;
         $this->lineForm['account_classification_id'] = $classification->id;
@@ -863,6 +1139,17 @@ class MemEditor extends Component
 
         $template = WfpLineTemplate::query()->active()->findOrFail($id);
 
+        // The picker only lists templates for the section being encoded; a
+        // crafted call cannot pull a Project template into an Operations line.
+        if ($template->line_type !== $this->lineSection) {
+            $this->addError(
+                'templateSearch',
+                'That template belongs to the other expenditure type. Switch the section first.'
+            );
+
+            return;
+        }
+
         if ($this->hasTemplateEdits()) {
             $this->pendingTemplateId = $id;
 
@@ -870,6 +1157,30 @@ class MemEditor extends Component
         }
 
         $this->applyTemplate($id, 'fill');
+    }
+
+    /**
+     * The section changed: a template applied to the old section no longer
+     * describes the line. Keep the values already on screen, but drop the
+     * template link so the line is not saved as if it came from that template.
+     */
+    public function updatedLineSection(): void
+    {
+        $this->pendingTemplateId = null;
+
+        if ($this->appliedTemplateId === null) {
+            return;
+        }
+
+        $template = WfpLineTemplate::find($this->appliedTemplateId);
+
+        if ($template !== null && $template->line_type === $this->lineSection) {
+            return;
+        }
+
+        $this->appliedTemplateId = null;
+        $this->appliedTemplateName = '';
+        $this->appliedTemplateSnapshot = [];
     }
 
     /** Replace every template-owned field with the chosen template's values. */
@@ -946,27 +1257,40 @@ class MemEditor extends Component
             ->active()
             ->findOrFail($id);
 
-        // The section lives on its own property, not in lineForm.
+        // The picker is filtered to the current section; keep the property in
+        // step for an edit opened from an older line whose section differed.
         $this->lineSection = $template->line_type;
 
         $snapshot = [];
 
-        // Each mapped field: template value → lineForm field.
+        // Each mapped field: template value → lineForm field. Lookup links are
+        // copied only when the referenced record is still active — an active
+        // template that points at a since-retired lookup shows its wording but
+        // does not re-attach the retired row to a new line.
+        $resourceKind = $template->resourceKind;
+        $unit = $template->unit;
+        $fundingSource = $template->fundingSource;
+        $orgClassification = $template->orgClassification;
+
         $mapping = [
             'objective' => $template->objective ?? '',
             'activity_description' => $template->activity_expenditure,
-            'resource_kind' => $template->resourceKind?->name ?? '',
-            'unit' => $template->unit?->name ?? '',
+            'resource_kind' => $resourceKind?->name ?? '',
+            'unit' => $unit?->name ?? '',
             'quantity' => $template->suggested_quantity !== null ? (string) (float) $template->suggested_quantity : '',
             'unit_cost' => $template->suggested_unit_cost !== null ? (string) (float) $template->suggested_unit_cost : '',
             'account_title' => $template->accountClassification?->account_title ?? '',
             'account_code' => $template->accountClassification?->uacs_object_code ?? '',
-            'account_classification_id' => $template->account_classification_id,
-            'funding_source' => $template->fundingSource?->name ?? '',
-            'organizational_classification' => $template->orgClassification?->name ?? '',
+            'account_classification_id' => $template->accountClassification?->is_active ? $template->account_classification_id : null,
+            'funding_source' => $fundingSource?->name ?? '',
+            'organizational_classification' => $orgClassification?->name ?? '',
             'major_output' => $template->major_output ?? '',
             'performance_indicator' => $template->performance_indicator ?? '',
             'activity_movs' => $template->activity_movs ?? '',
+            'resource_kind_id' => $resourceKind?->is_active ? $template->resource_kind_id : null,
+            'unit_id' => $unit?->is_active ? $template->unit_id : null,
+            'funding_source_id' => $fundingSource?->is_active ? $template->funding_source_id : null,
+            'org_classification_id' => $orgClassification?->is_active ? $template->org_classification_id : null,
         ];
 
         foreach ($mapping as $field => $value) {
@@ -987,9 +1311,11 @@ class MemEditor extends Component
             }
         }
 
-        // Wire the account combobox to show the chosen account.
-        if ($template->account_classification_id !== null) {
-            $this->accountSearch = (string) ($template->accountClassification?->account_title ?? '');
+        // Wire the account combobox to show the chosen account's wording.
+        $accountTitle = (string) ($template->accountClassification?->account_title ?? '');
+
+        if ($accountTitle !== '') {
+            $this->accountSearch = $accountTitle;
         }
 
         $this->appliedTemplateId = $template->id;
@@ -1010,12 +1336,17 @@ class MemEditor extends Component
         return WfpLineTemplate::query()
             ->with(['resourceKind', 'unit', 'accountClassification', 'fundingSource', 'orgClassification'])
             ->active()
+            // The line type is chosen first: only templates for that section
+            // are offered, so a Project template can never fill an Operations
+            // line (or vice versa).
+            ->where('line_type', $this->lineSection)
             ->when($term !== '', function ($query) use ($term): void {
                 $like = '%'.str_replace(['%', '_'], ['\%', '\_'], $term).'%';
 
                 $query->where(function ($query) use ($like): void {
                     $query->where('name', 'like', $like)
                         ->orWhere('activity_expenditure', 'like', $like)
+                        ->orWhere('objective', 'like', $like)
                         ->orWhere('tags', 'like', $like)
                         ->orWhereHas('accountClassification', function ($query) use ($like): void {
                             $query->where('account_title', 'like', $like)
@@ -1027,6 +1358,55 @@ class MemEditor extends Component
             ->limit(50)
             ->get()
             ->all();
+    }
+
+    /**
+     * Whether a line field still holds the value the applied template put
+     * there — the view tags those fields as auto-filled. Once the user edits
+     * one (and the form re-renders), its tag disappears.
+     */
+    public function templateFieldIsFilled(string $field): bool
+    {
+        if ($this->appliedTemplateId === null || $this->appliedTemplateSnapshot === []) {
+            return false;
+        }
+
+        $value = trim((string) ($this->lineForm[$field] ?? ''));
+        $templateValue = trim((string) ($this->appliedTemplateSnapshot[$field] ?? ''));
+
+        return $value !== '' && $value === $templateValue;
+    }
+
+    /**
+     * The administrator-managed lookup lists the variable fields draw from.
+     *
+     * @return array<int, WfpResourceKind>
+     */
+    #[Computed]
+    public function resourceKindOptions(): array
+    {
+        return WfpResourceKind::query()->active()->orderBy('name')->limit(50)->get()->all();
+    }
+
+    /** @return array<int, WfpUnit> */
+    #[Computed]
+    public function unitOptions(): array
+    {
+        return WfpUnit::query()->active()->orderBy('name')->limit(50)->get()->all();
+    }
+
+    /** @return array<int, WfpFundingSource> */
+    #[Computed]
+    public function fundingSourceOptions(): array
+    {
+        return WfpFundingSource::query()->active()->orderBy('name')->limit(50)->get()->all();
+    }
+
+    /** @return array<int, WfpOrgClassification> */
+    #[Computed]
+    public function orgClassificationOptions(): array
+    {
+        return WfpOrgClassification::query()->active()->orderBy('name')->limit(50)->get()->all();
     }
 
     /**

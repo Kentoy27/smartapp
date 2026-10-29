@@ -37,8 +37,10 @@ class WfpCsvReaderTest extends TestCase
         $this->assertSame('MOOE', $rows[0]['data']['code']);
         $this->assertSame('Maintenance and Other Operating Expenses', $rows[0]['data']['name']);
         $this->assertSame('Yes', $rows[0]['data']['is_active']);
-        $this->assertSame(1, $rows[0]['line']);
-        $this->assertSame(2, $rows[1]['line']);
+        // Lines carry the real file line numbers: the header is line 1, so
+        // the first data row is line 2 (the error report points at the file).
+        $this->assertSame(2, $rows[0]['line']);
+        $this->assertSame(3, $rows[1]['line']);
     }
 
     public function test_it_reads_positionally_when_there_is_no_header(): void

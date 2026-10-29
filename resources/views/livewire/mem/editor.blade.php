@@ -382,6 +382,11 @@
                                          so a month's lines stay compact and scannable. --}}
                                     @php($i = $entry['index'])
                                     @php($row = $entry['row'])
+                                    {{-- Server-built rows always carry a _key; a crafted
+                                         request body need not, and a missing key must
+                                         not blow up the page. --}}
+                                    @php($rowKey = (string) ($row['_key'] ?? 'row-'.$i))
+                                    @php($activity = (string) ($row['activity_description'] ?? ''))
                                     @php($objective = trim((string) ($row['objective'] ?? '')))
                                     @php($resourceKind = trim((string) ($row['resource_kind'] ?? '')))
                                     @php($funding = trim((string) ($row['funding_source'] ?? '')))
@@ -392,7 +397,7 @@
                                     @php($quantity = trim((string) ($row['quantity'] ?? '')))
                                     @php($unit = trim((string) ($row['unit'] ?? '')))
                                     @php($unitCost = trim((string) ($row['unit_cost'] ?? '')))
-                                    <tr wire:key="row-{{ $row['_key'] }}" @if ($this->canEdit()) wire:sort:item="{{ $row['_key'] }}" @endif>
+                                    <tr wire:key="row-{{ $rowKey }}" @if ($this->canEdit()) wire:sort:item="{{ $rowKey }}" @endif>
                                         <td class="mem-rownum mem-list__gutter">
                                             <span class="mem-rownum__inner">
                                                 @if ($this->canEdit())
@@ -416,7 +421,7 @@
                                             @endif
                                         </td>
                                         <td data-label="Project/Activity/Expenditure">
-                                            <span class="cell-strong">{{ $row['activity_description'] !== '' ? $row['activity_description'] : '—' }}</span>
+                                            <span class="cell-strong">{{ $activity !== '' ? $activity : '—' }}</span>
                                             @if ($funding !== '' || $org !== '')
                                                 <div class="mem-list__meta">
                                                     @if ($funding !== '') <span class="mem-list__meta-item">Funding: {{ $funding }}</span> @endif
@@ -478,7 +483,7 @@
                                                     <button
                                                         type="button"
                                                         class="mem-row-action"
-                                                        wire:click="openEditModal('{{ $row['_key'] }}')"
+                                                        wire:click="openEditModal('{{ $rowKey }}')"
                                                         title="Edit this line"
                                                     >
                                                         <x-icon name="pencil" :size="15" />
@@ -487,7 +492,7 @@
                                                     <button
                                                         type="button"
                                                         class="mem-row-action"
-                                                        wire:click="duplicateRow('{{ $row['_key'] }}')"
+                                                        wire:click="duplicateRow('{{ $rowKey }}')"
                                                         title="Duplicate this line"
                                                     >
                                                         <x-icon name="copy" :size="15" />
@@ -496,7 +501,7 @@
                                                     <button
                                                         type="button"
                                                         class="mem-row-action"
-                                                        wire:click="moveRow('{{ $row['_key'] }}')"
+                                                        wire:click="moveRow('{{ $rowKey }}')"
                                                         title="Move to {{ $sectionKey === 'operations' ? 'Project' : 'Operations' }}"
                                                     >
                                                         <x-icon name="arrow-right-left" :size="15" />
@@ -505,7 +510,7 @@
                                                     <button
                                                         type="button"
                                                         class="mem-row-remove"
-                                                        wire:click="removeRow('{{ $row['_key'] }}')"
+                                                        wire:click="removeRow('{{ $rowKey }}')"
                                                         title="Remove this line"
                                                     >
                                                         <x-icon name="trash" :size="15" />
@@ -640,7 +645,12 @@
                                     wire:click="chooseTemplate({{ $option->id }})"
                                     @click="open = false"
                                 >
-                                    <span class="mem-combo__option-title">{{ $option->name }}</span>
+                                    <span class="mem-combo__option-main">
+                                        <span class="mem-combo__option-title">{{ $option->name }}</span>
+                                        @if (trim((string) ($option->objective ?? '')) !== '')
+                                            <span class="mem-combo__option-sub">{{ \Illuminate\Support\Str::limit($option->objective, 90) }}</span>
+                                        @endif
+                                    </span>
                                     <span class="mem-combo__option-meta">
                                         <span class="badge">{{ $option->lineTypeLabel() }}</span>
                                         @if ($option->accountClassification?->uacs_object_code)
@@ -672,7 +682,12 @@
                     </div>
 
                     <div class="field">
-                        <label for="memLineObjective">Objectives</label>
+                        <label for="memLineObjective">
+                            Objectives
+                            @if ($this->templateFieldIsFilled('objective'))
+                                <span class="field-template-tag">from template</span>
+                            @endif
+                        </label>
                         <textarea
                             id="memLineObjective"
                             rows="2"
@@ -683,7 +698,12 @@
                     </div>
 
                      <div class="field mem-line-span">
-                        <label for="memLineActivity">Project/Activity/Expenditure <span class="field-required">required</span></label>
+                        <label for="memLineActivity">
+                            Project/Activity/Expenditure <span class="field-required">required</span>
+                            @if ($this->templateFieldIsFilled('activity_description'))
+                                <span class="field-template-tag">from template</span>
+                            @endif
+                        </label>
                         <input
                             id="memLineActivity"
                             type="text"
@@ -701,12 +721,22 @@
                          total recalculates while typing instead of waiting for
                          a blur or a save. --}}
                     <div class="mem-line-resource mem-line-span" role="group" aria-labelledby="memLineResourceLabel">
-                        <span id="memLineResourceLabel" class="mem-line-resource__label">Resource Needed</span>
+                        <span id="memLineResourceLabel" class="mem-line-resource__label">
+                            Resource Needed
+                            @if ($this->templateFieldIsFilled('resource_kind') || $this->templateFieldIsFilled('unit') || $this->templateFieldIsFilled('quantity') || $this->templateFieldIsFilled('unit_cost'))
+                                <span class="field-template-tag">from template</span>
+                            @endif
+                        </span>
 
                         <div class="mem-line-resource__fields">
                             <div class="field">
                                 <label for="memLineKind">Kind</label>
-                                <input id="memLineKind" type="text" wire:model="lineForm.resource_kind" placeholder="e.g. MOOE">
+                                <input id="memLineKind" type="text" list="memResourceKindOptions" wire:model="lineForm.resource_kind" placeholder="e.g. MOOE">
+                                <datalist id="memResourceKindOptions">
+                                    @foreach ($this->resourceKindOptions as $option)
+                                        <option value="{{ $option->name }}"></option>
+                                    @endforeach
+                                </datalist>
                                 @error('lineForm.resource_kind') <div class="error-text">{{ $message }}</div> @enderror
                             </div>
 
@@ -718,7 +748,12 @@
 
                             <div class="field">
                                 <label for="memLineUnit">Unit</label>
-                                <input id="memLineUnit" type="text" wire:model="lineForm.unit" placeholder="e.g. ream">
+                                <input id="memLineUnit" type="text" list="memUnitOptions" wire:model="lineForm.unit" placeholder="e.g. ream">
+                                <datalist id="memUnitOptions">
+                                    @foreach ($this->unitOptions as $option)
+                                        <option value="{{ $option->name }}"></option>
+                                    @endforeach
+                                </datalist>
                                 @error('lineForm.unit') <div class="error-text">{{ $message }}</div> @enderror
                             </div>
 
@@ -741,7 +776,12 @@
                          the classification link. Free text still works — if
                          nothing is picked, what was typed becomes the title. --}}
                     <div class="field">
-                        <label for="memLineAccount">Account title / Account code</label>
+                        <label for="memLineAccount">
+                            Account title / Account code
+                            @if ($this->templateFieldIsFilled('account_title'))
+                                <span class="field-template-tag">from template</span>
+                            @endif
+                        </label>
 
                         <div class="mem-combo" x-data="{ open: false }" @click.outside="open = false">
                             <span class="mem-combo__search" aria-hidden="true">
@@ -813,19 +853,44 @@
                     </div>
 
                     <div class="field">
-                        <label for="memLineFunding">Funding source</label>
-                        <input id="memLineFunding" type="text" wire:model="lineForm.funding_source" placeholder="e.g. MOOE">
+                        <label for="memLineFunding">
+                            Funding source
+                            @if ($this->templateFieldIsFilled('funding_source'))
+                                <span class="field-template-tag">from template</span>
+                            @endif
+                        </label>
+                        <input id="memLineFunding" type="text" list="memFundingSourceOptions" wire:model="lineForm.funding_source" placeholder="e.g. MOOE">
+                        <datalist id="memFundingSourceOptions">
+                            @foreach ($this->fundingSourceOptions as $option)
+                                <option value="{{ $option->name }}"></option>
+                            @endforeach
+                        </datalist>
                         @error('lineForm.funding_source') <div class="error-text">{{ $message }}</div> @enderror
                     </div>
 
                     <div class="field">
-                        <label for="memLineOrg">Org. classification</label>
-                        <input id="memLineOrg" type="text" wire:model="lineForm.organizational_classification" placeholder="e.g. School">
+                        <label for="memLineOrg">
+                            Org. classification
+                            @if ($this->templateFieldIsFilled('organizational_classification'))
+                                <span class="field-template-tag">from template</span>
+                            @endif
+                        </label>
+                        <input id="memLineOrg" type="text" list="memOrgClassificationOptions" wire:model="lineForm.organizational_classification" placeholder="e.g. School">
+                        <datalist id="memOrgClassificationOptions">
+                            @foreach ($this->orgClassificationOptions as $option)
+                                <option value="{{ $option->name }}"></option>
+                            @endforeach
+                        </datalist>
                         @error('lineForm.organizational_classification') <div class="error-text">{{ $message }}</div> @enderror
                     </div>
 
                     <div class="field">
-                        <label for="memLineMajorOutput">Major output</label>
+                        <label for="memLineMajorOutput">
+                            Major output
+                            @if ($this->templateFieldIsFilled('major_output'))
+                                <span class="field-template-tag">from template</span>
+                            @endif
+                        </label>
                         <textarea
                             id="memLineMajorOutput"
                             rows="2"
@@ -836,7 +901,12 @@
                     </div>
 
                     <div class="field">
-                        <label for="memLinePerformanceIndicator">Performance indicator</label>
+                        <label for="memLinePerformanceIndicator">
+                            Performance indicator
+                            @if ($this->templateFieldIsFilled('performance_indicator'))
+                                <span class="field-template-tag">from template</span>
+                            @endif
+                        </label>
                         <textarea
                             id="memLinePerformanceIndicator"
                             rows="2"
@@ -847,7 +917,12 @@
                     </div>
 
                     <div class="field mem-line-span">
-                        <label for="memLineMovs">Activity MOVs</label>
+                        <label for="memLineMovs">
+                            Activity MOVs
+                            @if ($this->templateFieldIsFilled('activity_movs'))
+                                <span class="field-template-tag">from template</span>
+                            @endif
+                        </label>
                         <textarea
                             id="memLineMovs"
                             rows="2"

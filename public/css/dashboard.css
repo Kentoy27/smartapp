@@ -700,6 +700,10 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
 .ac-import-pill { font-size: 0.75rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; }
 .ac-import-pill--ok { background: var(--primary-soft); color: var(--primary-strong); }
 .ac-import-pill--bad { background: var(--danger-soft); color: var(--danger); }
+/* A consequence worth noticing but not an error — a certification about to
+   be cleared by a bulk change reads here. */
+.ac-import-pill--warn { background: rgba(217, 119, 6, 0.15); color: #b45309; }
+[data-theme="dark"] .ac-import-pill--warn { background: rgba(251, 191, 36, 0.18); color: #fbbf24; }
 .ac-import-preview { max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
 .ac-import-preview .data-table td { padding: 8px 12px; }
 .ac-import-row--bad { background: var(--danger-soft); }
@@ -2017,8 +2021,32 @@ a.mem-month-tab:hover .mem-month-tab__total { color: var(--text-muted); }
     color: var(--text-muted);
 }
 
+/* Bulk set allotments: the two source cards sit side by side, and the
+   preview's row checkbox and the blank-amount switch keep a real checkbox's
+   size inside the modal's blanket input styling. */
+.allotment-bulk-modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+
+/* Two classes on the label so it outranks the modal form's blanket label
+   rule, which would otherwise stack the checkbox above its text. */
+.modal-form .allotment-bulk-toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.allotment-bulk-toggle input[type="checkbox"],
+.allotment-bulk-table input[type="checkbox"] {
+    width: auto;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    flex-shrink: 0;
+    accent-color: var(--primary);
+    box-shadow: none;
+    outline: none;
+}
+
+.allotment-bulk-table td:first-child,
+.allotment-bulk-table th:first-child { width: 1%; padding-right: 0; }
+
 @media (max-width: 1100px) {
     .allotment-summary--monitor { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .allotment-bulk-modes { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 900px) {
@@ -2202,6 +2230,38 @@ a.mem-month-tab:hover .mem-month-tab__total { color: var(--text-muted); }
 /* Keep the template picker combobox inside the two-column line form. */
 .mem-line-fields > .field.mem-line-span .mem-combo__menu {
     z-index: 50;
+}
+
+/* A field still holding the value the chosen template contributed. */
+.field-template-tag {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: #eff6ff;
+    border: 1px solid #dbeafe;
+    color: #1e40af;
+    font-size: 0.625rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    vertical-align: middle;
+}
+
+/* Second line in a template-picker option: the objective it serves. */
+.mem-combo__option-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.mem-combo__option-sub {
+    overflow: hidden;
+    color: var(--text-faint);
+    font-size: 0.75rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 

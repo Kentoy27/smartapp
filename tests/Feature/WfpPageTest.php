@@ -136,7 +136,7 @@ class WfpPageTest extends TestCase
             ->get(route('wfp.index'))
             ->assertOk()
             ->assertSee('Work and Financial Plan')
-            ->assertSee('Generate and Download WFP');
+            ->assertSee('Generate and Download Work and Financial Plan');
     }
 
     public function test_guests_are_redirected_to_login(): void

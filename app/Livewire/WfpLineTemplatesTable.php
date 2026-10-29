@@ -150,6 +150,16 @@ class WfpLineTemplatesTable extends Component
         $this->resetForm();
     }
 
+    /**
+     * The write gate, re-checked at the top of every mutating action — the
+     * hidden menu item is a convenience, never the security boundary. Same
+     * predicate as mount() and the Account Classifications module.
+     */
+    private function guard(): void
+    {
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
+    }
+
     /** Trim every text field before it is validated or saved. */
     private function prepare(): void    {
         $this->name = trim($this->name);
@@ -279,6 +289,65 @@ class WfpLineTemplatesTable extends Component
         $this->resetValidation();
     }
 
+    /**
+     * Copy a template under a new, non-conflicting name. A duplicate starts
+     * with every value of the source (including its optional defaults) so an
+     * administrator can change the one field that differs instead of typing
+     * the whole combination again.
+     */
+    public function duplicate(int $id): void
+    {
+        $this->guard();
+
+        $source = WfpLineTemplate::findOrFail($id);
+        $user = Auth::user();
+
+        $copy = WfpLineTemplate::create([
+            'name' => $this->uniqueCopyName((string) $source->name, (string) $source->line_type),
+            'description' => $source->description,
+            'line_type' => $source->line_type,
+            'objective' => $source->objective,
+            'activity_expenditure' => $source->activity_expenditure,
+            'resource_kind_id' => $source->resource_kind_id,
+            'unit_id' => $source->unit_id,
+            'suggested_quantity' => $source->suggested_quantity,
+            'suggested_unit_cost' => $source->suggested_unit_cost,
+            'account_classification_id' => $source->account_classification_id,
+            'funding_source_id' => $source->funding_source_id,
+            'org_classification_id' => $source->org_classification_id,
+            'major_output' => $source->major_output,
+            'performance_indicator' => $source->performance_indicator,
+            'activity_movs' => $source->activity_movs,
+            'tags' => $source->tags,
+            'is_active' => $source->is_active,
+            'created_by' => $user?->id,
+            'updated_by' => $user?->id,
+        ]);
+
+        $copy->recordLookupAudit(WfpLineTemplate::AUDIT_CREATE, $user, null, $copy->auditSnapshot());
+
+        $this->resetPage();
+        $this->successMessage = 'Template duplicated — “'.$copy->name.'” was created.';
+    }
+
+    /** "X (Copy)", then "X (Copy 2)" …, never colliding with an existing name. */
+    private function uniqueCopyName(string $name, string $lineType): string
+    {
+        $candidate = $name.' (Copy)';
+        $sequence = 2;
+
+        while (WfpLineTemplate::query()
+            ->whereRaw('LOWER(TRIM(name)) = ?', [mb_strtolower($candidate)])
+            ->where('line_type', $lineType)
+            ->exists()
+        ) {
+            $candidate = $name.' (Copy '.$sequence.')';
+            $sequence++;
+        }
+
+        return $candidate;
+    }
+
     /** Choose an account classification from the combobox. */
     public function chooseAccount(int $classificationId): void
     {
@@ -286,10 +355,19 @@ class WfpLineTemplatesTable extends Component
 
         $classification = AccountClassification::findOrFail($classificationId);
 
+        // A new template may only link to a live classification. Editing a
+        // template that already points at a retired one keeps that link via
+        // inactiveReferenceErrors() unless it is deliberately changed.
+        if (! $classification->is_active) {
+            $this->addError('accountClassificationId', 'That account classification is inactive and cannot be attached to a template.');
+
+            return;
+        }
+
         $this->accountClassificationId = $classification->id;
         $this->accountSearch = (string) $classification->account_title;
 
-        $this->resetValidation('lineForm.account_title');
+        $this->resetValidation('accountClassificationId');
     }
 
     /** Clear the line's account — the combobox's × button. */
@@ -306,9 +384,15 @@ class WfpLineTemplatesTable extends Component
     /** The user edited the search box. Drop the link once it no longer matches the chosen title. */
     public function updatedAccountSearch(): void
     {
-        if (trim($this->accountSearch) !== '') {
+        $needle = mb_strtolower(trim($this->accountSearch));
+
+        if ($needle !== '') {
             $classification = AccountClassification::query()
-                ->whereRaw('LOWER(TRIM(account_title)) = ?', [mb_strtolower($this->accountSearch)])
+                ->where(function ($query) use ($needle): void {
+                    $query->whereRaw('LOWER(TRIM(account_title)) = ?', [$needle])
+                        ->orWhereRaw('LOWER(TRIM(uacs_object_code)) = ?', [$needle]);
+                })
+                ->orderBy('id')
                 ->first();
 
             if ($classification === null || $classification->id !== $this->accountClassificationId) {
@@ -781,6 +865,7 @@ class WfpLineTemplatesTable extends Component
                 $query->where(function ($query) use ($term): void {
                     $query->where('name', 'like', $term)
                         ->orWhere('activity_expenditure', 'like', $term)
+                        ->orWhere('objective', 'like', $term)
                         ->orWhere('tags', 'like', $term)
                         ->orWhere('major_output', 'like', $term)
                         ->orWhere('performance_indicator', 'like', $term)

@@ -418,16 +418,14 @@ class MemMatrixTest extends TestCase
             ->assertHasNoErrors();
 
         // The modal closed and the filled row joined the grid, in the section
-        // the modal was opened for — still unsaved until Save Draft.
+        // the modal was opened for. Saving from the modal is a write: the
+        // line is persisted straight away.
         $items = $component->get('items');
 
         $this->assertCount(1, $items);
         $this->assertSame('project', $items[0]['section']);
         $this->assertSame('Procure supplies', $items[0]['activity_description']);
-        $this->assertSame(0, MonthlyExpenditureItem::count());
-
-        // The modal row joined the grid unsaved; a structural mutation writes it.
-        $component->call('addRow')->assertHasNoErrors();
+        $this->assertSame(1, MonthlyExpenditureItem::count());
 
         $this->assertDatabaseHas('monthly_expenditure_items', [
             'matrix_id' => $matrix->id,
@@ -712,9 +710,16 @@ class MemMatrixTest extends TestCase
             ->call('addRow');
 
         $component->set('items.0.activity_description', 'Payment for electricity')
+            ->set('items.0.section', 'operations')
             ->set('items.1.activity_description', 'Payment of school clerk')
+            ->set('items.1.section', 'operations')
             ->set('items.2.activity_description', 'Build a fence')
-            ->set('items.3.activity_description', 'Procure supplies');
+            ->set('items.2.section', 'project')
+            ->set('items.3.activity_description', 'Procure supplies')
+            ->set('items.3.section', 'operations')
+            // Persist the described rows and discard the blank one: only then
+            // does each row have the stable key a drag addresses.
+            ->call('addRow');
 
         $keys = array_column($component->get('items'), '_key');
 
@@ -747,10 +752,15 @@ class MemMatrixTest extends TestCase
         $sh = $this->schoolHead();
         $matrix = $this->matrixFor($sh);
 
+        $matrix->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Procure supplies',
+        ]);
+
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
-            ->call('addRow')
             ->assertSeeHtml('wire:sort="reorderRow"')
-            ->assertSeeHtml('wire:sort:item="new-')
+            ->assertSeeHtml('wire:sort:item="item-')
             // Only the grip starts a drag, so the row's buttons still click.
             ->assertSeeHtml('wire:sort:handle');
     }
@@ -760,10 +770,18 @@ class MemMatrixTest extends TestCase
         $sh = $this->schoolHead();
         $matrix = $this->matrixFor($sh);
 
+        $matrix->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Procure supplies',
+        ]);
+        $matrix->items()->create([
+            'position' => 2,
+            'section' => 'project',
+            'activity_description' => 'Build a fence',
+        ]);
+
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
-            ->call('addRow')
-            ->call('addRow', 'project')
-            ->call('addRow')
             ->assertSee('Operations')
             ->assertSee('Project')
             ->assertSeeInOrder(['Operations', 'Project'])
