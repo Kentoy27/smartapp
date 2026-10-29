@@ -19,7 +19,7 @@
     @endif
 
     <div class="opcrf-parts-head">
-        <h2 class="opcrf-parts-title">OPCRF {{ $year }}</h2>
+        <h2 class="opcrf-parts-title">Office Performance Commitment and Review Form (OPCRF) {{ $year }}</h2>
         <p class="opcrf-parts-sub">
             @if ($readOnly)
                 Part details are available to School Heads only.
@@ -37,7 +37,7 @@
             <div class="opcrf-part-card opcrf-part-card--{{ $part['card_tone'] }}" wire:key="{{ $part['is_grouped_term'] ? 'parts-2-4' : 'part-1' }}">
 
                 <div class="opcrf-part-card-head">
-                    <span class="opcrf-part-name">{{ $part['is_grouped_term'] ? 'Parts 2–4' : $part['label'] }}</span>
+                    <span class="opcrf-part-name">{{ $part['is_grouped_term'] ? 'Full OPCRF' : $part['label'] }}</span>
                     <span class="opcrf-part-badge opcrf-part-badge--{{ $part['card_tone'] }}">
                         <span class="opcrf-part-dot" aria-hidden="true"></span>
                         <span>{{ $part['all_group_parts_complete'] ? 'Completed' : $part['badge'] }}</span>
@@ -46,13 +46,13 @@
 
                 <p class="opcrf-part-message">
                     @if ($part['all_group_parts_complete'])
-                        Parts 2–4 are complete — submitted for this cycle.
+                        Full OPCRF is complete — submitted for this cycle.
                     @elseif ($part['is_grouped_term'] && collect($part['group_states'])->contains(fn (array $state): bool => $state['completed']))
-                        Your progress in Parts 2–4 is saved. Continue any unfinished Part during the end-of-year term.
+                        Your progress in Full OPCRF is saved. Continue any unfinished section during the end-of-year term.
                     @elseif ($part['completed'])
                         {{ $part['label'] }} is complete — submitted for this cycle.
                     @elseif ($part['is_grouped_term'])
-                        Parts 2, 3, and 4 share the end-of-year term and can be completed independently.
+                        Full OPCRF is available during the end-of-year term, and its sections can be completed independently.
                     @else
                         {{ $part['message'] }}
                     @endif
@@ -75,7 +75,7 @@
                     <div
                         class="opcrf-parts-group-actions"
                         role="group"
-                        aria-label="Access Parts 2 through 4"
+                        aria-label="Access Full OPCRF"
                         x-data="{ open: false }"
                         @keydown.escape.window="open = false"
                     >
@@ -89,7 +89,7 @@
                                 @click.outside="open = false"
                             >
                                 <x-icon name="unlock" :size="15" />
-                                <span>Access Parts 2–4</span>
+                                <span>Access Full OPCRF</span>
                                 <x-icon name="chevron-down" :size="14" />
                             </button>
                             <div class="opcrf-parts-menu" x-cloak x-show="open" role="menu">
@@ -117,7 +117,7 @@
                         @else
                             <span class="opcrf-part-action opcrf-part-action--locked" aria-disabled="true">
                                 <x-icon name="lock" :size="15" />
-                                <span>Parts 2–4 locked</span>
+                                <span>Full OPCRF locked</span>
                             </span>
                         @endif
                     </div>

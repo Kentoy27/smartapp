@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Livewire\OpcrfMovs;
 use App\Livewire\OpcrfReview;
+use App\Livewire\OpcrfTasksMenu;
 use App\Models\OpcrfSubmission;
 use App\Models\User;
 use App\Notifications\OpcrfReturned;
@@ -110,23 +111,170 @@ class OpcrfResubmitTest extends TestCase
         $this->assertSame(OpcrfSubmission::STATUS_PENDING, $submission->status);
     }
 
-    public function test_the_staff_member_sees_action_required_with_the_remarks(): void
+    public function test_returned_remarks_are_not_rendered_as_a_large_page_card(): void
     {
         $admin = $this->superadmin();
         $staff = $this->staffUser();
         $submission = $this->createSubmission($staff, ['reviewer_id' => $admin->id]);
         $submission->returnForRevision($admin, 'Correct the timeline and update Section 3.');
 
-        Livewire::actingAs($staff)
+        $html = Livewire::actingAs($staff)
             ->test(OpcrfMovs::class)
-            // The banner and its message…
-            ->assertSee('Action Required — Revision Needed')
-            ->assertSee('Your OPCRF has been returned for revision.')
-            // …the reviewer's exact remarks, prominent…
+            ->assertDontSee('Action Required — Revision Needed')
+            ->html();
+
+        $this->assertStringNotContainsString('class="card opcrf-action-required"', $html);
+    }
+
+    public function test_topbar_tasks_show_return_remarks_and_open_the_revision_modal(): void
+    {
+        $admin = $this->superadmin();
+        $staff = $this->staffUser();
+        $submission = $this->createSubmission($staff, [
+            'reviewer_id' => $admin->id,
+            'reviewer_remarks' => [
+                0 => [0 => 'Clarify the target measurement.'],
+                1 => [2 => 'Update the supporting evidence.'],
+            ],
+            'reviewer_task_completion' => ['general' => true],
+        ]);
+        $submission->returnForRevision($admin, 'Correct the timeline and update Section 3.');
+
+        Livewire::actingAs($staff)
+            ->test(OpcrfTasksMenu::class)
+            ->assertSee('Revision tasks')
+            ->assertSee('3 remarks to address')
+            ->assertSee('General feedback')
             ->assertSee('Correct the timeline and update Section 3.')
-            ->assertSee('Superadmin Remarks')
-            // …and the revise entry point.
+            ->assertSee('Part 1 — Objective 1')
+            ->assertSee('Clarify the target measurement.')
+            ->assertSee('Part 2 — Objective 3')
+            ->assertSee('Update the supporting evidence.');
+
+        $this->actingAs($staff)
+            ->get(route('opcrf.index'))
+            ->assertOk()
+            ->assertSee('Tasks')
+            ->assertSee('Revision tasks')
+            ->assertSee('Clarify the target measurement.');
+
+        $this->actingAs($staff)
+            ->get(route('opcrf.index', ['revision' => $submission->id]))
+            ->assertOk()
+            ->assertSee('Revise &amp; Resubmit', false)
+            ->assertSee('Correct the timeline and update Section 3.')
+            ->assertSee('Clarify the target measurement.')
+            ->assertSee('Update the supporting evidence.');
+
+        Livewire::actingAs($staff)
+            ->withQueryParams(['revision' => $submission->id])
+            ->test(OpcrfMovs::class)
+            ->assertSet('resubmittingId', $submission->id)
+            ->assertSee('Revise &amp; Resubmit', false)
+            ->assertSee('Correct the timeline and update Section 3.')
+            ->assertSee('Clarify the target measurement.')
+            ->assertSee('Update the supporting evidence.');
+    }
+
+    public function test_school_head_can_mark_topbar_tasks_complete(): void
+    {
+        $admin = $this->superadmin();
+        $staff = $this->staffUser();
+        $submission = $this->createSubmission($staff, [
+            'reviewer_id' => $admin->id,
+            'reviewer_remarks' => [0 => [0 => 'Clarify the target measurement.']],
+        ]);
+        $submission->returnForRevision($admin, 'Correct the timeline.');
+
+        Livewire::actingAs($staff)
+            ->test(OpcrfTasksMenu::class)
+            ->assertSee('2 remarks to address')
+            ->call('toggleTask', $submission->id, 'general')
+            ->call('toggleTask', $submission->id, 'objective:0:0')
+            ->assertSee('Resubmission required')
+            ->assertSee('aria-label="1 OPCRF requiring revision"', false);
+
+        $this->assertSame([
+            'general' => true,
+            'objectives' => [0 => [0 => true]],
+        ], $submission->fresh()->reviewer_task_completion);
+    }
+
+    public function test_school_head_can_mark_all_topbar_tasks_finished_at_once(): void
+    {
+        $admin = $this->superadmin();
+        $staff = $this->staffUser();
+        $submission = $this->createSubmission($staff, [
+            'reviewer_id' => $admin->id,
+            'reviewer_remarks' => [
+                0 => [0 => 'Clarify the target measurement.', 2 => 'Update the supporting evidence.'],
+            ],
+        ]);
+        $submission->returnForRevision($admin, 'Correct the timeline.');
+
+        Livewire::actingAs($staff)
+            ->test(OpcrfTasksMenu::class)
+            ->assertSee('Mark all as finished')
+            ->call('completeTasks', $submission->id)
+            ->assertDontSee('Mark all as finished')
+            ->assertSee('Resubmission required')
             ->assertSee('Revise &amp; Resubmit', false);
+
+        $this->assertSame([
+            'general' => true,
+            'objectives' => [0 => [0 => true, 2 => true]],
+        ], $submission->fresh()->reviewer_task_completion);
+    }
+
+    public function test_returning_again_resets_revision_task_completion(): void
+    {
+        $admin = $this->superadmin();
+        $staff = $this->staffUser();
+        $submission = $this->createSubmission($staff, [
+            'reviewer_id' => $admin->id,
+            'reviewer_remarks' => [0 => [0 => 'Clarify the target measurement.']],
+        ]);
+        $submission->returnForRevision($admin, 'First return.');
+        $submission->forceFill([
+            'reviewer_task_completion' => [
+                'general' => true,
+                'objectives' => [0 => [0 => true]],
+            ],
+        ])->save();
+
+        $submission->returnForRevision($admin, 'Second return.');
+
+        $this->assertSame([], $submission->fresh()->reviewer_task_completion);
+    }
+
+    public function test_only_the_owner_can_update_topbar_tasks_while_the_submission_is_returned(): void
+    {
+        $admin = $this->superadmin();
+        $staff = $this->staffUser();
+        $other = User::create([
+            'name' => 'Other Staff',
+            'username' => 'otherstaff',
+            'email' => 'otherstaff@example.com',
+            'password' => Hash::make('password123'),
+            'is_superadmin' => false,
+        ]);
+        $submission = $this->createSubmission($staff, [
+            'reviewer_id' => $admin->id,
+            'reviewer_remarks' => [0 => [0 => 'Clarify the target measurement.']],
+        ]);
+        $submission->returnForRevision($admin, 'Fix the workbook.');
+
+        Livewire::actingAs($other)
+            ->test(OpcrfTasksMenu::class)
+            ->call('toggleTask', $submission->id, 'objective:0:0')
+            ->assertNotFound();
+
+        Livewire::actingAs($staff)
+            ->test(OpcrfTasksMenu::class)
+            ->call('toggleTask', $submission->id, 'objective:9:9')
+            ->assertNotFound();
+
+        $this->assertSame([], $submission->fresh()->reviewer_task_completion);
     }
 
     public function test_resubmitting_archives_the_previous_workbook_and_routes_back_to_the_returner(): void

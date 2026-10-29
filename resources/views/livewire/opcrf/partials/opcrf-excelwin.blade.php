@@ -28,6 +28,8 @@
                 'full' => $full,
                 'rateeSignature' => $rateeSignature ?? null,
                 'reviewSignatures' => $reviewSignatures ?? [],
+                'reviewerRemarks' => $reviewerRemarks ?? [],
+                'canEditObjectiveRemarks' => $canEditObjectiveRemarks ?? false,
             ])
         </div>
 

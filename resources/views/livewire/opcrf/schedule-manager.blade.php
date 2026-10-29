@@ -21,9 +21,9 @@
             <div>
                 <div class="card-title">OPCRF Schedule</div>
                 <p class="card-text">
-                    Schedule Part 1 separately. Parts 2, 3, and 4 share one
+                    Schedule OPCRF Commitment separately. Full OPCRF uses one
                     end-of-year term window, so the school head can access all
-                    three together. A Part outside its access period is locked for staff —
+                    of its sections together. A Part outside its access period is locked for staff —
                     the rule is applied on the server, every time a Part is opened.
                 </p>
             </div>
@@ -256,8 +256,8 @@
                     <div class="field">
                         <label for="schedPart">Part</label>
                         <select id="schedPart" wire:model="part_number" class="{{ $errors->has('part_number') ? 'error' : '' }}">
-                            <option value="1">Part 1</option>
-                            <option value="2">Parts 2–4 (End-of-year term)</option>
+                            <option value="1">OPCRF Commitment</option>
+                            <option value="2">Full OPCRF (End-of-year term)</option>
                         </select>
                         @error('part_number') <div class="error-text">{{ $message }}</div> @enderror
                     </div>

@@ -162,12 +162,13 @@ class OpcrfScheduleTest extends TestCase
         $html = $this->actingAs($staff)->get(route('opcrf.index'))->assertOk()->getContent();
 
         // All four Parts are LISTED — a locked Part is never hidden.
-        $this->assertStringContainsString('Part 1', $html);
-        $this->assertStringContainsString('Parts 2–4', $html);
+        $this->assertStringContainsString('OPCRF Commitment', $html);
+        $this->assertStringContainsString('Full OPCRF', $html);
 
-        $this->assertStringContainsString('Part 1 is now open.', $html);
+        $this->assertStringContainsString('OPCRF Commitment is now open.', $html);
+        $this->assertStringContainsString('Access OPCRF Commitment', $html);
         // And the others say what is true, not nothing.
-        $this->assertStringContainsString('Parts 2–4 locked', $html);
+        $this->assertStringContainsString('Full OPCRF locked', $html);
     }
 
     public function test_a_user_cannot_access_a_part_before_its_start_date(): void
@@ -180,7 +181,7 @@ class OpcrfScheduleTest extends TestCase
         $response = $this->actingAs($staff)->get(route('opcrf.part', ['part' => 1]));
 
         $response->assertRedirect(route('opcrf.index'));
-        $response->assertSessionHas('opcrfPartNotice.message', 'Part 1 is not yet available. Available starting June 22, 2026 8:00 AM.');
+        $response->assertSessionHas('opcrfPartNotice.message', 'OPCRF Commitment is not yet available. Available starting June 22, 2026 8:00 AM.');
 
         $this->assertFalse(OpcrfAccess::canAccess($staff, 1));
     }
@@ -234,7 +235,7 @@ class OpcrfScheduleTest extends TestCase
         $this->actingAs($staff)
             ->get(route('opcrf.part', ['part' => 1]))
             ->assertRedirect(route('opcrf.index'))
-            ->assertSessionHas('opcrfPartNotice.message', 'Part 1 is currently unavailable.');
+            ->assertSessionHas('opcrfPartNotice.message', 'OPCRF Commitment is currently unavailable.');
     }
 
     /* ==================================================================
@@ -330,7 +331,7 @@ class OpcrfScheduleTest extends TestCase
 
         Livewire::actingAs($admin)
             ->test(\App\Livewire\OpcrfScheduleManager::class)
-            ->assertSee('Parts 2–4 (End-of-year term)')
+            ->assertSee('Full OPCRF (End-of-year term)')
             ->assertDontSee('Part 3</strong>')
             ->assertDontSee('Part 4</strong>');
 
@@ -349,9 +350,9 @@ class OpcrfScheduleTest extends TestCase
 
         $html = $this->actingAs($staff)->get(route('opcrf.index'))->assertOk()->getContent();
 
-        $this->assertStringContainsString('Part 1 is now open.', $html);
-        $this->assertStringContainsString('Parts 2–4 locked', $html);
-        $this->assertStringContainsString('Parts 2–4 share the end-of-year term.', $html);
+        $this->assertStringContainsString('OPCRF Commitment is now open.', $html);
+        $this->assertStringContainsString('Full OPCRF locked', $html);
+        $this->assertStringContainsString('Full OPCRF is available during the end-of-year term', $html);
         $this->assertSame(2, substr_count($html, 'class="opcrf-part-card opcrf-part-card--'));
     }
 
@@ -367,7 +368,7 @@ class OpcrfScheduleTest extends TestCase
             $this->assertStringContainsString(route('opcrf.part', ['part' => $part]), $html);
         }
         $this->assertSame(1, substr_count($html, 'class="opcrf-part-action opcrf-parts-menu-trigger"'));
-        $this->assertStringContainsString('Access Parts 2–4', $html);
+        $this->assertStringContainsString('Access Full OPCRF', $html);
         $this->assertSame(2, substr_count($html, 'class="opcrf-part-card opcrf-part-card--'));
     }
 
@@ -915,7 +916,7 @@ class OpcrfScheduleTest extends TestCase
 
         // And it completes that Part on the grid.
         $html = $this->actingAs($staff)->get(route('opcrf.index'))->assertOk()->getContent();
-        $this->assertStringContainsString('Part 1 is complete', $html);
+        $this->assertStringContainsString('OPCRF Commitment is complete', $html);
     }
 
     public function test_a_returned_submission_does_not_count_as_a_completed_part(): void

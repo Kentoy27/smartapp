@@ -435,8 +435,8 @@ class OpcrfScheduleManager extends Component
             return [
                 'part' => $part,
                 'label' => $part === OpcrfSchedule::PART_TWO
-                    ? 'Parts 2–4 (End-of-year term)'
-                    : 'Part 1',
+                    ? 'Full OPCRF (End-of-year term)'
+                    : 'OPCRF Commitment',
                 'schedule' => $schedule,
                 'status' => $schedule?->statusAt($now) ?? OpcrfAccess::STATUS_NOT_SCHEDULED,
             ];

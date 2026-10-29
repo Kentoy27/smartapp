@@ -52,7 +52,6 @@ class OpcrfFormTest extends TestCase
             'objectives' => "Objective 1: Improved learner outcomes\nObjective 2: Conducted research",
             'accomplishments' => "Raised MPS by 5 points\nCompleted one action research",
             'self_rating' => '4.50',
-            'remarks' => 'Submitted on time.',
         ];
     }
 
@@ -86,7 +85,8 @@ class OpcrfFormTest extends TestCase
             ->assertSee('Objective 1: Improved learner outcomes')
             ->assertSee('Raised MPS by 5 points')
             ->assertSee('4.50')
-            ->assertSee('Submitted on time.');
+            ->assertDontSee('opcrfRemarks', false)
+            ->assertDontSee('Remarks <span', false);
 
         $this->assertDatabaseCount('opcrf_submissions', 0);
     }
@@ -127,7 +127,7 @@ class OpcrfFormTest extends TestCase
         $this->assertSame('January to December 2026', $submission->review_period);
         $this->assertSame('Schools Division Office', $submission->division_office);
         $this->assertSame(4.5, $submission->self_rating);
-        $this->assertSame('Submitted on time.', $submission->remarks);
+        $this->assertNull($submission->remarks);
         $this->assertNotNull($submission->submitted_at);
     }
 

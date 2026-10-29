@@ -139,18 +139,6 @@
                     @error('self_rating') <div class="error-text">{{ $message }}</div> @enderror
                 </div>
 
-                <div class="field">
-                    <label for="opcrfRemarks">Remarks <span class="opcrf-optional">(optional)</span></label>
-                    <input
-                        id="opcrfRemarks"
-                        type="text"
-                        placeholder="Anything the reviewing officer should know"
-                        wire:model="remarks"
-                        @disabled(! $this->canEdit())
-                        @class(['error' => $errors->has('remarks')])
-                    >
-                    @error('remarks') <div class="error-text">{{ $message }}</div> @enderror
-                </div>
             </div>
 
             @if ($this->canEdit())
@@ -267,14 +255,6 @@
                                 </table>
                             </div>
 
-                            <div class="opcrf-sheet-remarks">
-                                <div class="opcrf-sheet-headrow">
-                                    <span class="opcrf-sheet-headlabel">Remarks:</span>
-                                    <span class="opcrf-sheet-headvalue {{ $remarks === '' ? 'is-empty' : '' }}">
-                                        {{ $remarks !== '' ? $remarks : '—' }}
-                                    </span>
-                                </div>
-                            </div>
                         </div>
 
                         <p class="opcrf-review-confirm-line">

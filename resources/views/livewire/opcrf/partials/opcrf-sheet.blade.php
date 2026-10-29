@@ -58,7 +58,9 @@
                 $columnOrder,
                 fn (string $field): bool => in_array($field, $fields, true)
             ));
-            $columnCount = count($columns) + 1;
+            $showReviewerRemarks = ($canEditObjectiveRemarks ?? false)
+                || ! empty($reviewerRemarks);
+            $columnCount = count($columns) + 1 + ($showReviewerRemarks ? 1 : 0);
             $bands = $part['bands'] ?? ['planning' => '', 'evaluation' => ''];
             $heading = function (string $field, string $main, string $sub = '') use ($captions): string {
                 $caption = trim((string) ($captions[$field] ?? ''));
@@ -140,10 +142,13 @@
                                     @endswitch
                                 </th>
                             @endforeach
+                            @if ($showReviewerRemarks)
+                                <th class="opcrf-sheet-reviewer-remarks" scope="col">Superadmin Remarks</th>
+                            @endif
                         </tr>
                     </thead>
                     <tbody>
-                        @forelse ($part['rows'] as $entry)
+                        @forelse ($part['rows'] as $ei => $entry)
                             @forelse ($entry['criteria'] as $ci => $crit)
                                 <tr wire:key="objrow-{{ $part['key'] }}-{{ $entry['row'] }}-{{ $ci }}-{{ $full ? 'staff' : 'review' }}">
                                     @if ($ci === 0)
@@ -179,6 +184,23 @@
                                             </td>
                                         @endif
                                     @endforeach
+                                    @if ($showReviewerRemarks && $ci === 0)
+                                        @php($objectiveRemark = $reviewerRemarks[$pi][$ei] ?? '')
+                                        <td class="opcrf-sheet-reviewer-remarks" rowspan="{{ max(1, count($entry['criteria'])) }}">
+                                            @if ($canEditObjectiveRemarks ?? false)
+                                                <textarea
+                                                    class="opcrf-remarks-textarea opcrf-objective-remarks"
+                                                    wire:model.defer="objectiveRemarks.{{ $pi }}.{{ $ei }}"
+                                                    rows="3"
+                                                    maxlength="2000"
+                                                    aria-label="Superadmin remarks for Part {{ $part['key'] }} objective {{ $entry['number'] }}"
+                                                    placeholder="Add remarks for objective {{ $entry['number'] }}…"
+                                                ></textarea>
+                                            @else
+                                                {{ trim((string) $objectiveRemark) !== '' ? $objectiveRemark : '—' }}
+                                            @endif
+                                        </td>
+                                    @endif
                                 </tr>
                             @empty
                                 <tr wire:key="objrow-{{ $part['key'] }}-{{ $entry['row'] }}-empty-{{ $full ? 'staff' : 'review' }}">
@@ -207,6 +229,23 @@
                                             @endswitch
                                         </td>
                                     @endforeach
+                                    @if ($showReviewerRemarks)
+                                        @php($objectiveRemark = $reviewerRemarks[$pi][$ei] ?? '')
+                                        <td class="opcrf-sheet-reviewer-remarks">
+                                            @if ($canEditObjectiveRemarks ?? false)
+                                                <textarea
+                                                    class="opcrf-remarks-textarea opcrf-objective-remarks"
+                                                    wire:model.defer="objectiveRemarks.{{ $pi }}.{{ $ei }}"
+                                                    rows="3"
+                                                    maxlength="2000"
+                                                    aria-label="Superadmin remarks for Part {{ $part['key'] }} objective {{ $entry['number'] }}"
+                                                    placeholder="Add remarks for objective {{ $entry['number'] }}…"
+                                                ></textarea>
+                                            @else
+                                                {{ trim((string) $objectiveRemark) !== '' ? $objectiveRemark : '—' }}
+                                            @endif
+                                        </td>
+                                    @endif
                                 </tr>
                             @endforelse
                         @empty
@@ -218,8 +257,11 @@
                     @if ($part['has_total_row'])
                         <tfoot>
                             <tr class="opcrf-sheet-totalrow">
-                                <td colspan="{{ max(1, $columnCount - 1) }}">PART {{ $part['key'] }} TOTAL SCORE</td>
+                                <td colspan="{{ max(1, count($columns)) }}">PART {{ $part['key'] }} TOTAL SCORE</td>
                                 <td class="opcrf-sheet-rate opcrf-sheet-summary-value">{{ $part['total_score'] !== null ? number_format($part['total_score'], 2) : '—' }}</td>
+                                @if ($showReviewerRemarks)
+                                    <td></td>
+                                @endif
                             </tr>
                         </tfoot>
                     @endif

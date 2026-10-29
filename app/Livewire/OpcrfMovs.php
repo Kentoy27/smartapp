@@ -3,6 +3,7 @@
 namespace App\Livewire;
 
 use App\Models\OpcrfSubmission;
+use App\Support\OpcrfSubmissionWorkbook;
 use App\Support\OpcrfTemplatePersonalizer;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
@@ -17,12 +18,11 @@ use Livewire\WithPagination;
  *
  * The table lists this staff member's submissions (newest first,
  * paginated) with their review status; an approved submission with an
- * archived workbook offers the download of the official copy. A submission
- * returned for revision raises an "Action Required" banner (the reviewer's
- * remarks front and center) with a Revise & Resubmit flow: the staff member
- * uploads their corrected workbook, and the same submission goes back into
- * review as 'resubmitted' — routed to the superadmin who returned it, with
- * the previous workbook archived as a version and the full history intact.
+ * archived workbook offers the download of the official copy. Returned
+ * submissions are listed in the topbar task menu; opening a task brings up
+ * the revision flow, and the same submission returns to review as
+ * 'resubmitted' — routed to the superadmin who returned it, with the
+ * previous workbook archived as a version and the full history intact.
  */
 class OpcrfMovs extends Component
 {
@@ -37,6 +37,17 @@ class OpcrfMovs extends Component
     public function mount(): void
     {
         abort_unless(Auth::check(), 404);
+
+        $revisionId = request()->query('revision');
+
+        if ($revisionId !== null) {
+            abort_unless(is_string($revisionId) || is_int($revisionId), 404);
+
+            $revisionId = filter_var($revisionId, FILTER_VALIDATE_INT);
+            abort_unless($revisionId !== false && $revisionId > 0, 404);
+
+            $this->openRevise($revisionId);
+        }
     }
 
     /**
@@ -51,6 +62,8 @@ class OpcrfMovs extends Component
     public ?int $resubmittingId = null;
 
     public ?int $archivingId = null;
+
+    public ?int $viewingId = null;
 
     public bool $showArchived = false;
 
@@ -128,6 +141,56 @@ class OpcrfMovs extends Component
         $this->showArchived = false;
     }
 
+    public function openSubmission(int $submissionId): void
+    {
+        $submission = OpcrfSubmission::where('user_id', Auth::id())
+            ->whereKey($submissionId)
+            ->first();
+
+        abort_unless($submission !== null && $submission->hasFile(), 404);
+
+        $this->viewingId = $submission->id;
+        unset($this->viewingSubmission, $this->viewingSheet, $this->viewingWorkbook);
+    }
+
+    public function closeSubmission(): void
+    {
+        $this->viewingId = null;
+        unset($this->viewingSubmission, $this->viewingSheet, $this->viewingWorkbook);
+    }
+
+    #[Computed]
+    public function viewingSubmission(): ?OpcrfSubmission
+    {
+        if ($this->viewingId === null) {
+            return null;
+        }
+
+        return OpcrfSubmission::where('user_id', Auth::id())
+            ->whereKey($this->viewingId)
+            ->first();
+    }
+
+    #[Computed]
+    public function viewingSheet(): ?array
+    {
+        $submission = $this->viewingSubmission();
+
+        return $submission === null ? null : OpcrfSubmissionWorkbook::sheet($submission);
+    }
+
+    #[Computed]
+    public function viewingWorkbook(): ?array
+    {
+        $submission = $this->viewingSubmission();
+
+        if ($submission === null || $this->viewingSheet === null) {
+            return null;
+        }
+
+        return OpcrfSubmissionWorkbook::workbook($submission);
+    }
+
     #[Computed]
     public function archivingSubmission(): ?OpcrfSubmission
     {
@@ -169,6 +232,7 @@ class OpcrfMovs extends Component
         $submission->update(['archived_at' => now()]);
         $this->archivingId = null;
         $this->resetPage();
+        $this->dispatch('opcrf-submission-archived');
     }
 
     public function restoreArchive(int $submissionId): void
@@ -179,6 +243,7 @@ class OpcrfMovs extends Component
 
         $submission->update(['archived_at' => null]);
         $this->resetPage('archivedPage');
+        $this->dispatch('opcrf-submission-restored');
     }
 
     /**
@@ -193,6 +258,8 @@ class OpcrfMovs extends Component
         }
 
         return OpcrfSubmission::where('user_id', Auth::id())
+            ->whereNull('archived_at')
+            ->where('status', OpcrfSubmission::STATUS_RETURNED)
             ->whereKey($this->resubmittingId)
             ->first();
     }
@@ -203,7 +270,9 @@ class OpcrfMovs extends Component
      */
     public function openRevise(int $submissionId): void
     {
-        $submission = OpcrfSubmission::where('user_id', Auth::id())->find($submissionId);
+        $submission = OpcrfSubmission::where('user_id', Auth::id())
+            ->whereNull('archived_at')
+            ->find($submissionId);
 
         // Only the owner, and only a submission that actually waits for
         // their revision — anything else is not revisable.

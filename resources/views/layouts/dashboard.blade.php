@@ -3302,7 +3302,7 @@
         }
 
         .opcrf-sheet-table--objectives {
-            min-width: 2380px;
+            min-width: 2740px;
         }
 
         .opcrf-sheet-table--objectives thead th {
@@ -3888,6 +3888,21 @@
             font: inherit;
             font-size: 0.8125rem;
             line-height: 1.5;
+        }
+
+        .opcrf-objective-remarks {
+            display: block;
+            box-sizing: border-box;
+            width: 100%;
+            min-width: 220px;
+            min-height: 88px;
+            font-size: 0.75rem;
+        }
+
+        .opcrf-sheet-reviewer-remarks {
+            width: 280px;
+            min-width: 280px;
+            white-space: pre-line;
         }
 
         .opcrf-decision-actions {
@@ -4945,48 +4960,6 @@
             color: var(--primary);
         }
 
-        /* ---------- ACTION REQUIRED (returned OPCRF, staff dashboard) ---------- */
-        .opcrf-action-required {
-            border-color: var(--warn);
-            border-width: 1px;
-            margin-bottom: 16px;
-        }
-
-        .opcrf-action-required-head {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 10px;
-        }
-
-        .opcrf-action-required-icon {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 26px;
-            height: 26px;
-            border-radius: 50%;
-            background: var(--warn-soft);
-            color: var(--warn);
-            flex: none;
-        }
-
-        .opcrf-action-required-title {
-            font-size: 0.9375rem;
-            font-weight: 700;
-            color: var(--text-strong);
-        }
-
-        .opcrf-action-required-head .badge {
-            margin-left: auto;
-        }
-
-        .opcrf-action-required-text {
-            margin: 0 0 10px;
-            font-size: 0.8125rem;
-            color: var(--text-muted);
-        }
-
         .opcrf-action-required-remarks {
             border: 1px solid var(--border);
             border-left: 3px solid var(--warn);
@@ -5011,14 +4984,6 @@
             color: var(--text);
             white-space: pre-wrap;
             overflow-wrap: anywhere;
-        }
-
-        .opcrf-action-required-foot {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 10px;
-            flex-wrap: wrap;
         }
 
         .opcrf-revise-remarks {
@@ -6787,6 +6752,245 @@
             padding: 10px 14px;
             font-size: 0.75rem;
             color: var(--text-faint);
+        }
+
+        .opcrf-taskbar {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .opcrf-taskbar-trigger {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            padding: 8px 10px;
+            border: 0;
+            border-radius: 8px;
+            background: none;
+            color: var(--text-faint);
+            font: inherit;
+            font-size: 0.8125rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: color 0.15s, background 0.15s;
+        }
+
+        .opcrf-taskbar-trigger:hover,
+        .opcrf-taskbar-trigger.open {
+            background: var(--bg-hover);
+            color: var(--text-strong);
+        }
+
+        .opcrf-taskbar-trigger:focus-visible,
+        .opcrf-taskbar-check:focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: 2px;
+        }
+
+        .opcrf-taskbar-trigger-label {
+            white-space: nowrap;
+        }
+
+        .opcrf-taskbar-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 17px;
+            height: 17px;
+            padding: 0 4px;
+            border-radius: 999px;
+            background: var(--danger);
+            color: #fff;
+            font-size: 0.625rem;
+            font-weight: 700;
+            line-height: 1;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .opcrf-taskbar-panel {
+            position: absolute;
+            top: calc(100% + 10px);
+            right: 0;
+            z-index: 200;
+            width: min(390px, calc(100vw - 24px));
+            display: none;
+            flex-direction: column;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            box-shadow: var(--shadow-dropdown);
+            overflow: hidden;
+        }
+
+        .opcrf-taskbar-panel.open {
+            display: flex;
+        }
+
+        .opcrf-taskbar-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .opcrf-taskbar-title {
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .opcrf-taskbar-count {
+            color: var(--warn);
+            font-size: 0.75rem;
+            font-weight: 700;
+        }
+
+        .opcrf-taskbar-list {
+            max-height: min(520px, 68vh);
+            overflow-y: auto;
+        }
+
+        .opcrf-taskbar-submission {
+            padding: 12px 14px;
+            border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+        }
+
+        .opcrf-taskbar-submission-heading {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            color: var(--text-strong);
+            font-size: 0.8125rem;
+        }
+
+        .opcrf-taskbar-submission-heading span,
+        .opcrf-taskbar-reviewer {
+            color: var(--text-faint);
+            font-size: 0.6875rem;
+        }
+
+        .opcrf-taskbar-reviewer {
+            margin: 3px 0 8px;
+        }
+
+        .opcrf-taskbar-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            padding: 7px 0;
+        }
+
+        .opcrf-taskbar-check {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex: none;
+            width: 19px;
+            height: 19px;
+            margin-top: 1px;
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            background: var(--bg-panel);
+            color: #fff;
+            cursor: pointer;
+        }
+
+        .opcrf-taskbar-check.is-completed {
+            border-color: var(--primary);
+            background: var(--primary);
+        }
+
+        .opcrf-taskbar-item-link {
+            display: grid;
+            gap: 2px;
+            min-width: 0;
+            flex: 1;
+            text-decoration: none;
+        }
+
+        .opcrf-taskbar-item-label {
+            color: var(--text-strong);
+            font-size: 0.75rem;
+            font-weight: 700;
+        }
+
+        .opcrf-taskbar-item-remark {
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            line-height: 1.4;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+
+        .opcrf-taskbar-item-link:hover .opcrf-taskbar-item-label {
+            color: var(--primary-strong);
+            text-decoration: underline;
+        }
+
+        .opcrf-taskbar-finish {
+            display: block;
+            width: 100%;
+            margin-top: 6px;
+            padding: 7px 10px;
+            border: 1px solid var(--border);
+            border-radius: 7px;
+            background: var(--bg-panel);
+            color: var(--text-strong);
+            font-size: 0.75rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .opcrf-taskbar-finish:hover {
+            border-color: var(--primary);
+            color: var(--primary-strong);
+        }
+
+        .opcrf-taskbar-finish:disabled {
+            cursor: wait;
+            opacity: 0.65;
+        }
+
+        .opcrf-taskbar-revise {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 7px;
+            margin-top: 8px;
+            padding: 8px 12px;
+            border: 1px solid var(--primary);
+            border-radius: 7px;
+            background: var(--primary);
+            color: #fff;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-decoration: none;
+        }
+
+        .opcrf-taskbar-revise:hover {
+            filter: brightness(0.94);
+        }
+
+        .opcrf-taskbar-empty {
+            padding: 18px 14px;
+            color: var(--text-muted);
+            font-size: 0.8125rem;
+        }
+
+        @media (max-width: 560px) {
+            .opcrf-taskbar-panel {
+                position: fixed;
+                top: 60px;
+                left: 10px;
+                right: 10px;
+                width: auto;
+            }
             text-align: center;
             border-top: 1px solid var(--border);
             background: var(--bg-panel);
@@ -6999,6 +7203,9 @@
                          beside the theme toggle and the account menu. --}}
                     @auth
                         <livewire:notifications-menu />
+                        @if (Auth::user()->canViewOpcrfParts() && Auth::user()->canAccessStaffPages())
+                            <livewire:opcrf-tasks-menu />
+                        @endif
                         {{-- The account menu opens these: mounted once in the layout
                              so every page can show "Update My Profile" and the
                              signature dialog without each page carrying them. --}}
