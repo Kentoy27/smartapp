@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Support\SchoolDivision;
 use App\Support\WfpAllotment;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
@@ -29,7 +30,10 @@ class BudgetAllotmentMonitor extends Component
     #[Computed]
     public function overview(): array
     {
-        return WfpAllotment::overview((int) now()->year);
+        return WfpAllotment::overview(
+            (int) now()->year,
+            Auth::user()?->activeDivision() ?? SchoolDivision::ELEMENTARY,
+        );
     }
 
     public function render()

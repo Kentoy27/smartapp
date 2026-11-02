@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasSchoolDivision;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -23,7 +24,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class MonthlyExpenditureMatrix extends Model
 {
-    use HasFactory;
+    use HasFactory, HasSchoolDivision;
 
     public const STATUS_DRAFT = 'draft';
 
@@ -37,6 +38,7 @@ class MonthlyExpenditureMatrix extends Model
 
     protected $fillable = [
         'school_id',
+        'school_division',
         'year',
         'month',
         'status',
@@ -114,13 +116,14 @@ class MonthlyExpenditureMatrix extends Model
         return $this->version;
     }
 
-    /** Only the SH of this school may manage it. */
+    /** Only the SH of this school — in this division — may manage it. */
     public function managedBy(?User $user): bool
     {
         return $user !== null
             && $user->canManageWfp()
             && $this->school_id !== null
-            && (int) $this->school_id === (int) $user->school_id;
+            && (int) $this->school_id === (int) $user->school_id
+            && $user->canAccessDivision($this->schoolDivision());
     }
 
     /**
@@ -135,7 +138,8 @@ class MonthlyExpenditureMatrix extends Model
         return $user !== null
             && $user->canAccessWfp()
             && $this->school_id !== null
-            && (int) $this->school_id === (int) $user->school_id;
+            && (int) $this->school_id === (int) $user->school_id
+            && $user->canAccessDivision($this->schoolDivision());
     }
 
     public function isFinalized(): bool

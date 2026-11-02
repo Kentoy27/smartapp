@@ -135,8 +135,11 @@ class AipManager extends Component
             // exists — the AIP is financed by the WFP, so the link is recorded
             // rather than retyped.
             if ($plan->wfp_plan_id === null) {
+                // The WFP of the division the SH is working in — a High
+                // School's two divisions have a plan each.
                 $plan->wfp_plan_id = WfpPlan::query()
                     ->where('school_id', $user->school_id)
+                    ->where('school_division', $user->activeDivision())
                     ->where('year', $this->year)
                     ->value('id');
 

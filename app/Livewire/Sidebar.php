@@ -9,6 +9,7 @@ use App\Models\MovRequirement;
 use App\Models\OpcrfSubmission;
 use App\Models\User;
 use App\Models\UserMov;
+use App\Support\SchoolDivision;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
@@ -313,6 +314,18 @@ class Sidebar extends Component
                     'section' => 'Admin',
                     'order' => 23,
                 ];
+
+                // School Division Mapping: where existing (pre-division)
+                // financial records are explicitly assigned to Junior High or
+                // Senior High — nothing is ever assigned automatically.
+                $items[] = [
+                    'label' => 'School Division Mapping',
+                    'route' => 'division-mapping.index',
+                    'path' => 'division-mapping',
+                    'icon' => 'arrow-right-left',
+                    'section' => 'Admin',
+                    'order' => 24,
+                ];
             }
         } elseif (Auth::user()?->isBudgetRole()) {
             $items[] = [
@@ -493,13 +506,8 @@ class Sidebar extends Component
                     'section' => 'Files',
                     'order' => 11,
                     'children' => [
-                        [
-                            'key' => 'wfp-plans',
-                            'label' => 'Work & Financial Plan',
-                            'title' => 'Download, upload and review your school\'s Work and Financial Plan',
-                            'url' => route('wfp.index'),
-                            'route' => 'wfp.index',
-                        ],
+                        // The matrix is where the lines are entered: the
+                        // source of truth, so it comes first.
                         [
                             'key' => 'wfp-matrices',
                             'label' => 'Monthly Expenditure Matrix',
@@ -508,9 +516,7 @@ class Sidebar extends Component
                             'route' => 'wfp.matrices.*',
                         ],
                         // The report the matrices add up to: the year's lines
-                        // rolled up per account code, as the printed form. It
-                        // sits last because it is what the two pages above it
-                        // produce.
+                        // rolled up per account code, as the printed form.
                         [
                             'key' => 'wfp-line-items',
                             'label' => 'Per Line Item Expenditure',
@@ -518,8 +524,40 @@ class Sidebar extends Component
                             'url' => route('wfp.lineitems.index'),
                             'route' => 'wfp.lineitems.*',
                         ],
+                        // The plan generated from the matrix sits last: it is
+                        // the document the pages above it produce.
+                        [
+                            'key' => 'wfp-plans',
+                            'label' => 'Work & Financial Plan',
+                            'title' => 'Download, upload and review your school\'s Work and Financial Plan',
+                            'url' => route('wfp.index'),
+                            'route' => 'wfp.index',
+                        ],
                     ],
                 ];
+            }
+        }
+
+        // A High School account's financial destinations say which division
+        // they lead to ("— Junior High", "— Senior High"); Elementary's
+        // labels carry no suffix, so its navigation is exactly as it was.
+        $suffix = SchoolDivision::sidebarSuffix(
+            Auth::user()?->activeDivision() ?? SchoolDivision::ELEMENTARY,
+        );
+
+        if ($suffix !== '') {
+            foreach ($items as $index => $item) {
+                if (($item['path'] ?? null) === 'wfp') {
+                    $items[$index]['label'] = ($item['label'] ?? '').$suffix;
+                }
+
+                foreach (($item['children'] ?? []) as $childIndex => $child) {
+                    $key = (string) ($child['key'] ?? '');
+
+                    if (str_starts_with($key, 'wfp-') || str_starts_with($key, 'budget-')) {
+                        $items[$index]['children'][$childIndex]['label'] = ($child['label'] ?? '').$suffix;
+                    }
+                }
             }
         }
 

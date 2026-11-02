@@ -188,8 +188,14 @@
         </div>
 
         @if ($this->canChangeRoles())
+            {{-- Close only when the press STARTS on the backdrop itself
+                 (@mousedown.self). A click-based guard is not enough: the
+                 expression `self` resolves to window.self (always truthy),
+                 and releasing a drag that started inside the panel — text
+                 selection, a scrollbar drag — targets the backdrop and
+                 would close the modal mid-edit. --}}
             <div class="modal-backdrop {{ $showRoleModal ? 'is-open' : '' }}"
-                 @if ($showRoleModal) @click="self && $wire.closeRoleModal()" @endif
+                 @if ($showRoleModal) @mousedown.self="$wire.closeRoleModal()" @endif
                  role="presentation">
                 <div class="modal" role="dialog" aria-modal="true" aria-labelledby="roleFormTitle" @click.stop>
                 <div class="modal-head">
@@ -270,7 +276,7 @@
 
         @if ($showDeleteModal)
             <div class="modal-backdrop is-open"
-                 @click="self && $wire.closeDeleteModal()"
+                 @mousedown.self="$wire.closeDeleteModal()"
                  role="presentation">
                 <div class="modal modal--confirmation" role="dialog" aria-modal="true" aria-labelledby="deleteFormTitle" @click.stop>
                     <div class="modal-head">
@@ -300,7 +306,7 @@
 
     {{-- ADD / EDIT USER MODAL (one modal, two modes) --}}
     <div class="modal-backdrop {{ $showCreateModal ? 'is-open' : '' }}"
-         @if ($showCreateModal) @click="self && $wire.closeCreateModal()" @endif
+         @if ($showCreateModal) @mousedown.self="$wire.closeCreateModal()" @endif
          role="presentation">
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="userFormTitle" @click.stop>
             <div class="modal-head">
@@ -435,6 +441,65 @@
                             class="is-readonly"
                         >
                     </div>
+
+                    {{-- FINANCIAL CLASSIFICATION: Elementary keeps the single
+                         division; a High School names its sublevel (the
+                         account's default division) and may be granted access
+                         to both high-school divisions. Plain Elementary
+                         accounts see none of these fields. --}}
+                    <div class="field">
+                        <label for="formSchoolLevel">School Level</label>
+                        <select
+                            id="formSchoolLevel"
+                            wire:model.live="school_level"
+                            @class(['error' => $errors->has('school_level')])
+                        >
+                            @foreach ($this->schoolLevelOptions() as $option)
+                                <option value="{{ $option['value'] }}">{{ $option['label'] }}</option>
+                            @endforeach
+                        </select>
+                        @error('school_level') <div class="error-text">{{ $message }}</div> @enderror
+                    </div>
+
+                    @if ($this->isHighSchool())
+                        <div class="field">
+                            <label for="formSchoolSublevel">School Sublevel</label>
+                            <select
+                                id="formSchoolSublevel"
+                                wire:model.live="school_sublevel"
+                                @class(['error' => $errors->has('school_sublevel')])
+                            >
+                                @foreach ($this->schoolSublevelOptions() as $option)
+                                    <option value="{{ $option['value'] }}">{{ $option['label'] }}</option>
+                                @endforeach
+                            </select>
+                            @error('school_sublevel') <div class="error-text">{{ $message }}</div> @enderror
+                        </div>
+
+                        <fieldset class="field">
+                            <legend>Division Access</legend>
+                            <div class="field-hint">
+                                The divisions this account may work in. The School Sublevel is always one of them;
+                                check both for an account that manages both Junior and Senior High.
+                            </div>
+                            <div class="role-options">
+                                @foreach ($this->divisionAccessOptions() as $option)
+                                    <label class="role-option">
+                                        <input
+                                            type="checkbox"
+                                            value="{{ $option['value'] }}"
+                                            wire:model.live="division_access"
+                                        >
+                                        <span class="role-option-body">
+                                            <strong>{{ $option['label'] }}</strong>
+                                        </span>
+                                    </label>
+                                @endforeach
+                            </div>
+                            @error('division_access') <div class="error-text">{{ $message }}</div> @enderror
+                            @error('division_access.*') <div class="error-text">{{ $message }}</div> @enderror
+                        </fieldset>
+                    @endif
                 @endif
 
                 <div class="field">

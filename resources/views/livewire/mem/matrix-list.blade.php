@@ -1,19 +1,4 @@
 <div class="mem-component">
-    {{-- On load, make sure the selected year's twelve months exist. A POST via
-         x-init (never a side effect of the GET page render); the stable
-         wire:key keeps Alpine from re-running it on every morph. Creating
-         months is a write, so a read-only reader (the Bookkeeper) does not
-         fire it — the action would be a no-op for them anyway. --}}
-    @if ($this->canEdit())
-        <div
-            wire:key="mem-year-init"
-            x-data
-            x-init="$wire.initializeYear()"
-            class="mem-init-sentinel"
-            aria-hidden="true"
-        ></div>
-    @endif
-
     @if ($successMessage)
         <div
             wire:key="mem-list-alert-{{ md5($successMessage) }}"
@@ -45,31 +30,12 @@
     @endif
 
     <div class="card">
-        <div class="card-head users-toolbar">
+        <div class="card-head users-toolbar mem-list-toolbar">
             <label class="users-per-page">
                 <span>Year</span>
                 <select wire:model.live="year" aria-label="Filter by year">
                     <option value="">All</option>
                     @foreach ($this->years as $option)
-                        <option value="{{ $option }}">{{ $option }}</option>
-                    @endforeach
-                </select>
-            </label>
-
-            <label class="users-per-page">
-                <span>Status</span>
-                <select wire:model.live="status" aria-label="Filter by status">
-                    <option value="all">All</option>
-                    <option value="draft">Draft</option>
-                    <option value="validated">Validated</option>
-                    <option value="finalized">Finalized</option>
-                </select>
-            </label>
-
-            <label class="users-per-page">
-                <span>Rows</span>
-                <select wire:model.live="perPage" aria-label="Rows per page">
-                    @foreach ([10, 25, 50] as $option)
                         <option value="{{ $option }}">{{ $option }}</option>
                     @endforeach
                 </select>
@@ -102,19 +68,7 @@
                     >
                         <x-icon name="plus" :size="16" />
                         <span wire:loading.remove wire:target="addYear">Add Year</span>
-                        <span wire:loading wire:target="addYear">Adding…</span>
-                    </button>
-
-                    <button
-                        type="button"
-                        class="ac-import-btn"
-                        wire:click="generateYear"
-                        wire:loading.attr="disabled"
-                        wire:target="generateYear"
-                        title="Re-create any months still missing for the selected year"
-                    >
-                        <span wire:loading.remove wire:target="generateYear">Initialize Year</span>
-                        <span wire:loading wire:target="generateYear">Initializing…</span>
+                        <span wire:loading wire:target="addYear">Generating…</span>
                     </button>
 
                     {{-- <button
@@ -144,18 +98,31 @@
             </div>
         @endunless
 
-        <div class="mem-init-status" wire:loading wire:target="initializeYear" role="status">
-            <span class="users-live-dot"></span> Preparing the year’s months…
-        </div>
+        {{-- Adding a year is a server round-trip. The table is dimmed and
+             covered by a spinner while it runs, so the click reads as
+             progress rather than as a stall. --}}
+        <div
+            class="table-wrap mem-table-shell"
+            wire:loading.class="is-generating"
+            wire:target="addYear"
+        >
+            <div
+                class="mem-table-loading"
+                wire:loading.flex
+                wire:target="addYear"
+                role="status"
+                aria-live="polite"
+            >
+                <span class="mem-table-loading__spinner" aria-hidden="true"></span>
+                <span>Generating the year’s twelve months…</span>
+            </div>
 
-        <div class="table-wrap">
             <table class="data-table">
                 <thead>
                     <tr>
                         <th scope="col">Period</th>
                         <th scope="col">Year</th>
                         <th scope="col">Lines</th>
-                        <th scope="col">Status</th>
                         <th scope="col">Updated</th>
                         <th scope="col" class="users-actions-col">Actions</th>
                     </tr>
@@ -175,9 +142,6 @@
                             </td>
                             <td><span class="ac-code">{{ $matrix->fiscalYearLabel() }}</span></td>
                             <td>{{ $matrix->items_count }}</td>
-                            <td>
-                                <span class="mem-status mem-status--{{ $matrix->status }}">{{ ucfirst($matrix->status) }}</span>
-                            </td>
                             <td>{{ $matrix->updated_at?->diffForHumans() ?? '—' }}</td>
                             <td class="users-actions-col">
                                 <x-row-menu :label="'Actions for '.$matrix->periodLabel()">
@@ -221,11 +185,11 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="6" class="table-empty">
-                                @if ($status !== 'all' || $year !== '')
-                                    No matrices match the current filters.
+                            <td colspan="5" class="table-empty">
+                                @if ($year !== '')
+                                    No matrices for CY {{ $year }} yet — use “Add year” to create its twelve months.
                                 @else
-                                    No matrices yet — pick a year to begin.
+                                    No matrices yet — use “Add year” to create a planning year.
                                 @endif
                             </td>
                         </tr>
@@ -235,7 +199,7 @@
         </div>
 
         <div class="users-footer">
-            <span class="users-live-indicator" wire:loading.delay wire:target="year,status,perPage" title="Updating…">
+            <span class="users-live-indicator" wire:loading.delay wire:target="year" title="Updating…">
                 <span class="users-live-dot"></span> Updating…
             </span>
 

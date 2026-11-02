@@ -83,6 +83,7 @@ class BudgetLineItemAllotment extends Component
         $this->year = (string) WfpAllotment::resolveYear(
             $this->school?->id,
             (int) $this->year,
+            $this->division(),
         );
     }
 
@@ -94,6 +95,12 @@ class BudgetLineItemAllotment extends Component
         abort_unless($user instanceof User && $user->canCheckLineItems(), 404);
 
         return $user;
+    }
+
+    /** The financial division this report is read in. */
+    private function division(): string
+    {
+        return $this->user()->activeDivision();
     }
 
     /* --------------------------------------------------------------- state */
@@ -118,6 +125,7 @@ class BudgetLineItemAllotment extends Component
         $this->year = (string) WfpAllotment::resolveYear(
             $this->school?->id,
             (int) $this->year,
+            $this->division(),
         );
 
         $this->forgetFigures();
@@ -133,6 +141,7 @@ class BudgetLineItemAllotment extends Component
         $this->year = (string) WfpAllotment::resolveYear(
             $this->school?->id,
             (int) $this->year,
+            $this->division(),
         );
 
         $this->forgetFigures();
@@ -214,9 +223,10 @@ class BudgetLineItemAllotment extends Component
             return;
         }
 
-        $year = (int) WfpAllotment::resolveYear($school->id, (int) $this->year);
+        $division = $this->division();
+        $year = (int) WfpAllotment::resolveYear($school->id, (int) $this->year, $division);
 
-        if (WfpAllotment::lineItems($school->id, $year) === []) {
+        if (WfpAllotment::lineItems($school->id, $year, $division) === []) {
             $this->showCheckModal = false;
             $this->errorMessage = 'There are no expenditure lines for '.$school->name.' in CY '.$year.' yet, so there is nothing to check.';
 
@@ -226,7 +236,11 @@ class BudgetLineItemAllotment extends Component
         // One check per school and year: checking again replaces the previous
         // checker, exactly as certifying again replaces the previous officer.
         WfpReportCheck::query()->updateOrCreate(
-            ['school_id' => $school->id, 'year' => $year],
+            [
+                'school_id' => $school->id,
+                'school_division' => $division,
+                'year' => $year,
+            ],
             ['checked_by' => $user->id, 'checked_at' => now()],
         );
 
@@ -291,7 +305,7 @@ class BudgetLineItemAllotment extends Component
     #[Computed]
     public function years(): array
     {
-        return WfpAllotment::years($this->school?->id);
+        return WfpAllotment::years($this->school?->id, $this->division());
     }
 
     /**
@@ -303,7 +317,7 @@ class BudgetLineItemAllotment extends Component
     #[Computed]
     public function months(): array
     {
-        return WfpAllotment::months($this->school?->id, (int) $this->year);
+        return WfpAllotment::months($this->school?->id, (int) $this->year, $this->division());
     }
 
     /**
@@ -320,7 +334,7 @@ class BudgetLineItemAllotment extends Component
             return [];
         }
 
-        return WfpAllotment::lineItems($this->school->id, (int) $this->year);
+        return WfpAllotment::lineItems($this->school->id, (int) $this->year, $this->division());
     }
 
     /**
@@ -348,7 +362,7 @@ class BudgetLineItemAllotment extends Component
     public function allocation(): array
     {
         return WfpAllotment::balance(
-            WfpAllotment::allotment($this->school?->id, (int) $this->year),
+            WfpAllotment::allotment($this->school?->id, (int) $this->year, $this->division()),
             $this->grandTotal,
         );
     }
@@ -362,7 +376,7 @@ class BudgetLineItemAllotment extends Component
     #[Computed]
     public function certification(): ?array
     {
-        return WfpAllotment::certification($this->school?->id, (int) $this->year);
+        return WfpAllotment::certification($this->school?->id, (int) $this->year, $this->division());
     }
 
     /**
@@ -376,7 +390,7 @@ class BudgetLineItemAllotment extends Component
     #[Computed]
     public function checking(): ?array
     {
-        return WfpAllotment::checking($this->school?->id, (int) $this->year);
+        return WfpAllotment::checking($this->school?->id, (int) $this->year, $this->division());
     }
 
     /**
@@ -394,12 +408,15 @@ class BudgetLineItemAllotment extends Component
             return null;
         }
 
+        $division = $this->division();
+
         return User::query()
             ->where('school_id', $school->id)
             ->where('role', 'user')
             ->orderBy('name')
             ->orderBy('username')
-            ->first();
+            ->get()
+            ->first(fn (User $candidate): bool => $candidate->canAccessDivision($division));
     }
 
     public function render()

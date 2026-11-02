@@ -203,10 +203,15 @@ final class MemWorkbookImporter
      * @param  array<int, array<int, array<string, mixed>>>  $valid  month => stored rows
      * @return array{imported: int, months: int}
      */
-    public static function commit(array $valid, int $schoolId, int $year, ?User $user = null): array
-    {
+    public static function commit(
+        array $valid,
+        int $schoolId,
+        int $year,
+        ?User $user = null,
+        ?string $division = SchoolDivision::ELEMENTARY,
+    ): array {
         $matrices = (new MemYearInitializer)
-            ->initialize($schoolId, $year, $user?->id)
+            ->initialize($schoolId, $year, $user?->id, $division)
             ->keyBy('month');
 
         $imported = 0;

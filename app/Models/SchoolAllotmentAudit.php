@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasSchoolDivision;
+use App\Support\SchoolDivision;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -18,6 +20,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class SchoolAllotmentAudit extends Model
 {
+    use HasSchoolDivision;
+
     public const UPDATED_AT = null;
 
     /** An amount was set (created or changed). */
@@ -26,14 +30,26 @@ class SchoolAllotmentAudit extends Model
     /** The allotment was cleared ("not set"). */
     public const ACTION_CLEAR = 'CLEAR';
 
+    /**
+     * The row's school division was re-assigned by the administrator's
+     * mapping page (School Division Mapping). The amount itself did not
+     * change: the entry records that the same money now belongs to another
+     * division.
+     */
+    public const ACTION_MAPPED = 'MAPPED';
+
     /** The change came from the single-row Save. */
     public const SOURCE_SINGLE = 'single';
 
     /** The change came from a bulk apply. */
     public const SOURCE_BULK = 'bulk_set';
 
+    /** The change came from the administrator's School Division Mapping page. */
+    public const SOURCE_MAPPING = 'division_mapping';
+
     protected $fillable = [
         'school_id',
+        'school_division',
         'year',
         'user_id',
         'action',
@@ -74,9 +90,11 @@ class SchoolAllotmentAudit extends Model
         ?float $previousAmount,
         ?float $amount,
         string $source,
+        ?string $division = SchoolDivision::ELEMENTARY,
     ): self {
         return self::query()->create([
             'school_id' => $schoolId,
+            'school_division' => $division ?? SchoolDivision::ELEMENTARY,
             'year' => $year,
             'user_id' => $user?->id,
             'action' => $action,

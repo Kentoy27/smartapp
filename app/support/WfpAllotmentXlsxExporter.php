@@ -77,14 +77,18 @@ final class WfpAllotmentXlsxExporter
     private const MAX_WIDTHS = ['A' => 40.0, 'B' => 20.0, 'C' => self::SPACER_WIDTH, 'D' => 10.0, 'E' => 46.0, 'F' => 20.0, 'G' => 20.0, 'H' => 14.0];
 
     /** Build the workbook's bytes. */
-    public static function bytes(int $schoolId, int $year, ?User $preparedBy = null): string
-    {
+    public static function bytes(
+        int $schoolId,
+        int $year,
+        ?User $preparedBy = null,
+        ?string $division = SchoolDivision::ELEMENTARY,
+    ): string {
         $school = School::query()->with('district')->find($schoolId);
-        $months = WfpAllotment::months($schoolId, $year);
-        $lines = WfpAllotment::lineItems($schoolId, $year);
+        $months = WfpAllotment::months($schoolId, $year, $division);
+        $lines = WfpAllotment::lineItems($schoolId, $year, $division);
         $total = WfpAllotment::total($lines);
-        $certification = WfpAllotment::certification($schoolId, $year);
-        $checking = WfpAllotment::checking($schoolId, $year);
+        $certification = WfpAllotment::certification($schoolId, $year, $division);
+        $checking = WfpAllotment::checking($schoolId, $year, $division);
 
         /** @var array<int, array<string, array{style: int, kind: string, value: string|float|null}>> $cells */
         $cells = [];

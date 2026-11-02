@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasSchoolDivision;
+use App\Support\SchoolDivision;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -19,10 +21,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class WfpReportCheck extends Model
 {
-    use HasFactory;
+    use HasFactory, HasSchoolDivision;
 
     protected $fillable = [
         'school_id',
+        'school_division',
         'year',
         'checked_by',
         'checked_at',
@@ -61,7 +64,7 @@ class WfpReportCheck extends Model
      * signed off on have changed". A check that no longer describes the
      * lines must not keep printing a name on them.
      */
-    public static function clearFor(?int $schoolId, ?int $year): void
+    public static function clearFor(?int $schoolId, ?int $year, ?string $division = SchoolDivision::ELEMENTARY): void
     {
         if ($schoolId === null || $year === null) {
             return;
@@ -70,6 +73,7 @@ class WfpReportCheck extends Model
         static::query()
             ->where('school_id', $schoolId)
             ->where('year', $year)
+            ->when($division !== null, fn ($query) => $query->where('school_division', $division))
             ->delete();
     }
 }

@@ -431,14 +431,13 @@ class WfpLineItemAllotmentTest extends TestCase
 
     // --------------------------------------------------------------- sidebar
 
-    public function test_the_sidebar_offers_the_report_at_the_bottom_of_the_wfp_group(): void
+    public function test_the_sidebar_offers_the_report_under_the_matrix_in_the_wfp_group(): void
     {
         $html = Livewire::actingAs($this->schoolHead())->test(Sidebar::class)->html();
 
         $this->assertStringContainsString(route('wfp.lineitems.index'), $html);
 
-        // Last of the group's pages: the report sits under the matrix and the
-        // plan it is derived from.
+        // The report sits under the matrix it is derived from.
         $this->assertGreaterThan(
             strpos($html, route('wfp.matrices.index')),
             strpos($html, route('wfp.lineitems.index'))

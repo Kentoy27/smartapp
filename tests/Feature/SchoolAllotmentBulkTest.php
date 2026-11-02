@@ -8,6 +8,7 @@ use App\Models\School;
 use App\Models\SchoolAllotment;
 use App\Models\SchoolAllotmentAudit;
 use App\Models\User;
+use App\Support\SchoolDivision;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Livewire\Livewire;
@@ -119,7 +120,7 @@ class SchoolAllotmentBulkTest extends TestCase
             ->assertSee('1 will lose certification')
             // The confirmation restates the consequence before it is applied.
             ->call('confirmBulk')
-            ->assertSee('You are about to set or clear allotments for')
+            ->assertSee('You are about to set or clear the')
             ->assertSee('will lose the current certification and must');
     }
 
@@ -176,7 +177,7 @@ class SchoolAllotmentBulkTest extends TestCase
             ->call('reviewBulk')
             ->call('confirmBulk')
             ->assertSet('bulkApplyCount', 2)
-            ->assertSee('You are about to set or clear allotments for')
+            ->assertSee('You are about to set or clear the')
             ->call('commitBulk')
             ->assertSet('showBulk', false)
             ->assertSet('amounts.'.$school->id, '2000000.00')
@@ -327,6 +328,146 @@ class SchoolAllotmentBulkTest extends TestCase
         $this->assertStringContainsString(
             '1 row(s) could not be applied',
             (string) $component->get('successMessage')
+        );
+    }
+
+    /* ------------------------------------------------------ divisions */
+
+    public function test_a_pasted_row_may_name_its_own_division(): void
+    {
+        $school = $this->school('High School One', '12345');
+
+        Livewire::actingAs($this->budgetOfficer())
+            ->test(SchoolAllotmentManager::class)
+            ->set('year', '2026')
+            ->call('openBulk')
+            ->set('bulkText', '12345, Senior High, 2000000')
+            ->call('reviewBulk')
+            ->assertSet('bulkReadyCount', 1)
+            // The preview names the division the row will land in.
+            ->assertSee('Senior High School')
+            ->call('confirmBulk')
+            ->assertSet('bulkApplyDivisions', [SchoolDivision::SENIOR_HIGH])
+            ->assertSeeHtml('<strong>Senior High School</strong>')
+            ->call('commitBulk');
+
+        $allotment = SchoolAllotment::query()->firstOrFail();
+
+        $this->assertSame($school->id, $allotment->school_id);
+        $this->assertSame(SchoolDivision::SENIOR_HIGH, $allotment->school_division);
+        $this->assertSame(2000000.0, (float) $allotment->amount);
+    }
+
+    public function test_one_file_can_set_two_divisions_of_the_same_school(): void
+    {
+        $school = $this->school('High School One', '12345');
+
+        Livewire::actingAs($this->budgetOfficer())
+            ->test(SchoolAllotmentManager::class)
+            ->set('year', '2026')
+            ->call('openBulk')
+            ->set('bulkText', "12345, Junior High, 1000000\n12345, Senior High, 2000000")
+            ->call('reviewBulk')
+            // The same school in two divisions is two allotments, not a
+            // duplicate: neither row supersedes the other.
+            ->assertSet('bulkReadyCount', 2)
+            ->assertSet('bulkSupersededCount', 0)
+            ->call('confirmBulk')
+            ->assertSet('bulkApplyDivisions', [SchoolDivision::JUNIOR_HIGH, SchoolDivision::SENIOR_HIGH])
+            // The confirmation names both divisions the change lands in.
+            ->assertSeeHtml('<strong>Junior High School and Senior High School</strong>')
+            ->call('commitBulk');
+
+        $rows = SchoolAllotment::query()->orderBy('school_division')->get();
+
+        $this->assertCount(2, $rows);
+        $this->assertSame($school->id, $rows[0]->school_id);
+        $this->assertSame(SchoolDivision::JUNIOR_HIGH, $rows[0]->school_division);
+        $this->assertSame(1000000.0, (float) $rows[0]->amount);
+        $this->assertSame($school->id, $rows[1]->school_id);
+        $this->assertSame(SchoolDivision::SENIOR_HIGH, $rows[1]->school_division);
+        $this->assertSame(2000000.0, (float) $rows[1]->amount);
+
+        $this->assertSame(
+            [SchoolDivision::JUNIOR_HIGH, SchoolDivision::SENIOR_HIGH],
+            SchoolAllotmentAudit::query()->orderBy('id')->pluck('school_division')->all(),
+        );
+    }
+
+    public function test_a_row_that_names_no_division_still_goes_to_the_pages_division(): void
+    {
+        $school = $this->school('Elementary School One', '12345');
+
+        Livewire::actingAs($this->budgetOfficer())
+            ->test(SchoolAllotmentManager::class)
+            ->set('year', '2026')
+            ->call('openBulk')
+            ->set('bulkText', "12345, 1000\n12345, Senior High, 2000")
+            ->call('reviewBulk')
+            ->assertSet('bulkReadyCount', 2)
+            ->call('confirmBulk')
+            ->assertSet('bulkApplyDivisions', [SchoolDivision::ELEMENTARY, SchoolDivision::SENIOR_HIGH])
+            ->call('commitBulk');
+
+        $this->assertSame(
+            1000.0,
+            (float) SchoolAllotment::query()->where('school_division', SchoolDivision::ELEMENTARY)->value('amount'),
+        );
+        $this->assertSame(
+            2000.0,
+            (float) SchoolAllotment::query()->where('school_division', SchoolDivision::SENIOR_HIGH)->value('amount'),
+        );
+    }
+
+    public function test_a_division_that_names_nothing_is_reported_not_written(): void
+    {
+        $this->school('High School One', '12345');
+
+        Livewire::actingAs($this->budgetOfficer())
+            ->test(SchoolAllotmentManager::class)
+            ->set('year', '2026')
+            ->call('openBulk')
+            ->set('bulkText', '12345, College, 100')
+            ->call('reviewBulk')
+            ->assertSet('bulkReadyCount', 0)
+            ->assertSet('bulkInvalidCount', 1)
+            ->assertSee('Division must be');
+
+        $this->assertSame(0, SchoolAllotment::query()->count());
+    }
+
+    public function test_a_senior_high_row_reads_against_its_own_division_not_the_pages(): void
+    {
+        $school = $this->school('High School One', '12345');
+
+        SchoolAllotment::create([
+            'school_id' => $school->id,
+            'school_division' => SchoolDivision::ELEMENTARY,
+            'year' => 2026,
+            'amount' => 1000,
+        ]);
+
+        Livewire::actingAs($this->budgetOfficer())
+            ->test(SchoolAllotmentManager::class)
+            ->set('year', '2026')
+            ->call('openBulk')
+            ->set('bulkText', '12345, Senior High, 2000')
+            ->call('reviewBulk')
+            // The Elementary figure is not the Senior High row's "current
+            // amount": each division reads only its own record.
+            ->assertSee('New allotment')
+            ->assertDontSee('Will update')
+            ->call('confirmBulk')
+            ->call('commitBulk');
+
+        $this->assertSame(2, SchoolAllotment::query()->count());
+        $this->assertSame(
+            1000.0,
+            (float) SchoolAllotment::query()->where('school_division', SchoolDivision::ELEMENTARY)->value('amount'),
+        );
+        $this->assertSame(
+            2000.0,
+            (float) SchoolAllotment::query()->where('school_division', SchoolDivision::SENIOR_HIGH)->value('amount'),
         );
     }
 

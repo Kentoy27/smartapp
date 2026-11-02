@@ -48,6 +48,7 @@ class WfpGenerator
             ? [$matrix]
             : MonthlyExpenditureMatrix::query()
                 ->where('school_id', $plan->school_id)
+                ->where('school_division', $plan->schoolDivision())
                 ->where('year', $plan->year)
                 ->orderBy('month')
                 ->orderBy('id')

@@ -11,6 +11,7 @@ use App\Models\MonthlyExpenditureMatrix;
 use App\Models\School;
 use App\Models\User;
 use App\Models\WfpPlan;
+use App\Models\WfpReportCheck;
 use App\Support\PurePhpZipReader;
 use App\Support\WfpGenerator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -157,50 +158,47 @@ class MemMatrixTest extends TestCase
             ->assertSet('year', (string) now()->year);
     }
 
-    public function test_initializing_a_year_creates_its_twelve_months(): void
+    public function test_opening_the_page_does_not_create_the_years_months(): void
     {
+        // Months exist only because the SH added the year: merely opening
+        // the page must never write.
         $sh = $this->schoolHead();
 
         Livewire::actingAs($sh)->test(MemMatrixList::class)
-            ->set('year', '2026')
-            ->call('generateYear')
-            ->assertHasNoErrors();
+            ->assertSet('year', (string) now()->year);
 
-        $months = MonthlyExpenditureMatrix::where('school_id', $sh->school_id)
-            ->where('year', 2026)
-            ->orderBy('month')
-            ->pluck('month')
-            ->all();
-
-        $this->assertSame(range(1, 12), $months);
-
-        // New months start as blank Drafts with zero lines.
-        $this->assertSame(12, MonthlyExpenditureMatrix::count());
-        $this->assertSame(
-            12,
-            MonthlyExpenditureMatrix::where('status', 'draft')->count()
-        );
-        $this->assertSame(0, MonthlyExpenditureItem::count());
+        $this->assertSame(0, MonthlyExpenditureMatrix::count());
     }
 
-    public function test_initializing_the_same_year_again_does_not_duplicate(): void
+    public function test_the_list_offers_add_year_as_the_only_way_to_create_months(): void
+    {
+        Livewire::actingAs($this->schoolHead())->test(MemMatrixList::class)
+            ->assertSee('Add Year')
+            ->assertSee('No matrices for CY '.now()->year.' yet', false)
+            ->assertDontSee('Initialize Year')
+            // The manual add is covered by a spinner while it runs.
+            ->assertSeeHtml('class="mem-table-loading"')
+            ->assertSeeHtml('wire:loading.flex');
+    }
+
+    public function test_adding_the_same_year_again_does_not_duplicate(): void
     {
         $sh = $this->schoolHead();
 
         $component = Livewire::actingAs($sh)->test(MemMatrixList::class)
-            ->set('year', '2026')
-            ->call('generateYear');
+            ->set('newYear', '2026')
+            ->call('addYear');
 
         $ids = MonthlyExpenditureMatrix::orderBy('id')->pluck('id')->all();
 
-        $component->call('generateYear')->call('generateYear');
+        $component->set('newYear', '2026')->call('addYear');
 
         $this->assertSame(12, MonthlyExpenditureMatrix::count());
         // The same rows, untouched — not replaced.
         $this->assertSame($ids, MonthlyExpenditureMatrix::orderBy('id')->pluck('id')->all());
     }
 
-    public function test_initializing_a_year_preserves_existing_months_and_creates_only_the_missing(): void
+    public function test_adding_a_year_preserves_existing_months_and_creates_only_the_missing(): void
     {
         $sh = $this->schoolHead();
 
@@ -215,8 +213,8 @@ class MemMatrixTest extends TestCase
         $julyId = $july->id;
 
         Livewire::actingAs($sh)->test(MemMatrixList::class)
-            ->set('year', '2026')
-            ->call('generateYear');
+            ->set('newYear', '2026')
+            ->call('addYear');
 
         $this->assertSame(12, MonthlyExpenditureMatrix::count());
 
@@ -230,33 +228,34 @@ class MemMatrixTest extends TestCase
         $this->assertSame(11, MonthlyExpenditureMatrix::where('status', 'draft')->count());
     }
 
-    public function test_initializing_a_year_is_scoped_to_the_callers_school(): void
+    public function test_adding_a_year_is_scoped_to_the_callers_school(): void
     {
         $owner = $this->schoolHead('School A');
         $other = $this->schoolHead('School B');
 
         Livewire::actingAs($owner)->test(MemMatrixList::class)
-            ->set('year', '2026')
-            ->call('generateYear');
+            ->set('newYear', '2026')
+            ->call('addYear');
 
         // Nobody else got a single month.
         $this->assertSame(12, MonthlyExpenditureMatrix::where('school_id', $owner->school_id)->count());
         $this->assertSame(0, MonthlyExpenditureMatrix::where('school_id', $other->school_id)->count());
     }
 
-    public function test_changing_the_year_initializes_the_new_year_and_shows_its_months(): void
+    public function test_changing_the_year_does_not_create_its_months(): void
     {
         $sh = $this->schoolHead();
 
         Livewire::actingAs($sh)->test(MemMatrixList::class)
-            ->set('year', '2025')
-            ->call('generateYear')
+            ->set('newYear', '2025')
+            ->call('addYear')
             ->set('year', '2026')
-            // updatedYear hooks in and ensures 2026 exists too.
             ->assertSet('year', '2026');
 
         $this->assertSame(12, MonthlyExpenditureMatrix::where('year', 2025)->count());
-        $this->assertSame(12, MonthlyExpenditureMatrix::where('year', 2026)->count());
+        // Filtering only narrows the list; the months of the chosen year are
+        // created by "Add Year", never by browsing to it.
+        $this->assertSame(0, MonthlyExpenditureMatrix::where('year', 2026)->count());
     }
 
     public function test_the_table_lists_the_months_in_calendar_order(): void
@@ -264,8 +263,8 @@ class MemMatrixTest extends TestCase
         $sh = $this->schoolHead();
 
         Livewire::actingAs($sh)->test(MemMatrixList::class)
-            ->set('year', '2026')
-            ->call('generateYear')
+            ->set('newYear', '2026')
+            ->call('addYear')
             ->assertSeeInOrder([
                 'January 2026',
                 'February 2026',
@@ -282,52 +281,30 @@ class MemMatrixTest extends TestCase
             ]);
     }
 
-    public function test_the_status_filter_narrows_the_years_months(): void
-    {
-        $sh = $this->schoolHead();
-
-        Livewire::actingAs($sh)->test(MemMatrixList::class)
-            ->set('year', '2026')
-            ->call('generateYear');
-
-        MonthlyExpenditureMatrix::where('year', 2026)->where('month', 5)
-            ->update(['status' => MonthlyExpenditureMatrix::STATUS_FINALIZED]);
-
-        Livewire::actingAs($sh)->test(MemMatrixList::class)
-            ->set('year', '2026')
-            ->set('status', 'finalized')
-            ->assertSee('May 2026')
-            ->assertDontSee('January 2026');
-    }
-
-    public function test_a_school_head_with_no_school_cannot_initialize_a_year(): void
-    {
-        $sh = User::factory()->create(['role' => 'user', 'is_superadmin' => false, 'school_id' => null]);
-
-        Livewire::actingAs($sh)->test(MemMatrixList::class)
-            ->set('year', '2026')
-            ->call('generateYear')
-            ->assertSet('errorMessage', fn ($value) => $value !== null);
-
-        $this->assertSame(0, MonthlyExpenditureMatrix::count());
-    }
-
-    public function test_a_new_year_can_be_added_and_its_twelve_months_are_created(): void
+    public function test_adding_a_year_creates_its_twelve_blank_drafts(): void
     {
         $sh = $this->schoolHead();
 
         Livewire::actingAs($sh)->test(MemMatrixList::class)
             ->set('newYear', '2027')
             ->call('addYear')
+            ->assertHasNoErrors()
             ->assertSet('errorMessage', null)
             // The filter switches to the year just added, so its months show.
             ->assertSet('year', '2027')
             ->assertSee('January 2027');
 
-        $this->assertSame(
-            12,
-            MonthlyExpenditureMatrix::where('school_id', $sh->school_id)->where('year', 2027)->count()
-        );
+        $months = MonthlyExpenditureMatrix::where('school_id', $sh->school_id)
+            ->where('year', 2027)
+            ->orderBy('month')
+            ->pluck('month')
+            ->all();
+
+        $this->assertSame(range(1, 12), $months);
+
+        // New months start as blank Drafts with zero lines.
+        $this->assertSame(12, MonthlyExpenditureMatrix::where('status', 'draft')->count());
+        $this->assertSame(0, MonthlyExpenditureItem::count());
     }
 
     public function test_adding_an_out_of_range_year_is_rejected(): void
@@ -552,6 +529,536 @@ class MemMatrixTest extends TestCase
 
         $this->assertSame('New description', $item->activity_description);
         $this->assertEquals(100.0, (float) $item->calculated_total);
+    }
+
+    // ------------------------------------------------------- apply to months
+
+    public function test_the_add_line_modal_checks_the_current_month_by_default(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh, month: 3);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openLineModal')
+            ->assertSet('lineMonths', [3])
+            ->assertSee('Apply to months')
+            ->assertSeeHtml('wire:model="lineMonths"');
+    }
+
+    public function test_adding_a_line_copies_it_into_every_checked_month(): void
+    {
+        $sh = $this->schoolHead();
+        $january = $this->matrixFor($sh, month: 1);
+        $february = $this->matrixFor($sh, month: 2);
+        $march = $this->matrixFor($sh, month: 3);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
+            ->call('openLineModal')
+            ->set('lineForm.activity_description', 'Monthly internet')
+            ->set('lineForm.resource_kind', 'MOOE')
+            ->set('lineForm.quantity', '1')
+            ->set('lineForm.unit_cost', '1500')
+            ->set('lineMonths', [1, 2, 3])
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors()
+            ->assertSet('successMessage', 'Line added to Jan, Feb and Mar 2026.');
+
+        foreach ([$january, $february, $march] as $matrix) {
+            $this->assertSame(1, $matrix->items()->count());
+
+            $item = $matrix->items()->firstOrFail();
+
+            $this->assertSame('Monthly internet', $item->activity_description);
+            $this->assertSame('MOOE', $item->resource_kind);
+            $this->assertEquals(1500.0, (float) $item->calculated_total);
+        }
+
+        // Every month written is bumped, so a WFP mapped from the old version
+        // reads as out of date.
+        $this->assertSame(2, $january->fresh()->version);
+        $this->assertSame(2, $february->fresh()->version);
+        $this->assertSame(2, $march->fresh()->version);
+    }
+
+    public function test_a_month_without_a_matrix_cannot_receive_the_line(): void
+    {
+        $sh = $this->schoolHead();
+        $january = $this->matrixFor($sh, month: 1);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
+            ->call('openLineModal')
+            // The missing month is shown, but not selectable: adding the year
+            // is still the only path that creates months.
+            ->assertSee('No matrix yet — add the year first')
+            ->set('lineForm.activity_description', 'Monthly internet')
+            ->set('lineMonths', [1, 2])
+            ->call('saveLineFromModal')
+            ->assertHasErrors(['lineMonths'])
+            ->assertSet('showLineModal', true);
+
+        // Refused before anything is written.
+        $this->assertSame(1, MonthlyExpenditureMatrix::count());
+        $this->assertSame(0, MonthlyExpenditureItem::count());
+    }
+
+    public function test_unchecking_the_current_month_leaves_it_untouched(): void
+    {
+        $sh = $this->schoolHead();
+        $january = $this->matrixFor($sh, month: 1);
+        $february = $this->matrixFor($sh, month: 2);
+
+        WfpReportCheck::create([
+            'school_id' => $sh->school_id,
+            'year' => 2026,
+            'checked_by' => $sh->id,
+            'checked_at' => now(),
+        ]);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
+            ->call('openLineModal')
+            ->set('lineForm.activity_description', 'Monthly internet')
+            ->set('lineMonths', [2])
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors();
+
+        $this->assertSame(0, $january->items()->count());
+        $this->assertSame(1, $february->items()->count());
+        $this->assertSame(1, $january->fresh()->version);
+        $this->assertSame(2, $february->fresh()->version);
+
+        // Writing another month of the year still invalidates the check.
+        $this->assertNull(WfpReportCheck::first());
+    }
+
+    public function test_the_edit_modal_offers_apply_to_months_with_the_edited_month_checked(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh, month: 3);
+
+        $item = MonthlyExpenditureItem::create([
+            'matrix_id' => $matrix->id,
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Old line',
+        ]);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openEditModal', 'item-'.$item->id)
+            ->assertSee('Apply to months')
+            ->assertSee('Checked months keep the line — unchecking one removes it there.')
+            // The month holding the line opens checked, like any other month
+            // that holds it.
+            ->assertSet('lineMonths', [3]);
+    }
+
+    public function test_editing_a_line_updates_the_existing_copy_in_a_checked_month(): void
+    {
+        $sh = $this->schoolHead();
+        $january = $this->matrixFor($sh, month: 1);
+        $february = $this->matrixFor($sh, month: 2);
+
+        $jan = $january->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Monthly internet',
+            'resource_kind' => 'MOOE',
+            'quantity' => 1,
+            'unit_cost' => 1500,
+        ]);
+        $feb = $february->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Monthly internet',
+            'resource_kind' => 'MOOE',
+            'quantity' => 1,
+            'unit_cost' => 1500,
+        ]);
+
+        WfpReportCheck::create([
+            'school_id' => $sh->school_id,
+            'year' => 2026,
+            'checked_by' => $sh->id,
+            'checked_at' => now(),
+        ]);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
+            ->call('openEditModal', 'item-'.$jan->id)
+            ->set('lineForm.unit_cost', '2000')
+            ->set('lineMonths', [1, 2])
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors()
+            ->assertSet('successMessage', 'Line saved to Jan and Feb 2026.');
+
+        // February's copy is the same row, updated in place — not re-added.
+        $this->assertSame(1, $february->items()->count());
+        $this->assertSame($feb->id, $feb->fresh()->id);
+        $this->assertEquals(2000.0, (float) $feb->fresh()->unit_cost);
+        $this->assertEquals(2000.0, (float) $feb->fresh()->calculated_total);
+
+        // Both written months are bumped, so a WFP mapped from the old versions
+        // reads as out of date.
+        $this->assertSame(2, $january->fresh()->version);
+        $this->assertSame(2, $february->fresh()->version);
+
+        // Writing another month of the year still invalidates the check.
+        $this->assertNull(WfpReportCheck::first());
+    }
+
+    public function test_editing_a_line_adds_a_copy_to_a_checked_month_without_one(): void
+    {
+        $sh = $this->schoolHead();
+        $january = $this->matrixFor($sh, month: 1);
+        $february = $this->matrixFor($sh, month: 2);
+
+        $jan = $january->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Monthly internet',
+            'quantity' => 1,
+            'unit_cost' => 1500,
+        ]);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
+            ->call('openEditModal', 'item-'.$jan->id)
+            ->set('lineForm.activity_description', 'Monthly internet (revised)')
+            ->set('lineMonths', [1, 2])
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors();
+
+        $this->assertSame(1, $february->items()->count());
+
+        $copy = $february->items()->firstOrFail();
+
+        $this->assertSame('Monthly internet (revised)', $copy->activity_description);
+        $this->assertEquals(1500.0, (float) $copy->unit_cost);
+        $this->assertEquals(1500.0, (float) $copy->calculated_total);
+        $this->assertSame(2, $february->fresh()->version);
+    }
+
+    public function test_editing_a_line_never_overwrites_a_copy_changed_differently(): void
+    {
+        $sh = $this->schoolHead();
+        $january = $this->matrixFor($sh, month: 1);
+        $february = $this->matrixFor($sh, month: 2);
+
+        $jan = $january->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Monthly internet',
+            'quantity' => 1,
+            'unit_cost' => 1500,
+        ]);
+        // February's line started as a copy but was already changed there.
+        $feb = $february->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Monthly internet',
+            'quantity' => 1,
+            'unit_cost' => 999,
+        ]);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
+            ->call('openEditModal', 'item-'.$jan->id)
+            ->set('lineForm.unit_cost', '2000')
+            ->set('lineMonths', [1, 2])
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors();
+
+        // The diverged February line keeps its own value; the edited line is
+        // appended as a fresh copy instead.
+        $this->assertSame(2, $february->items()->count());
+        $this->assertEquals(999.0, (float) $feb->fresh()->unit_cost);
+
+        $appended = $february->items()->where('id', '!=', $feb->id)->firstOrFail();
+
+        $this->assertEquals(2000.0, (float) $appended->unit_cost);
+    }
+
+    public function test_editing_refuses_a_checked_month_without_a_matrix(): void
+    {
+        $sh = $this->schoolHead();
+        $january = $this->matrixFor($sh, month: 1);
+
+        $jan = $january->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Monthly internet',
+            'quantity' => 1,
+            'unit_cost' => 1500,
+        ]);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
+            ->call('openEditModal', 'item-'.$jan->id)
+            ->set('lineForm.unit_cost', '2000')
+            // February has no matrix: adding the year is still the only path
+            // that creates months.
+            ->set('lineMonths', [1, 2])
+            ->call('saveLineFromModal')
+            ->assertHasErrors(['lineMonths'])
+            ->assertSet('showLineModal', true);
+
+        // Refused before anything is written — the edit included.
+        $this->assertSame(1, MonthlyExpenditureMatrix::count());
+        $this->assertEquals(1500.0, (float) $jan->fresh()->unit_cost);
+    }
+
+    public function test_unchecking_the_edited_month_moves_the_line_out_of_it(): void
+    {
+        $sh = $this->schoolHead();
+        $january = $this->matrixFor($sh, month: 1);
+        $february = $this->matrixFor($sh, month: 2);
+
+        $jan = $january->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Monthly internet',
+            'quantity' => 1,
+            'unit_cost' => 1500,
+            'calculated_total' => 1500,
+        ]);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
+            ->call('openEditModal', 'item-'.$jan->id)
+            // January is just a month like the rest: clearing it removes the
+            // line from this month and leaves it only where still checked.
+            ->set('lineMonths', [2])
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors()
+            ->assertSet('successMessage', 'Line saved to Feb 2026. Removed from Jan 2026.');
+
+        $this->assertSame(0, $january->items()->count());
+        $this->assertSame(1, $february->items()->count());
+        $this->assertEquals(1500.0, (float) $february->items()->firstOrFail()->unit_cost);
+    }
+
+    public function test_unchecking_a_month_removes_the_lines_copy_there(): void
+    {
+        $sh = $this->schoolHead();
+        $january = $this->matrixFor($sh, month: 1);
+        $february = $this->matrixFor($sh, month: 2);
+        $march = $this->matrixFor($sh, month: 3);
+
+        $jan = $january->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Monthly internet',
+            'quantity' => 1,
+            'unit_cost' => 1500,
+            'calculated_total' => 1500,
+        ]);
+        $february->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Monthly internet',
+            'quantity' => 1,
+            'unit_cost' => 1500,
+            'calculated_total' => 1500,
+        ]);
+        $march->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Monthly internet',
+            'quantity' => 1,
+            'unit_cost' => 1500,
+            'calculated_total' => 1500,
+        ]);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
+            ->call('openEditModal', 'item-'.$jan->id)
+            ->assertSet('lineMonths', [1, 2, 3])
+            // Clearing March takes the line out of that month on save.
+            ->set('lineMonths', [1, 2])
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors()
+            ->assertSet('successMessage', 'Line saved to Jan and Feb 2026. Removed from Mar 2026.');
+
+        $this->assertSame(0, $march->items()->count());
+        $this->assertSame(1, $february->items()->count());
+        $this->assertSame(2, $march->fresh()->version);
+    }
+
+    public function test_unchecking_a_month_leaves_a_copy_changed_differently(): void
+    {
+        $sh = $this->schoolHead();
+        $january = $this->matrixFor($sh, month: 1);
+        $february = $this->matrixFor($sh, month: 2);
+        $march = $this->matrixFor($sh, month: 3);
+
+        $jan = $january->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Monthly internet',
+            'quantity' => 1,
+            'unit_cost' => 1500,
+            'calculated_total' => 1500,
+        ]);
+        $february->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Monthly internet',
+            'quantity' => 1,
+            'unit_cost' => 1500,
+            'calculated_total' => 1500,
+        ]);
+        // March's line started as a copy but was already changed there.
+        $march->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Monthly internet',
+            'quantity' => 1,
+            'unit_cost' => 999,
+            'calculated_total' => 999,
+        ]);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
+            ->call('openEditModal', 'item-'.$jan->id)
+            // March is not a copy of this line any more, so it is not claimed
+            // by the picker...
+            ->assertSet('lineMonths', [1, 2])
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors()
+            // ...and saving never deletes a line it does not claim.
+            ->assertSet('successMessage', 'Line saved to Jan and Feb 2026.');
+
+        $this->assertSame(1, $march->items()->count());
+        $this->assertEquals(999.0, (float) $march->items()->firstOrFail()->unit_cost);
+        $this->assertSame(1, $march->fresh()->version);
+    }
+
+    public function test_reopening_the_edit_modal_checks_the_months_the_line_was_applied_to(): void
+    {
+        $sh = $this->schoolHead();
+        $january = $this->matrixFor($sh, month: 1);
+        $february = $this->matrixFor($sh, month: 2);
+
+        $jan = $january->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Monthly internet',
+            'quantity' => 1,
+            'unit_cost' => 1500,
+            'calculated_total' => 1500,
+        ]);
+        $february->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Monthly internet',
+            'quantity' => 1,
+            'unit_cost' => 1500,
+            'calculated_total' => 1500,
+        ]);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
+            // The months already holding this line open checked, so an edit
+            // keeps applying there without re-ticking them.
+            ->call('openEditModal', 'item-'.$jan->id)
+            ->assertSet('lineMonths', [1, 2])
+            ->set('lineForm.unit_cost', '2000')
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors()
+            // Saving and opening the line again keeps them checked.
+            ->call('openEditModal', 'item-'.$jan->id)
+            ->assertSet('lineMonths', [1, 2]);
+
+        $this->assertEquals(2000.0, (float) $january->items()->firstOrFail()->unit_cost);
+        $this->assertEquals(2000.0, (float) $february->items()->firstOrFail()->unit_cost);
+    }
+
+    public function test_reopening_the_edit_modal_does_not_check_a_month_whose_copy_diverged(): void
+    {
+        $sh = $this->schoolHead();
+        $january = $this->matrixFor($sh, month: 1);
+        $february = $this->matrixFor($sh, month: 2);
+
+        $jan = $january->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Monthly internet',
+            'quantity' => 1,
+            'unit_cost' => 1500,
+            'calculated_total' => 1500,
+        ]);
+        $february->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Monthly internet',
+            'quantity' => 1,
+            'unit_cost' => 999,
+            'calculated_total' => 999,
+        ]);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
+            ->call('openEditModal', 'item-'.$jan->id)
+            // February's line is no longer a copy of this one, so the edit
+            // does not claim it.
+            ->assertSet('lineMonths', [1]);
+    }
+
+    public function test_saving_an_unchanged_line_does_not_bump_the_other_months(): void
+    {
+        $sh = $this->schoolHead();
+        $january = $this->matrixFor($sh, month: 1);
+        $february = $this->matrixFor($sh, month: 2);
+
+        $jan = $january->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Monthly internet',
+            'quantity' => 1,
+            'unit_cost' => 1500,
+            'calculated_total' => 1500,
+        ]);
+        $february->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Monthly internet',
+            'quantity' => 1,
+            'unit_cost' => 1500,
+            'calculated_total' => 1500,
+        ]);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
+            ->call('openEditModal', 'item-'.$jan->id)
+            ->assertSet('lineMonths', [1, 2])
+            // Save without touching a field: the reopened months are checked,
+            // but February already matches, so it must not be rewritten.
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors();
+
+        $this->assertSame(2, $january->fresh()->version);
+        $this->assertSame(1, $february->fresh()->version);
+    }
+
+    public function test_the_add_line_modal_requires_at_least_one_month(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh, month: 1);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openLineModal')
+            ->set('lineForm.activity_description', 'Monthly internet')
+            ->set('lineMonths', [])
+            ->call('saveLineFromModal')
+            ->assertHasErrors(['lineMonths'])
+            ->assertSet('showLineModal', true);
+
+        $this->assertSame(0, MonthlyExpenditureItem::count());
+    }
+
+    public function test_a_month_outside_the_calendar_is_rejected(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh, month: 1);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openLineModal')
+            ->set('lineForm.activity_description', 'Monthly internet')
+            ->set('lineMonths', [13])
+            ->call('saveLineFromModal')
+            ->assertHasErrors(['lineMonths.0']);
+
+        $this->assertSame(0, MonthlyExpenditureItem::count());
+        $this->assertSame(1, MonthlyExpenditureMatrix::count());
     }
 
     public function test_choosing_an_account_fills_the_modal_form(): void

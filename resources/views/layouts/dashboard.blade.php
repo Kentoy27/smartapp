@@ -9,7 +9,7 @@
     {{-- The version is bumped whenever dashboard.css changes: browsers that
          cached an older copy keep painting the stale sheet at the same URL,
          which is why a broken stylesheet can survive a fresh deploy. --}}
-    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=26">
+    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=31">
     <title>@yield('title', 'Dashboard — SmartApp')</title>
     <script>
         /* Apply the saved theme before first paint to avoid a flash.
@@ -136,6 +136,32 @@
             align-items: center;
             gap: 16px;
             margin-left: auto;
+        }
+
+        /* The financial division the account is working in: only rendered for
+           an account authorized for more than one division (a High School
+           account with access to both, or a division-wide overseer). */
+        .division-switcher {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.75rem;
+            color: var(--text-faint);
+        }
+
+        .division-switcher select {
+            font: inherit;
+            color: var(--text-strong);
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 5px 8px;
+            cursor: pointer;
+        }
+
+        .division-switcher select:focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: 2px;
         }
 
         .header .user-info .avatar {
@@ -1592,10 +1618,6 @@
         }
 
         .error-alert-sentinel {
-            display: none;
-        }
-
-        .mem-init-sentinel {
             display: none;
         }
 
@@ -7211,6 +7233,26 @@
                              signature dialog without each page carrying them. --}}
                         <livewire:profile.update-profile />
                         <livewire:profile.digital-signature-modal />
+                    @endauth
+
+                    {{-- The division the account is working in. Only an account
+                         authorized for more than one division sees it; the
+                         switch is honoured server-side only while the account
+                         still authorizes the chosen division. --}}
+                    @auth
+                        @if (Auth::user()->canSwitchDivision())
+                            <form method="POST" action="{{ route('division.switch') }}" class="division-switcher">
+                                @csrf
+                                <label for="divisionSwitcher" class="division-switcher-label">Division</label>
+                                <select id="divisionSwitcher" name="division" onchange="this.form.submit()" title="The financial division you are working in">
+                                    @foreach (Auth::user()->authorizedDivisions() as $divisionOption)
+                                        <option value="{{ $divisionOption }}" @selected($divisionOption === Auth::user()->activeDivision())>
+                                            {{ \App\Support\SchoolDivision::label($divisionOption) }}
+                                        </option>
+                                    @endforeach
+                                </select>
+                            </form>
+                        @endif
                     @endauth
 
                     <button type="button" class="theme-toggle" id="themeToggle" title="Toggle light/dark mode" aria-label="Toggle light/dark mode">

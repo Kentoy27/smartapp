@@ -67,9 +67,13 @@ final class WfpPlanExporter
      * plan or matrix lines for resolves to one it does have (see dataYearFor),
      * so a crafted value cannot generate from another year's data.
      */
-    public static function exportableFor(?User $user, ?int $preferredYear = null): ?WfpPlan
-    {
-        $year = self::dataYearFor($user, $preferredYear);
+    public static function exportableFor(
+        ?User $user,
+        ?int $preferredYear = null,
+        ?string $division = null,
+    ): ?WfpPlan {
+        $division = self::resolveDivision($user, $division);
+        $year = self::dataYearFor($user, $preferredYear, $division);
 
         if ($year === null) {
             return null;
@@ -77,7 +81,11 @@ final class WfpPlanExporter
 
         /** @var User $user */
         $plan = WfpPlan::firstOrCreate(
-            ['school_id' => $user->school_id, 'year' => $year],
+            [
+                'school_id' => $user->school_id,
+                'school_division' => $division,
+                'year' => $year,
+            ],
             ['status' => WfpPlan::STATUS_DRAFT],
         );
 
@@ -99,9 +107,12 @@ final class WfpPlanExporter
      * Read-only on purpose: the card renders it to say which workbook is
      * coming, and rendering must never create a plan.
      */
-    public static function dataYearFor(?User $user, ?int $preferredYear = null): ?int
-    {
-        $years = self::dataYears($user);
+    public static function dataYearFor(
+        ?User $user,
+        ?int $preferredYear = null,
+        ?string $division = null,
+    ): ?int {
+        $years = self::dataYears($user, $division);
 
         if ($years === []) {
             return null;
@@ -120,20 +131,23 @@ final class WfpPlanExporter
      *
      * @return array<int, int>
      */
-    public static function dataYears(?User $user): array
+    public static function dataYears(?User $user, ?string $division = null): array
     {
         if ($user === null || ! $user->canAccessWfp() || $user->school_id === null) {
             return [];
         }
 
+        $division = self::resolveDivision($user, $division);
         $schoolId = (int) $user->school_id;
 
         $planYears = WfpPlan::query()
             ->where('school_id', $schoolId)
+            ->where('school_division', $division)
             ->pluck('year');
 
         $matrixYears = MonthlyExpenditureMatrix::query()
             ->where('school_id', $schoolId)
+            ->where('school_division', $division)
             ->whereHas('items')
             ->pluck('year');
 
@@ -144,5 +158,11 @@ final class WfpPlanExporter
             ->sortDesc()
             ->values()
             ->all();
+    }
+
+    /** The division to export: the explicit one, else the account's active division. */
+    private static function resolveDivision(?User $user, ?string $division): string
+    {
+        return $division ?? $user?->activeDivision() ?? SchoolDivision::ELEMENTARY;
     }
 }

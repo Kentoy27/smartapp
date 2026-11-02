@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasSchoolDivision;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -16,12 +17,13 @@ use Illuminate\Support\Facades\Storage;
  */
 class WfpSubmission extends Model
 {
-    use HasFactory;
+    use HasFactory, HasSchoolDivision;
 
     public const STATUS_UPLOADED = 'uploaded';
 
     protected $fillable = [
         'user_id',
+        'school_division',
         'original_file_name',
         'file_path',
         'file_size',
@@ -105,7 +107,9 @@ class WfpSubmission extends Model
      */
     public function canBeManagedBy(?User $user): bool
     {
-        return $user !== null && $this->user_id === $user->id;
+        return $user !== null
+            && $this->user_id === $user->id
+            && $user->canAccessDivision($this->schoolDivision());
     }
 
     /**
@@ -119,7 +123,8 @@ class WfpSubmission extends Model
             return false;
         }
 
-        return $user->canReviewWfp() || $this->user_id === $user->id;
+        return $user->canAccessDivision($this->schoolDivision())
+            && ($user->canReviewWfp() || $this->user_id === $user->id);
     }
 
     /**

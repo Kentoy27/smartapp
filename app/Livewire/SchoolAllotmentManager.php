@@ -9,9 +9,13 @@ use App\Models\SchoolAllotmentAudit;
 use App\Models\User;
 use App\Support\MemYearInitializer;
 use App\Support\SchoolAllotmentImporter;
+use App\Support\SchoolDivision;
 use App\Support\WfpAllotment;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -39,19 +43,34 @@ use RuntimeException;
 #[Title('School Allotments — SmartApp')]
 class SchoolAllotmentManager extends Component
 {
-    use WithPagination;
     use WithFileUploads;
+    use WithPagination;
 
     /** How many analysed rows are shown in the bulk preview. Every row is
      *  still applied — this only caps what is sent to the browser, and the
      *  rows beyond it stay selected. */
     private const BULK_PREVIEW_LIMIT = 200;
 
+    /**
+     * The slices the school table can show. 'all' is the default; the others
+     * are the questions the Budget office actually asks of a division's
+     * roster — who has a School Head to consume the money, who is still
+     * missing an allotment, and whose is already set.
+     */
+    private const SCHOOL_FILTERS = ['all', 'with_head', 'without_allotment', 'with_allotment'];
+
     /** The budget year being set. */
     public string $year = '';
 
     /** Search across school, School ID, district and School Head. */
     public string $search = '';
+
+    /**
+     * Which slice of the division's schools the table shows: every school
+     * ('all'), the ones a School Head works in this division ('with_head'),
+     * or the ones still missing an amount ('without_allotment').
+     */
+    public string $schoolFilter = 'all';
 
     public int $perPage = 25;
 
@@ -130,6 +149,15 @@ class SchoolAllotmentManager extends Component
     public int $bulkApplyClearCertificationCount = 0;
 
     /**
+     * The divisions the confirmed rows will write to, in canonical order.
+     * One file may carry several — a high school's Junior High and Senior
+     * High figures at once — so the confirmation names every one.
+     *
+     * @var array<int, string>
+     */
+    public array $bulkApplyDivisions = [];
+
+    /**
      * The finished apply's report, while its result screen is showing.
      *
      * @var array{processed: int, created: int, updated: int, cleared: int, unchanged: int, cleared_certification: int, skipped: int, errors: array<int, array{line: int, school_id: string, error: string}>}|null
@@ -152,6 +180,18 @@ class SchoolAllotmentManager extends Component
         abort_unless($user instanceof User && $user->canManageAllotments(), 404);
 
         return $user;
+    }
+
+    /** The financial division these allotments belong to. */
+    private function division(): string
+    {
+        return $this->user()->activeDivision();
+    }
+
+    /** The divisions the account may write to; a bulk row may name any of them. */
+    private function allowedDivisions(): array
+    {
+        return $this->user()->authorizedDivisions();
     }
 
     /* --------------------------------------------------------------- state */
@@ -181,6 +221,17 @@ class SchoolAllotmentManager extends Component
 
     public function updatedSearch(): void
     {
+        $this->resetPage();
+    }
+
+    public function updatedSchoolFilter(): void
+    {
+        // A crafted value filters nothing — it must not silently leave the
+        // select showing an option the table is not applying.
+        if (! in_array($this->schoolFilter, self::SCHOOL_FILTERS, true)) {
+            $this->schoolFilter = 'all';
+        }
+
         $this->resetPage();
     }
 
@@ -230,46 +281,236 @@ class SchoolAllotmentManager extends Component
 
         $field = 'amounts.'.$schoolId;
 
-        $this->validateOnly($field, [
-            $field => ['nullable', 'numeric', 'min:0', 'max:9999999999999.99'],
-        ], [
-            $field.'.numeric' => 'Enter the allotment as a number.',
-            $field.'.min' => 'The allotment cannot be negative.',
-            $field.'.max' => 'The allotment is too large to record.',
-        ]);
+        $this->validateOnly($field, $this->amountRules($field), $this->amountMessages($field));
 
         $raw = $this->amounts[$schoolId] ?? null;
 
-        $existing = SchoolAllotment::query()
-            ->where('school_id', $school->id)
-            ->where('year', (int) $this->year)
-            ->first();
+        $division = $this->division();
 
-        if ($raw === null || trim((string) $raw) === '') {
-            if ($existing !== null) {
-                $previousAmount = (float) $existing->amount;
+        $existing = $this->findAllotment($school->id, $division);
 
-                $existing->delete();
+        $result = $this->persistAmount($user, $division, (int) $this->year, $school, $existing, $raw);
 
-                SchoolAllotmentAudit::record(
-                    (int) $school->id,
-                    (int) $this->year,
-                    $user,
-                    SchoolAllotmentAudit::ACTION_CLEAR,
-                    $previousAmount,
-                    null,
-                    SchoolAllotmentAudit::SOURCE_SINGLE,
-                );
-            }
+        $this->certifyingSchoolId = null;
+        unset($this->overview);
+        $this->errorMessage = null;
 
+        if ($result['amount'] === null) {
             unset($this->amounts[$schoolId]);
-            $this->certifyingSchoolId = null;
-            unset($this->overview);
-            $this->errorMessage = null;
             $this->successMessage = 'Allotment cleared — '.$school->name
                 .' has no CY '.$this->year.' allotment on record.';
 
             return;
+        }
+
+        // Echo the stored figure back so the field shows exactly what the
+        // database now holds (2 decimals, no thousands separators).
+        $this->amounts[$schoolId] = number_format($result['amount'], 2, '.', '');
+        $this->successMessage = 'Allotment saved — '.$school->name.' may consume '
+            .number_format($result['amount'], 2).' in CY '.$this->year.'.'
+            .($result['cleared_certification']
+                ? ' The previous certification was cleared because the amount changed.'
+                : '');
+    }
+
+    /**
+     * Save every amount the officer has entered, in one action — the page's
+     * whole reason for being a table: type the figures down the column, then
+     * press one button instead of a Save per row.
+     *
+     * Only rows that actually differ from what is stored are written, so a
+     * sweep with nothing edited changes nothing at all (and re-stamps no
+     * one's "set by"). A row that fails validation is reported and left
+     * alone; the rest still land.
+     */
+    public function saveAll(): void
+    {
+        $user = $this->user();
+
+        if (! $this->validYear()) {
+            $this->errorMessage = 'Choose a valid budget year before saving.';
+
+            return;
+        }
+
+        $division = $this->division();
+        $year = (int) $this->year;
+
+        // Everything on the officer's screen: the year's stored amounts plus
+        // any row they typed into — including rows left on another page.
+        $schoolIds = array_values(array_unique(array_map('intval', array_keys($this->amounts))));
+
+        if ($schoolIds === []) {
+            $this->successMessage = 'Nothing to save — no amounts have been entered yet.';
+
+            return;
+        }
+
+        $schools = School::query()->whereIn('id', $schoolIds)->get()->keyBy('id');
+
+        $stored = SchoolAllotment::query()
+            ->where('year', $year)
+            ->where('school_division', $division)
+            ->whereIn('school_id', $schoolIds)
+            ->get()
+            ->keyBy('school_id');
+
+        $created = 0;
+        $updated = 0;
+        $cleared = 0;
+        $clearedCertification = 0;
+        $failed = 0;
+
+        foreach ($schoolIds as $schoolId) {
+            $school = $schools->get($schoolId);
+
+            if ($school === null) {
+                continue;
+            }
+
+            $raw = $this->amounts[$schoolId] ?? null;
+            $record = $stored->get($schoolId);
+            $raw = $raw === null ? null : trim((string) $raw);
+
+            // The row already holds this figure (or is blank with nothing on
+            // record): there is nothing to write. A figure typed in another
+            // spelling ("2000000" for 2000000.00) is still no change — the
+            // stored form is echoed back and the row is left untouched.
+            if ($raw === null || $raw === '') {
+                if ($record === null) {
+                    continue;
+                }
+            } elseif ($record !== null && is_numeric($raw)
+                && round((float) $raw, 2) === round((float) $record->amount, 2)) {
+                $this->amounts[$schoolId] = number_format((float) $record->amount, 2, '.', '');
+
+                continue;
+            }
+
+            $field = 'amounts.'.$schoolId;
+
+            // Validated per row with the same rules the single-row Save uses.
+            // Livewire's own validateOnly() would abort the whole sweep on the
+            // first bad row; a sweep reports the bad rows and writes the sound
+            // ones, so the failure is caught and put on the field instead.
+            $validator = Validator::make(
+                ['amount' => $raw],
+                $this->amountRules('amount'),
+                $this->amountMessages('amount'),
+            );
+
+            if ($validator->fails()) {
+                foreach ($validator->errors()->get('amount') as $message) {
+                    $this->addError($field, $message);
+                }
+
+                $failed++;
+
+                continue;
+            }
+
+            $result = $this->persistAmount($user, $division, $year, $school, $record, $raw);
+
+            match ($result['status']) {
+                'created' => $created++,
+                'updated' => $updated++,
+                'cleared' => $cleared++,
+                default => null,
+            };
+
+            if ($result['cleared_certification']) {
+                $clearedCertification++;
+            }
+
+            $this->amounts[$schoolId] = $result['amount'] === null
+                ? ''
+                : number_format($result['amount'], 2, '.', '');
+        }
+
+        $this->certifyingSchoolId = null;
+        unset($this->overview);
+
+        $saved = $created + $updated + $cleared;
+
+        if ($failed > 0) {
+            $this->errorMessage = $failed.' row(s) could not be saved — see the field errors below.';
+        } else {
+            $this->errorMessage = null;
+        }
+
+        $this->successMessage = $this->saveAllSummary($saved, $created, $updated, $cleared, $clearedCertification);
+    }
+
+    /** The one-line account of a Save-all sweep, for the toast. */
+    private function saveAllSummary(int $saved, int $created, int $updated, int $cleared, int $clearedCertification): string
+    {
+        if ($saved === 0) {
+            return 'Nothing to save — every amount already matches what is stored.';
+        }
+
+        $parts = [];
+
+        if ($created > 0) {
+            $parts[] = $created.' set';
+        }
+
+        if ($updated > 0) {
+            $parts[] = $updated.' updated';
+        }
+
+        if ($cleared > 0) {
+            $parts[] = $cleared.' cleared';
+        }
+
+        $summary = 'Saved — '.implode(', ', $parts).' for CY '.$this->year.'.';
+
+        if ($clearedCertification > 0) {
+            $summary .= ' '.$clearedCertification
+                .($clearedCertification === 1 ? ' certification was' : ' certifications were')
+                .' cleared and must be given again.';
+        }
+
+        return $summary;
+    }
+
+    /**
+     * Write one school's amount for the year and division — the shared core of
+     * the single-row Save and the Save-all sweep, so the two can never
+     * disagree about rounding, certification or the audit trail. The caller
+     * has already validated the raw value.
+     *
+     * @return array{status: 'created'|'updated'|'cleared'|'unchanged', amount: ?float, cleared_certification: bool}
+     */
+    private function persistAmount(
+        User $user,
+        string $division,
+        int $year,
+        School $school,
+        ?SchoolAllotment $existing,
+        ?string $raw,
+    ): array {
+        if ($raw === null || trim($raw) === '') {
+            if ($existing === null) {
+                return ['status' => 'unchanged', 'amount' => null, 'cleared_certification' => false];
+            }
+
+            $previousAmount = (float) $existing->amount;
+            $wasCertified = $existing->isCertified();
+
+            $existing->delete();
+
+            SchoolAllotmentAudit::record(
+                (int) $school->id,
+                $year,
+                $user,
+                SchoolAllotmentAudit::ACTION_CLEAR,
+                $previousAmount,
+                null,
+                SchoolAllotmentAudit::SOURCE_SINGLE,
+                $division,
+            );
+
+            return ['status' => 'cleared', 'amount' => null, 'cleared_certification' => $wasCertified];
         }
 
         $amount = round((float) $raw, 2);
@@ -290,7 +531,11 @@ class SchoolAllotmentManager extends Component
         }
 
         SchoolAllotment::query()->updateOrCreate(
-            ['school_id' => $school->id, 'year' => (int) $this->year],
+            [
+                'school_id' => $school->id,
+                'school_division' => $division,
+                'year' => $year,
+            ],
             $attributes,
         );
 
@@ -299,26 +544,60 @@ class SchoolAllotmentManager extends Component
         if ($amountChanged) {
             SchoolAllotmentAudit::record(
                 (int) $school->id,
-                (int) $this->year,
+                $year,
                 $user,
                 SchoolAllotmentAudit::ACTION_SET,
                 $previousAmount,
                 $amount,
                 SchoolAllotmentAudit::SOURCE_SINGLE,
+                $division,
             );
         }
 
-        // Echo the stored figure back so the field shows exactly what the
-        // database now holds (2 decimals, no thousands separators).
-        $this->amounts[$schoolId] = number_format($amount, 2, '.', '');
-        $this->certifyingSchoolId = null;
-        unset($this->overview);
-        $this->errorMessage = null;
-        $this->successMessage = 'Allotment saved — '.$school->name.' may consume '
-            .number_format($amount, 2).' in CY '.$this->year.'.'
-            .($amountChanged && $wasCertified
-                ? ' The previous certification was cleared because the amount changed.'
-                : '');
+        return [
+            'status' => $amountChanged
+                ? ($previousAmount === null ? 'created' : 'updated')
+                : 'unchanged',
+            'amount' => $amount,
+            'cleared_certification' => $amountChanged && $wasCertified,
+        ];
+    }
+
+    /** The stored allotment for one school, year and division. */
+    private function findAllotment(int $schoolId, string $division): ?SchoolAllotment
+    {
+        if (! $this->validYear()) {
+            return null;
+        }
+
+        return SchoolAllotment::query()
+            ->where('school_id', $schoolId)
+            ->where('school_division', $division)
+            ->where('year', (int) $this->year)
+            ->first();
+    }
+
+    /**
+     * The validation rules and messages for one amount field, shared by the
+     * single-row Save and the Save-all sweep.
+     *
+     * @return array<string, array<int, string>>
+     */
+    private function amountRules(string $field): array
+    {
+        return [$field => ['nullable', 'numeric', 'min:0', 'max:9999999999999.99']];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function amountMessages(string $field): array
+    {
+        return [
+            $field.'.numeric' => 'Enter the allotment as a number.',
+            $field.'.min' => 'The allotment cannot be negative.',
+            $field.'.max' => 'The allotment is too large to record.',
+        ];
     }
 
     /* -------------------------------------------------------- certification */
@@ -381,6 +660,7 @@ class SchoolAllotmentManager extends Component
 
         $allotment = SchoolAllotment::query()
             ->where('school_id', $school->id)
+            ->where('school_division', $this->division())
             ->where('year', (int) $this->year)
             ->first();
 
@@ -516,6 +796,7 @@ class SchoolAllotmentManager extends Component
         }
 
         $this->bulkApplyCount = $counts['selected'];
+        $this->bulkApplyDivisions = $counts['divisions'];
         $this->bulkApplyClearCertificationCount = $counts['clears_certification'];
         $this->bulkConfirming = true;
     }
@@ -565,31 +846,38 @@ class SchoolAllotmentManager extends Component
             $excluded,
             (int) $this->year,
             $user,
+            $this->division(),
+            $this->allowedDivisions(),
         );
 
         // Every row that was not applied — invalid, superseded, unchecked or
-        // refused at commit time — belongs in the downloadable report.
+        // refused at commit time — belongs in the downloadable report, each
+        // under the division it was headed for.
         $errors = $report['errors'];
 
         foreach ($analysis['rows'] as $row) {
             $line = (int) $row['line'];
+            $rowDivision = (string) ($row['school_division'] ?? '');
 
             if ($row['superseded']) {
                 $errors[] = [
                     'line' => $line,
                     'school_id' => (string) $row['school_id'],
+                    'school_division' => $rowDivision,
                     'error' => 'Superseded by row '.$row['superseded_line'].' — the last occurrence wins.',
                 ];
             } elseif (! $row['valid']) {
                 $errors[] = [
                     'line' => $line,
                     'school_id' => (string) $row['school_id'],
+                    'school_division' => $rowDivision,
                     'error' => implode(' ', $row['errors']),
                 ];
             } elseif (in_array($line, $excluded, true)) {
                 $errors[] = [
                     'line' => $line,
                     'school_id' => (string) $row['school_id'],
+                    'school_division' => $rowDivision,
                     'error' => 'Unchecked before applying.',
                 ];
             }
@@ -612,12 +900,69 @@ class SchoolAllotmentManager extends Component
         $this->bulkSupersededCount = 0;
         $this->bulkClearCertificationCount = 0;
         $this->bulkApplyCount = 0;
+        $this->bulkApplyDivisions = [];
         $this->bulkApplyClearCertificationCount = 0;
 
         $this->loadAmounts();
         unset($this->overview);
 
         $this->successMessage = $this->bulkSummary($report);
+    }
+
+    /**
+     * Download the schools currently listed — the search and Show filters
+     * applied, every page — with their amounts, as a CSV.
+     *
+     * The columns are the ones the bulk import reads back, so the file
+     * doubles as the bulk template: export it, fill the blanks in a
+     * spreadsheet, and upload the same file through Bulk Set Allotments.
+     */
+    public function exportAllotments()
+    {
+        $this->user();
+
+        if (! $this->validYear()) {
+            $this->errorMessage = 'Choose a valid budget year before downloading.';
+
+            return null;
+        }
+
+        $division = $this->division();
+        $year = (int) $this->year;
+
+        $schools = $this->filteredSchools()
+            ->orderBy('name')
+            ->get(['id', 'name', 'school_id']);
+
+        if ($schools->isEmpty()) {
+            $this->errorMessage = 'There are no schools to download with the current search and filter.';
+
+            return null;
+        }
+
+        $amounts = SchoolAllotment::query()
+            ->where('year', $year)
+            ->where('school_division', $division)
+            ->whereIn('school_id', $schools->pluck('id'))
+            ->pluck('amount', 'school_id');
+
+        $rows = $schools->map(fn (School $school): array => [
+            'school_id' => (string) ($school->school_id ?? ''),
+            'school_name' => (string) $school->name,
+            'school_division' => $division,
+            'amount' => isset($amounts[$school->id]) ? (float) $amounts[$school->id] : null,
+        ])->all();
+
+        $csv = SchoolAllotmentImporter::exportCsv($rows);
+
+        return response()->streamDownload(
+            fn () => print ($csv),
+            'school-allotments-cy'.$this->year.'-'.Str::slug(SchoolDivision::label($division)).'.csv',
+            [
+                'Content-Type' => 'text/csv; charset=UTF-8',
+                'Content-Length' => (string) strlen($csv),
+            ],
+        );
     }
 
     /** The error report for the finished apply, as a download. */
@@ -689,6 +1034,8 @@ class SchoolAllotmentManager extends Component
                     $this->bulkFile->getRealPath(),
                     (int) $this->year,
                     $this->bulkBlankClears,
+                    $this->division(),
+                    $this->allowedDivisions(),
                 );
             }
 
@@ -700,7 +1047,13 @@ class SchoolAllotmentManager extends Component
                 return null;
             }
 
-            return SchoolAllotmentImporter::analyzeText($text, (int) $this->year, $this->bulkBlankClears);
+            return SchoolAllotmentImporter::analyzeText(
+                $text,
+                (int) $this->year,
+                $this->bulkBlankClears,
+                $this->division(),
+                $this->allowedDivisions(),
+            );
         } catch (RuntimeException $exception) {
             if ($this->bulkMode === 'csv') {
                 $this->bulkFile = null;
@@ -776,6 +1129,7 @@ class SchoolAllotmentManager extends Component
         $this->bulkError = null;
         $this->bulkConfirming = false;
         $this->bulkApplyCount = 0;
+        $this->bulkApplyDivisions = [];
         $this->bulkApplyClearCertificationCount = 0;
     }
 
@@ -829,6 +1183,20 @@ class SchoolAllotmentManager extends Component
         return $summary;
     }
 
+    /**
+     * The readable list of the divisions the confirmed apply will write to —
+     * "Senior High School", or "Elementary and Senior High School" when one
+     * file spans several. Read from the fresh analysis the confirmation
+     * restates, never from the browser.
+     */
+    #[Computed]
+    public function bulkApplyDivisionLabel(): string
+    {
+        $summary = SchoolAllotmentImporter::divisionSummary($this->bulkApplyDivisions);
+
+        return $summary !== '' ? $summary : SchoolDivision::label($this->division());
+    }
+
     /* ---------------------------------------------------------------- year */
 
     private function validYear(): bool
@@ -848,6 +1216,7 @@ class SchoolAllotmentManager extends Component
 
         $this->amounts = SchoolAllotment::query()
             ->where('year', (int) $this->year)
+            ->where('school_division', $this->division())
             ->pluck('amount', 'school_id')
             ->map(fn ($amount): string => number_format((float) $amount, 2, '.', ''))
             ->all();
@@ -864,14 +1233,16 @@ class SchoolAllotmentManager extends Component
     #[Computed]
     public function years(): array
     {
+        $division = $this->division();
+
         $years = collect([
             now()->year - 1,
             now()->year,
             now()->year + 1,
             now()->year + 2,
         ])
-            ->merge(SchoolAllotment::query()->distinct()->pluck('year'))
-            ->merge(MonthlyExpenditureMatrix::query()->distinct()->pluck('year'))
+            ->merge(SchoolAllotment::query()->where('school_division', $division)->distinct()->pluck('year'))
+            ->merge(MonthlyExpenditureMatrix::query()->where('school_division', $division)->distinct()->pluck('year'))
             ->map(fn ($year): int => (int) $year)
             ->unique()
             ->sortDesc()
@@ -899,21 +1270,39 @@ class SchoolAllotmentManager extends Component
     public function overview(): array
     {
         return WfpAllotment::overview(
-            $this->validYear() ? (int) $this->year : (int) now()->year
+            $this->validYear() ? (int) $this->year : (int) now()->year,
+            $this->division(),
         );
     }
 
     /**
+     * The slices of the roster the "Show" select offers, in the order it
+     * lists them. Used by the view and by the empty-state message, so the two
+     * can never describe the same filter differently.
+     *
+     * @return array<string, string>
+     */
+    #[Computed]
+    public function schoolFilterOptions(): array
+    {
+        return [
+            'all' => 'All schools',
+            'with_head' => 'With a School Head in this division',
+            'without_allotment' => 'Missing an allotment',
+            'with_allotment' => 'With an allotment set',
+        ];
+    }
+
+    /**
      * The schools, with their School Head account(s), filtered by the search
-     * box. The consumption and allotment figures are joined in render() so
-     * they are read once for the whole page rather than once per row.
+     * box and the Show select. The consumption and allotment figures are
+     * joined in render() so they are read once for the whole page rather than
+     * once per row.
      */
     #[Computed]
     public function schools(): LengthAwarePaginator
     {
-        $term = trim($this->search);
-
-        return School::query()
+        $schools = $this->filteredSchools()
             ->with([
                 'district',
                 'users' => fn ($query) => $query
@@ -921,6 +1310,36 @@ class SchoolAllotmentManager extends Component
                     ->orderBy('name')
                     ->orderBy('username'),
             ])
+            ->orderBy('name')
+            ->paginate($this->perPage);
+
+        // Only this division's School Heads are named against a school.
+        $division = $this->division();
+
+        $schools->getCollection()->transform(function (School $school) use ($division): School {
+            $school->setRelation(
+                'users',
+                $school->users->filter(fn (User $user): bool => $user->canAccessDivision($division))->values(),
+            );
+
+            return $school;
+        });
+
+        return $schools;
+    }
+
+    /**
+     * The roster the search box and the Show select between them — the one
+     * definition the paginated table and the CSV download share, so the file
+     * always carries exactly what the officer is looking at.
+     */
+    private function filteredSchools(): Builder
+    {
+        $term = trim($this->search);
+        $division = $this->division();
+        $year = $this->validYear() ? (int) $this->year : (int) now()->year;
+
+        return School::query()
             ->when($term !== '', function ($query) use ($term): void {
                 $like = '%'.$term.'%';
 
@@ -936,8 +1355,44 @@ class SchoolAllotmentManager extends Component
                                 ->orWhere('username', 'like', $like)));
                 });
             })
-            ->orderBy('name')
-            ->paginate($this->perPage);
+            ->when($this->schoolFilter === 'with_head', function ($query) use ($division): void {
+                $query->whereIn('id', $this->schoolIdsWithHead($division));
+            })
+            ->when(
+                in_array($this->schoolFilter, ['with_allotment', 'without_allotment'], true),
+                function ($query) use ($division, $year): void {
+                    $withAllotment = SchoolAllotment::query()
+                        ->where('year', $year)
+                        ->where('school_division', $division)
+                        ->pluck('school_id');
+
+                    $this->schoolFilter === 'with_allotment'
+                        ? $query->whereIn('id', $withAllotment)
+                        : $query->whereNotIn('id', $withAllotment);
+                },
+            );
+    }
+
+    /**
+     * The schools whose School Head account(s) can work this division — the
+     * roster that will actually consume the money being allotted. The
+     * division each account may work is derived from its classification, so
+     * the match is decided account by account rather than in SQL.
+     *
+     * @return array<int, int>
+     */
+    private function schoolIdsWithHead(string $division): array
+    {
+        return User::query()
+            ->where('role', 'user')
+            ->whereNotNull('school_id')
+            ->get(['id', 'school_id', 'role', 'is_superadmin', 'school_level', 'school_sublevel', 'division_access'])
+            ->filter(fn (User $user): bool => $user->canAccessDivision($division))
+            ->pluck('school_id')
+            ->map(fn ($id): int => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
     }
 
     public function paginationView(): string
@@ -958,9 +1413,12 @@ class SchoolAllotmentManager extends Component
             ->map(fn ($id): int => (int) $id)
             ->all();
 
+        $division = $this->division();
+
         $allotments = SchoolAllotment::query()
             ->with(['setter', 'certifier'])
             ->where('year', $year)
+            ->where('school_division', $division)
             ->whereIn('school_id', $schoolIds)
             ->get()
             ->keyBy('school_id');
@@ -973,6 +1431,7 @@ class SchoolAllotmentManager extends Component
             ? null
             : SchoolAllotment::query()
                 ->where('school_id', $certifyingSchool->id)
+                ->where('school_division', $division)
                 ->where('year', $year)
                 ->first();
 
@@ -981,18 +1440,19 @@ class SchoolAllotmentManager extends Component
         // later search or page change moved its row off the visible page.
         $certifyingSpent = $certifyingSchool === null
             ? 0.0
-            : (float) (WfpAllotment::consumedBySchool([$certifyingSchool->id], $year)[$certifyingSchool->id] ?? 0.0);
+            : (float) (WfpAllotment::consumedBySchool([$certifyingSchool->id], $year, $division)[$certifyingSchool->id] ?? 0.0);
 
         return view('livewire.budget.school-allotments', [
             'schools' => $schools,
             'allotments' => $allotments,
-            'consumed' => WfpAllotment::consumedBySchool($schoolIds, $year),
+            'consumed' => WfpAllotment::consumedBySchool($schoolIds, $year, $division),
             'overview' => $this->overview,
             'canCertify' => $this->user()->canCertifyAllotments(),
             'certifyingSchool' => $certifyingSchool,
             'certifyingAllotment' => $certifyingAllotment,
             'certifyingSpent' => $certifyingSpent,
             'bulkSelectedCount' => $this->bulkSelectedCount(),
+            'divisionLabel' => SchoolDivision::label($division),
         ]);
     }
 

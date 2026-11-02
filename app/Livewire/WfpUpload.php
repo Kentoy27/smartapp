@@ -3,6 +3,7 @@
 namespace App\Livewire;
 
 use App\Models\WfpSubmission;
+use App\Support\SchoolDivision;
 use App\Support\WfpSpreadsheet;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Title;
@@ -114,6 +115,10 @@ class WfpUpload extends Component
     {
         $user = Auth::user();
 
+        // The uploaded plan belongs to the division the account is working
+        // in; the same account's other division's submission is untouched.
+        $division = $user?->activeDivision() ?? SchoolDivision::ELEMENTARY;
+
         // Open + structure-check the workbook before storing anything.
         $spreadsheet = new WfpSpreadsheet($this->file->getRealPath());
         $spreadsheet->validateStructure();
@@ -129,6 +134,7 @@ class WfpUpload extends Component
 
         $submission = WfpSubmission::create([
             'user_id' => $user->id,
+            'school_division' => $division,
             'original_file_name' => $originalName,
             'file_path' => $path,
             'file_size' => $this->file->getSize(),
@@ -146,6 +152,7 @@ class WfpUpload extends Component
         // Keep the just-created analyzed workbook intact if a cleanup failure
         // occurs while removing this user's previous upload.
         WfpSubmission::where('user_id', $user->id)
+            ->where('school_division', $division)
             ->where('id', '!=', $submission->id)
             ->get()
             ->each

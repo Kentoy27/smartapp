@@ -50,7 +50,11 @@ final class WfpValidator
             $planByMonth[$month] = round(($planByMonth[$month] ?? 0.0) + (float) $item->financial_target, 2);
         }
 
-        $matrixByMonth = self::matrixTotalsByMonth((int) $plan->school_id, (int) $plan->year);
+        $matrixByMonth = self::matrixTotalsByMonth(
+            (int) $plan->school_id,
+            (int) $plan->year,
+            $plan->schoolDivision(),
+        );
 
         $months = [];
         $grandMatrix = 0.0;
@@ -100,13 +104,14 @@ final class WfpValidator
      *
      * @return array<int, float>
      */
-    private static function matrixTotalsByMonth(int $schoolId, int $year): array
+    private static function matrixTotalsByMonth(int $schoolId, int $year, ?string $division = null): array
     {
         $totals = [];
 
         $matrices = MonthlyExpenditureMatrix::query()
             ->where('school_id', $schoolId)
             ->where('year', $year)
+            ->when($division !== null, fn ($query) => $query->where('school_division', $division))
             ->with('items')
             ->get();
 

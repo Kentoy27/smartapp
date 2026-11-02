@@ -32,12 +32,13 @@ final class WfpAllotment
      *
      * @return array<int, string>
      */
-    public static function years(?int $schoolId): array
+    public static function years(?int $schoolId, ?string $division = SchoolDivision::ELEMENTARY): array
     {
         $years = $schoolId === null
             ? []
             : MonthlyExpenditureMatrix::query()
                 ->where('school_id', $schoolId)
+                ->when($division !== null, fn ($query) => $query->where('school_division', $division))
                 ->distinct()
                 ->orderByDesc('year')
                 ->pluck('year')
@@ -57,9 +58,12 @@ final class WfpAllotment
      * through this, so a crafted `?year=` on the download can never report on
      * a year the school has nothing in.
      */
-    public static function resolveYear(?int $schoolId, int $requested): int
-    {
-        $years = array_map(intval(...), self::years($schoolId));
+    public static function resolveYear(
+        ?int $schoolId,
+        int $requested,
+        ?string $division = SchoolDivision::ELEMENTARY,
+    ): int {
+        $years = array_map(intval(...), self::years($schoolId, $division));
 
         return in_array($requested, $years, true) ? $requested : (int) ($years[0] ?? now()->year);
     }
@@ -70,8 +74,11 @@ final class WfpAllotment
      * allotment explicitly set to zero is a decision, while no row at all
      * means the office has not set one yet.
      */
-    public static function allotment(?int $schoolId, int $year): ?float
-    {
+    public static function allotment(
+        ?int $schoolId,
+        int $year,
+        ?string $division = SchoolDivision::ELEMENTARY,
+    ): ?float {
         if ($schoolId === null) {
             return null;
         }
@@ -79,6 +86,7 @@ final class WfpAllotment
         $amount = SchoolAllotment::query()
             ->where('school_id', $schoolId)
             ->where('year', $year)
+            ->when($division !== null, fn ($query) => $query->where('school_division', $division))
             ->value('amount');
 
         return $amount === null ? null : round((float) $amount, 2);
@@ -95,8 +103,11 @@ final class WfpAllotment
      *
      * @return array{name: string, position: string, certified_at: CarbonInterface}|null
      */
-    public static function certification(?int $schoolId, int $year): ?array
-    {
+    public static function certification(
+        ?int $schoolId,
+        int $year,
+        ?string $division = SchoolDivision::ELEMENTARY,
+    ): ?array {
         if ($schoolId === null) {
             return null;
         }
@@ -105,6 +116,7 @@ final class WfpAllotment
             ->with('certifier')
             ->where('school_id', $schoolId)
             ->where('year', $year)
+            ->when($division !== null, fn ($query) => $query->where('school_division', $division))
             ->first();
 
         if ($allotment === null || ! $allotment->isCertified() || $allotment->certifier === null) {
@@ -129,8 +141,11 @@ final class WfpAllotment
      *
      * @return array{name: string, position: string, checked_at: CarbonInterface}|null
      */
-    public static function checking(?int $schoolId, int $year): ?array
-    {
+    public static function checking(
+        ?int $schoolId,
+        int $year,
+        ?string $division = SchoolDivision::ELEMENTARY,
+    ): ?array {
         if ($schoolId === null) {
             return null;
         }
@@ -139,6 +154,7 @@ final class WfpAllotment
             ->with('checker')
             ->where('school_id', $schoolId)
             ->where('year', $year)
+            ->when($division !== null, fn ($query) => $query->where('school_division', $division))
             ->first();
 
         if ($check === null || ! $check->isChecked() || $check->checker === null) {
@@ -170,9 +186,11 @@ final class WfpAllotment
      *     remaining_total: float
      * }
      */
-    public static function overview(int $year): array
+    public static function overview(int $year, ?string $division = null): array
     {
-        $allotments = SchoolAllotment::query()->where('year', $year);
+        $allotments = SchoolAllotment::query()
+            ->where('year', $year)
+            ->when($division !== null, fn ($query) => $query->where('school_division', $division));
 
         $allottedSchools = (clone $allotments)->count();
         $certifiedSchools = (clone $allotments)
@@ -185,9 +203,11 @@ final class WfpAllotment
             ->join('monthly_expenditure_matrices as mem', 'mem.id', '=', 'monthly_expenditure_items.matrix_id')
             ->join('school_allotments as sa', function ($join) use ($year): void {
                 $join->on('sa.school_id', '=', 'mem.school_id')
+                    ->on('sa.school_division', '=', 'mem.school_division')
                     ->where('sa.year', '=', $year);
             })
             ->where('mem.year', $year)
+            ->when($division !== null, fn ($query) => $query->where('mem.school_division', $division))
             ->selectRaw(
                 'SUM(ROUND(COALESCE(monthly_expenditure_items.quantity, 0) '
                 .'* COALESCE(monthly_expenditure_items.unit_cost, 0), 2)) as consumed'
@@ -243,8 +263,11 @@ final class WfpAllotment
      * @param  array<int, int>  $schoolIds
      * @return array<int, float>
      */
-    public static function consumedBySchool(array $schoolIds, int $year): array
-    {
+    public static function consumedBySchool(
+        array $schoolIds,
+        int $year,
+        ?string $division = SchoolDivision::ELEMENTARY,
+    ): array {
         if ($schoolIds === []) {
             return [];
         }
@@ -253,6 +276,7 @@ final class WfpAllotment
             ->join('monthly_expenditure_matrices as mem', 'mem.id', '=', 'monthly_expenditure_items.matrix_id')
             ->whereIn('mem.school_id', $schoolIds)
             ->where('mem.year', $year)
+            ->when($division !== null, fn ($query) => $query->where('mem.school_division', $division))
             ->groupBy('mem.school_id')
             ->selectRaw(
                 'mem.school_id as school_id, '
@@ -272,13 +296,17 @@ final class WfpAllotment
      *
      * @return array<int, array{label: string, budget: float, has_matrix: bool}>
      */
-    public static function months(?int $schoolId, int $year): array
-    {
+    public static function months(
+        ?int $schoolId,
+        int $year,
+        ?string $division = SchoolDivision::ELEMENTARY,
+    ): array {
         $matrices = $schoolId === null
             ? collect()
             : MonthlyExpenditureMatrix::query()
                 ->where('school_id', $schoolId)
                 ->where('year', $year)
+                ->when($division !== null, fn ($query) => $query->where('school_division', $division))
                 ->with('items')
                 ->get()
                 ->keyBy('month');
@@ -312,8 +340,11 @@ final class WfpAllotment
      *
      * @return array<int, array{title: string, code: ?string, total: float, percent: float}>
      */
-    public static function lineItems(?int $schoolId, int $year): array
-    {
+    public static function lineItems(
+        ?int $schoolId,
+        int $year,
+        ?string $division = SchoolDivision::ELEMENTARY,
+    ): array {
         if ($schoolId === null) {
             return [];
         }
@@ -321,7 +352,8 @@ final class WfpAllotment
         $items = MonthlyExpenditureItem::query()
             ->whereHas('matrix', fn ($query) => $query
                 ->where('school_id', $schoolId)
-                ->where('year', $year))
+                ->where('year', $year)
+                ->when($division !== null, fn ($query) => $query->where('school_division', $division)))
             ->get(['account_title', 'account_code', 'quantity', 'unit_cost']);
 
         /** @var array<string, array{title: string, code: ?string, total: float}> $grouped */

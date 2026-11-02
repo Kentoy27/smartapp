@@ -9,10 +9,10 @@ use Illuminate\Support\Facades\DB;
 /**
  * Ensures a school has its twelve monthly matrices for a planning year.
  *
- * Selecting a year is the primary way to view the Monthly Expenditure Matrix
- * page, so a year's months are made to exist lazily rather than one at a time.
- * This is idempotent: a month that already exists is left exactly as it is —
- * its expenditure lines, status, version and audit columns are never touched —
+ * The matrix list creates a year's months when the School Head adds that
+ * year, so they exist in one step rather than one at a time. This is
+ * idempotent: a month that already exists is left exactly as it is — its
+ * expenditure lines, status, version and audit columns are never touched —
  * and only the missing months are inserted, as blank Drafts.
  *
  * Ownership is by school. The caller passes the school id and the year, and
@@ -35,10 +35,17 @@ final class MemYearInitializer
      *
      * @return Collection<int, MonthlyExpenditureMatrix>
      */
-    public function initialize(int $schoolId, int $year, ?int $userId = null): Collection
-    {
+    public function initialize(
+        int $schoolId,
+        int $year,
+        ?int $userId = null,
+        ?string $division = SchoolDivision::ELEMENTARY,
+    ): Collection {
+        $division ??= SchoolDivision::ELEMENTARY;
+
         $existing = MonthlyExpenditureMatrix::query()
             ->where('school_id', $schoolId)
+            ->where('school_division', $division)
             ->where('year', $year)
             ->pluck('month')
             ->all();
@@ -50,6 +57,7 @@ final class MemYearInitializer
 
             $rows = array_map(fn (int $month): array => [
                 'school_id' => $schoolId,
+                'school_division' => $division,
                 'year' => $year,
                 'month' => $month,
                 'status' => MonthlyExpenditureMatrix::STATUS_DRAFT,
@@ -70,6 +78,7 @@ final class MemYearInitializer
 
         return MonthlyExpenditureMatrix::query()
             ->where('school_id', $schoolId)
+            ->where('school_division', $division)
             ->where('year', $year)
             ->orderBy('month')
             ->get();

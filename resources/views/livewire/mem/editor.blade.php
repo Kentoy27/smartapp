@@ -597,7 +597,7 @@
                 @endif
 
                 <div class="field mem-line-span">
-                    <label for="memLineTemplate">Start from a template <span class="field-optional">(optional)</span></label>
+                    <label for="memLineTemplate">Project/Activity/Expenditure <span class="field-optional">(optional)</span></label>
 
                     <div class="mem-combo" x-data="{ open: false }" @click.outside="open = false">
                         <span class="mem-combo__search" aria-hidden="true">
@@ -613,7 +613,7 @@
                             aria-controls="memTemplateOptions"
                             :aria-expanded="String(open)"
                             wire:model.live.debounce.300ms="templateSearch"
-                            placeholder="Search templates…"
+                            placeholder="Project/Activity/Expenditure"
                             @focus="open = true"
                             @keydown.escape="open = false"
                         >
@@ -679,6 +679,50 @@
                                 <span>{{ $label }}</span>
                             </label>
                         @endforeach
+                    </div>
+
+                    {{-- Apply one encoded line to several months at once.
+                         Adding copies the line into each checked month;
+                         editing keeps it only in the months checked — each
+                         checked month's copy is updated (or added when it has
+                         none) and an unchecked month holding a copy loses it.
+                         Reopening an edit checks the months already holding
+                         the line. --}}
+                    <div class="mem-line-months mem-line-span" role="group" aria-labelledby="memLineMonthsLabel">
+                        <span id="memLineMonthsLabel" class="mem-line-months__label">
+                            Apply to months
+                            <span class="mem-line-months__hint">
+                                {{ $editingKey === null
+                                    ? 'The line is added to every month checked.'
+                                    : 'Checked months keep the line — unchecking one removes it there.' }}
+                            </span>
+                        </span>
+
+                        <div class="mem-line-months__grid">
+                            @foreach ($this->months as $tab)
+                                <label
+                                    wire:key="mem-line-month-{{ $tab['month'] }}"
+                                    @class(['mem-line-month', 'is-current' => $tab['current'], 'is-empty' => $tab['id'] === null])
+                                    title="{{ $tab['id'] === null ? 'No matrix yet — add the year first' : $tab['label'] }}"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        wire:model="lineMonths"
+                                        value="{{ $tab['month'] }}"
+                                        aria-label="{{ $tab['label'] }}"
+                                        @disabled($tab['id'] === null)
+                                    >
+                                    <span>{{ $tab['abbr'] }}</span>
+                                </label>
+                            @endforeach
+                        </div>
+
+                        @php($monthError = $errors->first('lineMonths') ?: $errors->first('lineMonths.*'))
+                        @if ($monthError !== '')
+                            <div class="error-text">{{ $monthError }}</div>
+                        @else
+                            <div class="field-hint">Months without a matrix are not selectable — add the year first.</div>
+                        @endif
                     </div>
 
                     <div class="field">
@@ -859,7 +903,7 @@
                                 <span class="field-template-tag">from template</span>
                             @endif
                         </label>
-                        <input id="memLineFunding" type="text" list="memFundingSourceOptions" wire:model="lineForm.funding_source" placeholder="e.g. MOOE">
+                        <input id="memLineFunding" type="text" list="memFundingSourceOptions" wire:model="lineForm.funding_source" placeholder="MOOE" disabled>
                         <datalist id="memFundingSourceOptions">
                             @foreach ($this->fundingSourceOptions as $option)
                                 <option value="{{ $option->name }}"></option>
@@ -875,7 +919,7 @@
                                 <span class="field-template-tag">from template</span>
                             @endif
                         </label>
-                        <input id="memLineOrg" type="text" list="memOrgClassificationOptions" wire:model="lineForm.organizational_classification" placeholder="e.g. School">
+                        <input id="memLineOrg" type="text" list="memOrgClassificationOptions" wire:model="lineForm.organizational_classification" placeholder="School" disabled>
                         <datalist id="memOrgClassificationOptions">
                             @foreach ($this->orgClassificationOptions as $option)
                                 <option value="{{ $option->name }}"></option>

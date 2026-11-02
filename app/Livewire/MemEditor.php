@@ -77,6 +77,14 @@ class MemEditor extends Component
     /** The _key of the line being edited in the modal, or null when adding one. */
     public ?string $editingKey = null;
 
+    /**
+     * The month numbers the line being added is copied into. Only used while
+     * adding: editing changes one month's line in place.
+     *
+     * @var array<int, int>
+     */
+    public array $lineMonths = [];
+
     /** The live query behind the account combobox (title or object code). */
     public string $accountSearch = '';
 
@@ -310,9 +318,10 @@ class MemEditor extends Component
      */
     public function openLineModal(string $section = 'operations'): void
     {
-        $this->guard();
+        $matrix = $this->guard();
 
         $this->editingKey = null;
+        $this->lineMonths = [(int) $matrix->month];
         $this->lineSection = in_array($section, ['operations', 'project'], true) ? $section : 'operations';
         $this->lineForm = $this->blankRow($this->lineSection);
         $this->accountSearch = '';
@@ -334,12 +343,29 @@ class MemEditor extends Component
     {
         $this->guard();
 
+        // The modal offers the same month picker as adding. The month being
+        // edited is always written (the edit is in place), so it opens checked.
+        $this->lineMonths = [(int) $this->matrix->month];
+
         foreach ($this->items as $row) {
             if (($row['_key'] ?? null) !== $key) {
                 continue;
             }
 
             $this->editingKey = $key;
+
+            // Reopen with the months this line already lives in checked, so a
+            // save-and-reopen never silently forgets where it was applied.
+            $item = ! empty($row['id'])
+                ? MonthlyExpenditureItem::query()
+                    ->where('matrix_id', $this->matrixId)
+                    ->find((int) $row['id'])
+                : null;
+
+            if ($item !== null) {
+                $this->lineMonths = $this->monthsHoldingLine($item);
+            }
+
             $this->lineSection = in_array($row['section'] ?? '', ['operations', 'project'], true)
                 ? $row['section']
                 : 'operations';
@@ -386,6 +412,7 @@ class MemEditor extends Component
         $this->showLineModal = false;
         $this->editingKey = null;
         $this->lineForm = [];
+        $this->lineMonths = [];
         $this->accountSearch = '';
         $this->templateSearch = '';
         $this->appliedTemplateId = null;
@@ -396,10 +423,13 @@ class MemEditor extends Component
     }
 
     /**
-     * Validate the modal's line and either append it to the grid (add) or
-     * write it back over the row it was opened for (edit). Either way the
-     * change joins the others unsaved, so it still needs Save Draft — same
-     * as a duplicated or imported line.
+     * Validate the modal's line and write it to the checked months. Adding
+     * copies the line in; editing keeps the line only in the checked months —
+     * this month's row is updated (or deleted when its checkbox is cleared),
+     * a checked sibling month's exact copy is updated (or a copy appended),
+     * and an unchecked sibling month's exact copy is removed. This month goes
+     * through persist(), so the optimistic lock applies; every written month
+     * is bumped.
      */
     public function saveLineFromModal(): void
     {
@@ -427,34 +457,391 @@ class MemEditor extends Component
 
         $this->validate($this->lineRules(), $this->lineAttributes());
 
+        $currentMonth = (int) $this->matrix->month;
+
         if ($this->editingKey !== null) {
+            $checked = $this->checkedMonths();
+
+            if ($checked === null) {
+                return;
+            }
+
+            /** @var array<int, int> $months */
+            [$months, $siblings] = $checked;
+
+            $inCurrentMonth = in_array($currentMonth, $months, true);
+            $dropped = false;
+
+            // The picker is the line's membership, so the month this page
+            // shows is not special: checked, its row is edited in place;
+            // unchecked, the row leaves the grid and persist() deletes it.
             foreach ($this->items as $index => $row) {
                 if (($row['_key'] ?? null) !== $this->editingKey) {
                     continue;
                 }
 
-                // Keep the row's identity; the form only carries its fields.
-                $updated = array_merge($row, $this->lineForm);
-                $updated['_key'] = $row['_key'];
-                $updated['id'] = $row['id'];
+                if ($inCurrentMonth) {
+                    // Keep the row's identity; the form only carries its fields.
+                    $updated = array_merge($row, $this->lineForm);
+                    $updated['_key'] = $row['_key'];
+                    $updated['id'] = $row['id'];
 
-                $this->items[$index] = $updated;
+                    $this->items[$index] = $updated;
+                } else {
+                    unset($this->items[$index]);
+                    $this->items = array_values($this->items);
+                    $dropped = true;
+                }
 
                 break;
             }
 
-            $this->closeLineModal();
-        } else {
             $row = array_merge($this->blankRow($this->lineSection), $this->lineForm);
-            $row['_key'] = 'new-'.bin2hex(random_bytes(8));
-            $row['id'] = null;
-
-            $this->items[] = $row;
 
             $this->closeLineModal();
+
+            $removed = [];
+
+            $saved = DB::transaction(function () use ($row, $existing, $siblings, $months, $dropped, $currentMonth, &$removed): bool {
+                if (! $this->persist()) {
+                    return false;
+                }
+
+                $this->applyEditToMonths($row, $existing, $siblings);
+
+                $removed = $this->removeLineFromUncheckedMonths($existing, $months);
+
+                if ($dropped) {
+                    $removed[] = $currentMonth;
+                    sort($removed);
+                }
+
+                return true;
+            });
+
+            if (! $saved) {
+                return;
+            }
+
+            // The current month already shows its result in the grid; the
+            // alert is for the months this page does not show.
+            if ($siblings->isNotEmpty() || $removed !== []) {
+                $message = 'Line saved to '.$this->monthList($months).' '.$this->matrix->year.'.';
+
+                if ($removed !== []) {
+                    $message .= ' Removed from '.$this->monthList($removed).' '.$this->matrix->year.'.';
+                }
+
+                $this->successMessage = $message;
+                unset($this->months, $this->allocation, $this->totals);
+            }
+
+            return;
         }
 
-        $this->persist();
+        $checked = $this->checkedMonths();
+
+        if ($checked === null) {
+            return;
+        }
+
+        /** @var array<int, int> $months */
+        [$months, $siblings] = $checked;
+
+        $inCurrentMonth = in_array($currentMonth, $months, true);
+
+        $row = array_merge($this->blankRow($this->lineSection), $this->lineForm);
+        $row['_key'] = 'new-'.bin2hex(random_bytes(8));
+        $row['id'] = null;
+
+        if ($inCurrentMonth) {
+            $this->items[] = $row;
+        }
+
+        $this->closeLineModal();
+
+        $saved = DB::transaction(function () use ($row, $siblings, $inCurrentMonth): bool {
+            if ($inCurrentMonth && ! $this->persist()) {
+                return false;
+            }
+
+            $this->copyLineToMonths($row, $siblings);
+
+            // Writing any month changes the year's lines, so the Bookkeeper's
+            // check no longer describes what the report will show.
+            WfpReportCheck::clearFor(
+                (int) $this->matrix->school_id,
+                (int) $this->matrix->year,
+                $this->matrix->schoolDivision(),
+            );
+
+            return true;
+        });
+
+        if (! $saved) {
+            return;
+        }
+
+        // A current-month-only add already shows its result in the grid; the
+        // alert is for the months this page does not show.
+        if (count($months) > 1 || ! $inCurrentMonth) {
+            $this->successMessage = 'Line added to '.$this->monthList($months).' '.$this->matrix->year.'.';
+        }
+
+        // The other months' totals and the year's balance changed too.
+        unset($this->months, $this->allocation, $this->totals);
+    }
+
+    /**
+     * The modal's checked months, validated, with the sibling months' matrices
+     * resolved for this editor's school, division and year. Adding and editing
+     * share this, so the two can never disagree about which months a write
+     * reaches. Returns null (with an error on the form) when a checked month
+     * has no matrix — adding the year is the one path that creates months.
+     *
+     * @return array{0: array<int, int>, 1: \Illuminate\Database\Eloquent\Collection<int, MonthlyExpenditureMatrix>}|null
+     */
+    private function checkedMonths(): ?array
+    {
+        $this->validate([
+            'lineMonths' => ['required', 'array', 'min:1'],
+            'lineMonths.*' => ['integer', 'between:1,12'],
+        ], [
+            'lineMonths.required' => 'Choose at least one month for this line.',
+            'lineMonths.min' => 'Choose at least one month for this line.',
+        ]);
+
+        /** @var array<int, int> $months */
+        $months = array_values(array_unique(array_map('intval', $this->lineMonths)));
+        sort($months);
+
+        $otherMonths = array_values(array_diff($months, [(int) $this->matrix->month]));
+
+        $siblings = MonthlyExpenditureMatrix::query()
+            ->where('school_id', $this->matrix->school_id)
+            ->where('school_division', $this->matrix->schoolDivision())
+            ->where('year', $this->matrix->year)
+            ->whereIn('month', $otherMonths)
+            ->get()
+            ->keyBy('month');
+
+        if ($siblings->count() !== count($otherMonths)) {
+            $this->addError('lineMonths', 'A checked month has no matrix yet — add the year first, then apply the line.');
+
+            return null;
+        }
+
+        return [$months, $siblings];
+    }
+
+    /**
+     * Copy one validated line into each sibling month's matrix, appended after
+     * that month's existing lines. The matrices are the ones the caller
+     * resolved for this editor's school, division and year.
+     *
+     * @param  array<string, mixed>  $row
+     * @param  iterable<int, MonthlyExpenditureMatrix>  $matrices
+     */
+    private function copyLineToMonths(array $row, iterable $matrices): void
+    {
+        foreach ($matrices as $matrix) {
+            $position = (int) ($matrix->items()->max('position') ?? 0) + 1;
+
+            $item = new MonthlyExpenditureItem(self::itemAttributes($row, (int) $matrix->id, $position));
+            $item->syncTotal();
+            $item->save();
+
+            $matrix->updated_by = Auth::id();
+            $matrix->save();
+            $matrix->bumpVersion();
+        }
+    }
+
+    /**
+     * Apply an edited line to each checked sibling month. A month that still
+     * holds an exact copy of the line as it was before this edit has that copy
+     * updated in place; a month without one receives an appended copy. "Exact
+     * copy" is compared on the stored columns, so a copy someone has already
+     * changed there keeps its own values — it is never silently overwritten.
+     *
+     * @param  array<string, mixed>  $row  the edited line
+     * @param  MonthlyExpenditureItem|null  $snapshot  the line as last saved
+     * @param  iterable<int, MonthlyExpenditureMatrix>  $matrices
+     */
+    private function applyEditToMonths(array $row, ?MonthlyExpenditureItem $snapshot, iterable $matrices): void
+    {
+        $fingerprint = $snapshot === null ? null : self::copyFingerprint($snapshot);
+
+        foreach ($matrices as $matrix) {
+            $copies = $fingerprint === null
+                ? collect()
+                : $matrix->items()->get()->filter(
+                    fn (MonthlyExpenditureItem $item): bool => self::copyFingerprint($item) === $fingerprint,
+                );
+
+            $written = false;
+
+            if ($copies->isEmpty()) {
+                $position = (int) ($matrix->items()->max('position') ?? 0) + 1;
+
+                $item = new MonthlyExpenditureItem(self::itemAttributes($row, (int) $matrix->id, $position));
+                $item->syncTotal();
+                $item->save();
+                $written = true;
+            } else {
+                foreach ($copies as $copy) {
+                    $copy->fill(self::itemAttributes($row, (int) $matrix->id, (int) $copy->position));
+                    $copy->syncTotal();
+
+                    // The modal opens with these months checked, so a save that
+                    // changed nothing must not churn the month's version.
+                    if (! $copy->isDirty()) {
+                        continue;
+                    }
+
+                    $copy->save();
+                    $written = true;
+                }
+            }
+
+            if (! $written) {
+                continue;
+            }
+
+            $matrix->updated_by = Auth::id();
+            $matrix->save();
+            $matrix->bumpVersion();
+        }
+    }
+
+    /**
+     * The picker is the line's membership: a month left unchecked must not
+     * keep a copy of it. Every sibling month still holding an exact copy of
+     * the line as it was loses it; a line changed differently there is left
+     * alone, exactly as the update path leaves it alone.
+     *
+     * @param  array<int, int>  $checkedMonths
+     * @return array<int, int>  the months the line was removed from
+     */
+    private function removeLineFromUncheckedMonths(?MonthlyExpenditureItem $snapshot, array $checkedMonths): array
+    {
+        if ($snapshot === null) {
+            return [];
+        }
+
+        $fingerprint = self::copyFingerprint($snapshot);
+
+        $siblings = MonthlyExpenditureMatrix::query()
+            ->where('school_id', $this->matrix->school_id)
+            ->where('school_division', $this->matrix->schoolDivision())
+            ->where('year', $this->matrix->year)
+            ->where('month', '!=', $this->matrix->month)
+            ->whereNotIn('month', $checkedMonths)
+            ->get();
+
+        $removed = [];
+
+        foreach ($siblings as $matrix) {
+            $copies = $matrix->items()->get()->filter(
+                fn (MonthlyExpenditureItem $item): bool => self::copyFingerprint($item) === $fingerprint,
+            );
+
+            if ($copies->isEmpty()) {
+                continue;
+            }
+
+            foreach ($copies as $copy) {
+                $copy->delete();
+            }
+
+            $matrix->updated_by = Auth::id();
+            $matrix->save();
+            $matrix->bumpVersion();
+
+            $removed[] = (int) $matrix->month;
+        }
+
+        sort($removed);
+
+        return $removed;
+    }
+
+    /**
+     * The stored fields that make one line's content — everything but its id,
+     * the matrix (month) it sits in, its position and its timestamps. Two
+     * lines with the same fingerprint are the same line, copied.
+     *
+     * @return array<string, mixed>
+     */
+    private static function copyFingerprint(MonthlyExpenditureItem $item): array
+    {
+        $attributes = $item->getAttributes();
+
+        unset($attributes['id'], $attributes['matrix_id'], $attributes['position'], $attributes['created_at'], $attributes['updated_at']);
+
+        return $attributes;
+    }
+
+    /**
+     * The months whose matrix already holds this line: the month it lives in
+     * plus every sibling month with an identical stored line. The edit modal
+     * opens with them checked, so the months a line was applied to survive a
+     * save-and-reopen; a copy changed differently there no longer matches and
+     * opens unchecked.
+     *
+     * @return array<int, int>
+     */
+    private function monthsHoldingLine(MonthlyExpenditureItem $item): array
+    {
+        $fingerprint = self::copyFingerprint($item);
+
+        $siblings = MonthlyExpenditureMatrix::query()
+            ->where('school_id', $this->matrix->school_id)
+            ->where('school_division', $this->matrix->schoolDivision())
+            ->where('year', $this->matrix->year)
+            ->where('month', '!=', $this->matrix->month)
+            ->pluck('month', 'id');
+
+        $months = [(int) $this->matrix->month];
+
+        if ($siblings->isEmpty()) {
+            return $months;
+        }
+
+        $holding = MonthlyExpenditureItem::query()
+            ->whereIn('matrix_id', $siblings->keys()->all())
+            ->get()
+            ->filter(fn (MonthlyExpenditureItem $sibling): bool => self::copyFingerprint($sibling) === $fingerprint)
+            ->map(fn (MonthlyExpenditureItem $sibling): int => (int) $siblings->get((int) $sibling->matrix_id))
+            ->unique()
+            ->values()
+            ->all();
+
+        $months = array_values(array_unique(array_merge($months, $holding)));
+        sort($months);
+
+        return $months;
+    }
+
+    /**
+     * "Jan, Feb and Mar" — the checked months, in calendar order.
+     *
+     * @param  array<int, int>  $months
+     */
+    private function monthList(array $months): string
+    {
+        $labels = array_map(
+            fn (int $month): string => MonthlyExpenditureMatrix::MONTH_ABBREVIATIONS[$month],
+            $months,
+        );
+
+        if (count($labels) === 1) {
+            return $labels[0];
+        }
+
+        $last = array_pop($labels);
+
+        return implode(', ', $labels).' and '.$last;
     }
 
     /**
@@ -698,6 +1085,42 @@ class MemEditor extends Component
     /* ---------------------------------------------------------------- save */
 
     /**
+     * The column values one validated line writes to a matrix item. Shared by
+     * the editor's own grid save and the cross-month copy, so the two can
+     * never write different fields.
+     *
+     * @param  array<string, mixed>  $row
+     * @return array<string, mixed>
+     */
+    private static function itemAttributes(array $row, int $matrixId, int $position): array
+    {
+        return [
+            'matrix_id' => $matrixId,
+            'position' => $position,
+            'section' => (string) ($row['section'] ?? 'operations'),
+            'objective' => self::nullIfBlank($row['objective'] ?? null),
+            'activity_description' => (string) ($row['activity_description'] ?? ''),
+            'resource_kind' => self::nullIfBlank($row['resource_kind'] ?? null),
+            'quantity' => self::nullIfBlank($row['quantity'] ?? null) !== null ? (float) $row['quantity'] : null,
+            'unit' => self::nullIfBlank($row['unit'] ?? null),
+            'unit_cost' => self::nullIfBlank($row['unit_cost'] ?? null) !== null ? (float) $row['unit_cost'] : null,
+            'account_title' => self::nullIfBlank($row['account_title'] ?? null),
+            'account_code' => self::nullIfBlank($row['account_code'] ?? null),
+            'account_classification_id' => ! empty($row['account_classification_id']) ? (int) $row['account_classification_id'] : null,
+            'funding_source' => self::nullIfBlank($row['funding_source'] ?? null),
+            'organizational_classification' => self::nullIfBlank($row['organizational_classification'] ?? null),
+            'activity_movs' => self::nullIfBlank($row['activity_movs'] ?? null),
+            'major_output' => self::nullIfBlank($row['major_output'] ?? null),
+            'performance_indicator' => self::nullIfBlank($row['performance_indicator'] ?? null),
+            'wfp_line_template_id' => ! empty($row['wfp_line_template_id']) ? (int) $row['wfp_line_template_id'] : null,
+            'resource_kind_id' => ! empty($row['resource_kind_id']) ? (int) $row['resource_kind_id'] : null,
+            'unit_id' => ! empty($row['unit_id']) ? (int) $row['unit_id'] : null,
+            'funding_source_id' => ! empty($row['funding_source_id']) ? (int) $row['funding_source_id'] : null,
+            'org_classification_id' => ! empty($row['org_classification_id']) ? (int) $row['org_classification_id'] : null,
+        ];
+    }
+
+    /**
      * Write the grid to the database. Returns false (with an error message) only
      * when the optimistic lock fails; validation failures throw and are handled
      * by Livewire.
@@ -739,6 +1162,7 @@ class MemEditor extends Component
         // describes what the report will show.
         $checkExisted = WfpReportCheck::query()
             ->where('school_id', $matrix->school_id)
+            ->where('school_division', $matrix->schoolDivision())
             ->where('year', $matrix->year)
             ->exists();
 
@@ -757,30 +1181,7 @@ class MemEditor extends Component
                     continue; // never let a crafted call move a line across matrices
                 }
 
-                $item->fill([
-                    'matrix_id' => $matrix->id,
-                    'position' => $position,
-                    'section' => (string) ($row['section'] ?? 'operations'),
-                    'objective' => self::nullIfBlank($row['objective'] ?? null),
-                    'activity_description' => (string) ($row['activity_description'] ?? ''),
-                    'resource_kind' => self::nullIfBlank($row['resource_kind'] ?? null),
-                    'quantity' => self::nullIfBlank($row['quantity'] ?? null) !== null ? (float) $row['quantity'] : null,
-                    'unit' => self::nullIfBlank($row['unit'] ?? null),
-                    'unit_cost' => self::nullIfBlank($row['unit_cost'] ?? null) !== null ? (float) $row['unit_cost'] : null,
-                    'account_title' => self::nullIfBlank($row['account_title'] ?? null),
-                    'account_code' => self::nullIfBlank($row['account_code'] ?? null),
-                    'account_classification_id' => ! empty($row['account_classification_id']) ? (int) $row['account_classification_id'] : null,
-                    'funding_source' => self::nullIfBlank($row['funding_source'] ?? null),
-                    'organizational_classification' => self::nullIfBlank($row['organizational_classification'] ?? null),
-                    'activity_movs' => self::nullIfBlank($row['activity_movs'] ?? null),
-                    'major_output' => self::nullIfBlank($row['major_output'] ?? null),
-                    'performance_indicator' => self::nullIfBlank($row['performance_indicator'] ?? null),
-                    'wfp_line_template_id' => ! empty($row['wfp_line_template_id']) ? (int) $row['wfp_line_template_id'] : null,
-                    'resource_kind_id' => ! empty($row['resource_kind_id']) ? (int) $row['resource_kind_id'] : null,
-                    'unit_id' => ! empty($row['unit_id']) ? (int) $row['unit_id'] : null,
-                    'funding_source_id' => ! empty($row['funding_source_id']) ? (int) $row['funding_source_id'] : null,
-                    'org_classification_id' => ! empty($row['org_classification_id']) ? (int) $row['org_classification_id'] : null,
-                ]);
+                $item->fill(self::itemAttributes($row, (int) $matrix->id, $position));
                 $item->syncTotal();
                 $item->save();
 
@@ -799,7 +1200,7 @@ class MemEditor extends Component
         // The year's lines changed, so the Bookkeeper's check of the account
         // titles and codes no longer stands for what the report shows; it is
         // cleared and must be given again (see WfpReportCheck).
-        WfpReportCheck::clearFor((int) $matrix->school_id, (int) $matrix->year);
+        WfpReportCheck::clearFor((int) $matrix->school_id, (int) $matrix->year, $matrix->schoolDivision());
 
         $fresh = MonthlyExpenditureMatrix::findOrFail($matrix->id);
         $this->loadedVersion = (int) $fresh->version;
@@ -1054,7 +1455,11 @@ class MemEditor extends Component
         $user = $this->requireSchoolOwner($matrix);
 
         $plan = WfpPlan::firstOrCreate(
-            ['school_id' => $matrix->school_id, 'year' => $matrix->year],
+            [
+                'school_id' => $matrix->school_id,
+                'school_division' => $matrix->schoolDivision(),
+                'year' => $matrix->year,
+            ],
             ['status' => WfpPlan::STATUS_DRAFT],
         );
 
@@ -1565,7 +1970,11 @@ class MemEditor extends Component
     {
         $matrix = $this->matrix;
 
-        return WfpAllotment::allotment((int) $matrix->school_id, (int) $matrix->year);
+        return WfpAllotment::allotment(
+            (int) $matrix->school_id,
+            (int) $matrix->year,
+            $matrix->schoolDivision(),
+        );
     }
 
     /**
@@ -1618,6 +2027,7 @@ class MemEditor extends Component
 
         $siblings = MonthlyExpenditureMatrix::query()
             ->where('school_id', $matrix->school_id)
+            ->where('school_division', $matrix->schoolDivision())
             ->where('year', $matrix->year)
             ->withCount('items')
             ->withSum('items', 'calculated_total')

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasSchoolDivision;
 use App\Support\WfpAllotment;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -22,10 +23,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class SchoolAllotment extends Model
 {
-    use HasFactory;
+    use HasFactory, HasSchoolDivision;
 
     protected $fillable = [
         'school_id',
+        'school_division',
         'year',
         'amount',
         'set_by',

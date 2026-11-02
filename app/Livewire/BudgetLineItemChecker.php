@@ -102,6 +102,12 @@ class BudgetLineItemChecker extends Component
         return $user;
     }
 
+    /** The financial division this page is checking. */
+    private function division(): string
+    {
+        return $this->user()->activeDivision();
+    }
+
     /* --------------------------------------------------------------- state */
 
     public function updatedYear(): void
@@ -242,6 +248,7 @@ class BudgetLineItemChecker extends Component
     public function years(): array
     {
         $years = MonthlyExpenditureMatrix::query()
+            ->where('school_division', $this->division())
             ->distinct()
             ->pluck('year')
             ->map(fn ($year): string => (string) $year)
@@ -271,7 +278,7 @@ class BudgetLineItemChecker extends Component
     {
         $term = trim($this->search);
 
-        return School::query()
+        $schools = School::query()
             ->with([
                 'district',
                 'users' => fn ($query) => $query
@@ -296,6 +303,21 @@ class BudgetLineItemChecker extends Component
             })
             ->orderBy('name')
             ->paginate($this->perPage);
+
+        // Only the division's own School Heads are named against a school
+        // here: the other division's SH has no work on this page.
+        $division = $this->division();
+
+        $schools->getCollection()->transform(function (School $school) use ($division): School {
+            $school->setRelation(
+                'users',
+                $school->users->filter(fn (User $user): bool => $user->canAccessDivision($division))->values(),
+            );
+
+            return $school;
+        });
+
+        return $schools;
     }
 
     /**
@@ -313,7 +335,7 @@ class BudgetLineItemChecker extends Component
             return null;
         }
 
-        return School::query()
+        $school = School::query()
             ->with([
                 'district',
                 'users' => fn ($query) => $query
@@ -322,6 +344,17 @@ class BudgetLineItemChecker extends Component
                     ->orderBy('username'),
             ])
             ->find($schoolId);
+
+        if ($school !== null) {
+            $division = $this->division();
+
+            $school->setRelation(
+                'users',
+                $school->users->filter(fn (User $user): bool => $user->canAccessDivision($division))->values(),
+            );
+        }
+
+        return $school;
     }
 
     /**
@@ -336,7 +369,7 @@ class BudgetLineItemChecker extends Component
 
         return $schoolId === null
             ? null
-            : WfpAllotment::allotment($schoolId, (int) $this->year);
+            : WfpAllotment::allotment($schoolId, (int) $this->year, $this->division());
     }
 
     /**
@@ -369,6 +402,7 @@ class BudgetLineItemChecker extends Component
             ->join('monthly_expenditure_matrices as mem', 'mem.id', '=', 'monthly_expenditure_items.matrix_id')
             ->where('mem.year', $year)
             ->where('mem.school_id', $schoolId)
+            ->where('mem.school_division', $this->division())
             ->groupBy('mem.month')
             ->selectRaw(
                 'mem.month as month, '
@@ -498,6 +532,7 @@ class BudgetLineItemChecker extends Component
             ->join('monthly_expenditure_matrices as mem', 'mem.id', '=', 'monthly_expenditure_items.matrix_id')
             ->join('schools', 'schools.id', '=', 'mem.school_id')
             ->where('mem.year', (int) $this->year)
+            ->where('mem.school_division', $this->division())
             ->when($schoolId !== null, fn (Builder $query) => $query->where('mem.school_id', $schoolId))
             ->when($month !== null, fn (Builder $query) => $query->where('mem.month', $month))
             ->when($term !== '', function (Builder $query) use ($term): void {
@@ -520,7 +555,9 @@ class BudgetLineItemChecker extends Component
 
     private function defaultYear(): int
     {
-        $latest = (int) MonthlyExpenditureMatrix::query()->max('year');
+        $latest = (int) MonthlyExpenditureMatrix::query()
+            ->where('school_division', $this->division())
+            ->max('year');
 
         return $latest > 0 ? $latest : (int) now()->year;
     }
@@ -572,6 +609,7 @@ class BudgetLineItemChecker extends Component
 
             $matrices = MonthlyExpenditureMatrix::query()
                 ->where('year', (int) $this->year)
+                ->where('school_division', $this->division())
                 ->whereIn('school_id', collect($schools->items())->pluck('id')->all())
                 ->withCount('items')
                 ->get()

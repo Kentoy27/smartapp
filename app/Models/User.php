@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\SchoolDivision;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Carbon\CarbonInterface;
@@ -26,6 +27,9 @@ class User extends Authenticatable
         'is_superadmin',
         'google_id',
         'school_id',
+        'school_level',
+        'school_sublevel',
+        'division_access',
     ];
 
     protected $hidden = [
@@ -39,6 +43,7 @@ class User extends Authenticatable
         'signature_size' => 'integer',
         'signature_uploaded_at' => 'datetime',
         'signature_updated_at' => 'datetime',
+        'division_access' => 'array',
     ];
 
     /**
@@ -77,6 +82,111 @@ class User extends Authenticatable
     public function isBookkeeperRole(): bool
     {
         return ! $this->is_superadmin && $this->role === 'bookkeeper';
+    }
+
+    /**
+     * Whether this account oversees every school division rather than being
+     * tied to one school's work. The administrative side, the Budget office
+     * and the SDS Viewer all read the district-wide financial pages; the
+     * School Head and the Bookkeeper are bound to the divisions of their own
+     * school.
+     */
+    public function isDivisionOverseer(): bool
+    {
+        return $this->hasAdminAccess()
+            || $this->isBudgetRole()
+            || (! $this->is_superadmin && $this->role === 'viewer');
+    }
+
+    /** The school level assigned to this account ("ELEMENTARY" / "HIGH_SCHOOL"). */
+    public function schoolLevel(): string
+    {
+        $level = (string) ($this->school_level ?? '');
+
+        return SchoolDivision::isValidLevel($level) ? $level : SchoolDivision::LEVEL_ELEMENTARY;
+    }
+
+    /** The school sublevel assigned to this account ("NONE" / "JUNIOR_HIGH" / "SENIOR_HIGH"). */
+    public function schoolSublevel(): string
+    {
+        $sublevel = (string) ($this->school_sublevel ?? '');
+
+        return SchoolDivision::isValidSublevel($sublevel) ? $sublevel : SchoolDivision::SUBLEVEL_NONE;
+    }
+
+    /**
+     * Every division this account may read.
+     *
+     * Overseers are division-wide by definition. A school account is limited
+     * to what its classification and explicit access list authorize — never
+     * to what a request payload claims.
+     *
+     * @return array<int, string>
+     */
+    public function authorizedDivisions(): array
+    {
+        if ($this->isDivisionOverseer()) {
+            return SchoolDivision::all();
+        }
+
+        $divisions = SchoolDivision::authorizedFor(
+            $this->schoolLevel(),
+            $this->schoolSublevel(),
+            $this->division_access,
+        );
+
+        // A malformed or empty access list must not silently widen access;
+        // it falls back to the one division the classification implies.
+        return $divisions !== [] ? $divisions : [$this->defaultDivision()];
+    }
+
+    /** The division this account acts in when it has not switched. */
+    public function defaultDivision(): string
+    {
+        if ($this->isDivisionOverseer()) {
+            return SchoolDivision::ELEMENTARY;
+        }
+
+        return SchoolDivision::divisionFor(
+            $this->schoolLevel(),
+            $this->schoolSublevel(),
+            $this->division_access,
+        );
+    }
+
+    /** Whether this account may read records belonging to the division. */
+    public function canAccessDivision(?string $division): bool
+    {
+        return is_string($division) && in_array($division, $this->authorizedDivisions(), true);
+    }
+
+    /**
+     * The division the account is currently working in: the session's choice
+     * when it is still authorized, otherwise the account's default. The
+     * session is only a preference — the authorization check is re-run on
+     * every read, so a revoked division is never honoured.
+     */
+    public function activeDivision(): string
+    {
+        $selected = session('active_school_division');
+
+        if (is_string($selected) && $this->canAccessDivision($selected)) {
+            return $selected;
+        }
+
+        return $this->defaultDivision();
+    }
+
+    /** Whether the header should offer a division selector. */
+    public function canSwitchDivision(): bool
+    {
+        return count($this->authorizedDivisions()) > 1;
+    }
+
+    /** The readable name of the division the account is working in. */
+    public function activeDivisionLabel(): string
+    {
+        return SchoolDivision::label($this->activeDivision());
     }
 
     /** Whether this account may review submitted AIP plans. */

@@ -19,6 +19,22 @@
         </p>
     </div>
 
+    {{-- THE PAGE'S SCOPE: every figure below belongs to ONE division. A high
+         school's Junior High and Senior High allotments are different money,
+         so the division is stated before the reader scans a single figure. --}}
+    <div class="allotment-scope">
+        <span class="allotment-scope__chip">
+            <x-icon name="school" :size="14" />
+            <span>{{ $divisionLabel }}</span>
+        </span>
+        <p class="allotment-scope__text">
+            This page sets the <strong>{{ $divisionLabel }}</strong> allotments for
+            CY {{ $this->year }}. A school’s Elementary, Junior High School and
+            Senior High School allotments are separate — switch the division from
+            the top bar to work another one.
+        </p>
+    </div>
+
     @if ($successMessage)
         <div
             wire:key="allotment-alert-{{ md5($successMessage) }}"
@@ -112,6 +128,18 @@
                 @endif
             </div>
 
+            {{-- The question the officer is asking of the roster: everyone,
+                 who has a School Head to consume the money, who is still
+                 missing an allotment, whose is set. --}}
+            <label class="users-per-page">
+                <span>Show</span>
+                <select wire:model.live="schoolFilter" aria-label="Filter schools">
+                    @foreach ($this->schoolFilterOptions as $value => $label)
+                        <option value="{{ $value }}">{{ $label }}</option>
+                    @endforeach
+                </select>
+            </label>
+
             <label class="users-per-page">
                 <span>Year</span>
                 <select wire:model.live="year" aria-label="Budget year">
@@ -130,9 +158,36 @@
                 </select>
             </label>
 
-            {{-- Bulk set: the same amounts one row at a time, for many schools
-                 at once. The single-row Save stays exactly as it is. --}}
             <div class="ac-toolbar-actions">
+                {{-- The current view as a CSV — the same columns the bulk
+                     import reads back, so it doubles as the bulk template. --}}
+                <button
+                    type="button"
+                    class="ac-import-btn"
+                    wire:click="exportAllotments"
+                    title="Download the schools currently listed, with their amounts, as a CSV — fill the blanks in a spreadsheet and upload it back through Bulk Set Allotments"
+                >
+                    <x-icon name="download" :size="16" />
+                    <span>Download CSV</span>
+                </button>
+
+                {{-- Save every amount typed on the page in one action; rows
+                     already at their stored figure are left untouched. --}}
+                <button
+                    type="button"
+                    class="ac-import-btn"
+                    wire:click="saveAll"
+                    wire:loading.attr="disabled"
+                    wire:target="saveAll"
+                    title="Save every amount you have entered, including rows on other pages"
+                >
+                    <x-icon name="check-check" :size="16" />
+                    <span wire:loading.remove wire:target="saveAll">Save all changes</span>
+                    <span wire:loading wire:target="saveAll">Saving…</span>
+                </button>
+
+                {{-- Bulk set: the same amounts one row at a time, for many schools
+                     at once. The single-row Save stays exactly as it is. --}}
                 <button
                     type="button"
                     class="ac-import-btn"
@@ -182,10 +237,17 @@
                                     <span class="cell-strong">{{ $head->name !== '' ? $head->name : $head->username }}</span>
                                     <span class="cell-sub">{{ $head->username }}</span>
                                 @empty
-                                    <span class="badge badge-muted">No SH account</span>
+                                    <span
+                                        class="badge badge-muted"
+                                        title="No School Head account in this school works the {{ $divisionLabel }} division"
+                                    >No SH account</span>
                                 @endforelse
                             </td>
 
+                            {{-- An amount typed but not yet saved marks itself
+                                 (.is-dirty), so a sweep of the page shows
+                                 exactly which rows Save all changes would
+                                 write. --}}
                             <td>
                                 <input
                                     type="number"
@@ -196,6 +258,10 @@
                                     placeholder="Not set"
                                     wire:model="amounts.{{ $school->id }}"
                                     wire:key="allotment-amount-{{ $school->id }}"
+                                    data-saved="{{ $this->amounts[$school->id] ?? '' }}"
+                                    x-data
+                                    x-init="$el.classList.toggle('is-dirty', $el.value.trim() !== ($el.dataset.saved ?? ''))"
+                                    @input="$el.classList.toggle('is-dirty', $el.value.trim() !== ($el.dataset.saved ?? ''))"
                                     aria-label="Allotment for {{ $school->name }} in {{ $this->year }}"
                                 >
                                 @error('amounts.'.$school->id)
@@ -282,7 +348,13 @@
                         <tr>
                             <td colspan="7" class="table-empty">
                                 @if (trim($search) !== '')
-                                    No schools match “{{ $search }}”.
+                                    No schools match “{{ $search }}”@if ($schoolFilter !== 'all') under “{{ $this->schoolFilterOptions[$schoolFilter] }}”@endif.
+                                @elseif ($schoolFilter === 'with_head')
+                                    No School Head account works the {{ $divisionLabel }} division yet.
+                                @elseif ($schoolFilter === 'without_allotment')
+                                    Every school already has a {{ $divisionLabel }} allotment for CY {{ $this->year }}.
+                                @elseif ($schoolFilter === 'with_allotment')
+                                    No {{ $divisionLabel }} allotment has been set for CY {{ $this->year }} yet.
                                 @else
                                     No schools to display yet.
                                 @endif
@@ -306,11 +378,13 @@
         </div>
 
         <p class="allotment-footnote">
-            Consumed is the sum of the school’s CY {{ $this->year }} Monthly
-            Expenditure Matrix lines (quantity × unit cost). Clearing an amount
-            removes the allotment; the expenditure record is untouched. A
-            certified amount appears as the certifying officer on the School
-            Head’s Per Line Item Expenditure report.
+            Consumed is the sum of the school’s CY {{ $this->year }}
+            {{ $divisionLabel }} Monthly Expenditure Matrix lines
+            (quantity × unit cost). Clearing an amount removes the allotment;
+            the expenditure record is untouched. A certified amount appears as
+            the certifying officer on the School Head’s Per Line Item
+            Expenditure report. Amounts typed but not yet saved are highlighted —
+            “Save all changes” writes them in one sweep, or Save writes one row.
         </p>
     </div>
 
@@ -373,17 +447,23 @@
                                 <tr>
                                     <th scope="col">Row</th>
                                     <th scope="col">School ID</th>
+                                    <th scope="col">Division</th>
                                     <th scope="col">Reason</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 @foreach (array_slice($bulkResult['errors'], 0, 200) as $error)
+                                    @php $errorDivision = (string) ($error['school_division'] ?? ''); @endphp
+
                                     <tr wire:key="allotment-bulk-error-{{ $error['line'] }}">
                                         <td>{{ $error['line'] }}</td>
                                         <td>
                                             <span class="cell-strong">
                                                 {{ $error['school_id'] !== '' ? $error['school_id'] : '—' }}
                                             </span>
+                                        </td>
+                                        <td>
+                                            {{ $errorDivision !== '' ? \App\Support\SchoolDivision::label($errorDivision) : '—' }}
                                         </td>
                                         <td>{{ $error['error'] }}</td>
                                     </tr>
@@ -415,7 +495,9 @@
                     {{-- THE CONFIRMATION: restates the counts the apply will
                          write — read fresh from the source, not the browser. --}}
                     <p class="delete-modal-description">
-                        You are about to set or clear allotments for
+                        You are about to set or clear the
+                        <strong>{{ $this->bulkApplyDivisionLabel }}</strong>
+                        allotments of
                         <strong>{{ number_format($bulkApplyCount) }}</strong> school(s)
                         in CY {{ $this->year }}.
                         @if ($bulkApplyClearCertificationCount > 0)
@@ -455,6 +537,21 @@
                     {{-- THE INPUT + PREVIEW: choose a source, validate it, read
                          every row's outcome, uncheck what should not be
                          applied, then confirm. --}}
+
+                    {{-- Which division rows land in: the page's own, unless a
+                         row names its own — so one file can carry a high
+                         school's Junior High and Senior High figures. --}}
+                    <div class="allotment-bulk-scope">
+                        <x-icon name="school" :size="14" />
+                        <span>
+                            Rows without a division go to
+                            <strong>{{ $divisionLabel }}</strong> (this page’s
+                            division). A row may name its own division —
+                            Elementary, Junior High School or Senior High School —
+                            to set another division’s allotment in the same file.
+                        </span>
+                    </div>
+
                     <div class="field">
                         <label>Input</label>
                         <div class="allotment-bulk-modes">
@@ -462,7 +559,7 @@
                                 <input type="radio" value="paste" wire:model.live="bulkMode" aria-label="Paste a list">
                                 <span class="role-option-body">
                                     <strong>Paste list</strong>
-                                    <small>One “School ID, Amount” per line — quick edits from a spreadsheet.</small>
+                                    <small>One “School ID, Amount” per line, with an optional division — quick edits from a spreadsheet.</small>
                                 </span>
                             </label>
 
@@ -470,7 +567,7 @@
                                 <input type="radio" value="csv" wire:model.live="bulkMode" aria-label="Upload a CSV">
                                 <span class="role-option-body">
                                     <strong>Upload CSV</strong>
-                                    <small>Columns: school_id, allotted_budget — for large batches.</small>
+                                    <small>Columns: school_id, allotted_budget and an optional division — for large batches.</small>
                                 </span>
                             </label>
                         </div>
@@ -487,8 +584,9 @@
                                 @class(['error' => $errors->has('bulkFile')])
                             >
                             <div class="field-hint">
-                                A header row is optional; the amount may carry ₱, spaces or
-                                thousands separators. Up to
+                                Columns: school_id, allotted_budget and an optional
+                                division. A header row is optional; the amount may carry
+                                ₱, spaces or thousands separators. Up to
                                 {{ number_format(\App\Support\SchoolAllotmentImporter::MAX_ROWS) }} rows.
                             </div>
                             @error('bulkFile') <div class="error-text">{{ $message }}</div> @enderror
@@ -501,11 +599,12 @@
                                 id="allotmentBulkText"
                                 rows="6"
                                 wire:model="bulkText"
-                                placeholder="School ID, Amount&#10;12345, 2000000.00&#10;117833, 1500000"
+                                placeholder="School ID, Amount&#10;12345, 2000000.00&#10;117833, 1500000&#10;&#10;Optional division column:&#10;12345, Senior High, 2000000"
                             ></textarea>
                             <div class="field-hint">
                                 Comma, tab or semicolon separated; a header row is optional;
-                                ₱ and thousands separators are tolerated.
+                                ₱ and thousands separators are tolerated. A row may name
+                                its own division — “12345, Senior High, 2000000”.
                             </div>
                         </div>
                     @endif
@@ -547,6 +646,7 @@
                                         <th scope="col"><span class="sr-only">Apply</span></th>
                                         <th scope="col">School ID</th>
                                         <th scope="col">School</th>
+                                        <th scope="col">Division</th>
                                         <th scope="col" class="allotment-money">Current amount</th>
                                         <th scope="col" class="allotment-money">New amount</th>
                                         <th scope="col">Status</th>
@@ -570,6 +670,7 @@
                                                 <span class="cell-strong">{{ $row['school_id'] !== '' ? $row['school_id'] : '—' }}</span>
                                             </td>
                                             <td>{{ $row['school_name'] ?? '—' }}</td>
+                                            <td>{{ \App\Support\SchoolDivision::label($row['school_division']) }}</td>
                                             <td class="allotment-money">
                                                 @if ($row['previous_amount'] === null)
                                                     <span class="allotment-muted">Not set</span>

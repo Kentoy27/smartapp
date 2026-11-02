@@ -12,6 +12,7 @@ use App\Models\MonthlyExpenditureItem;
 use App\Models\MonthlyExpenditureMatrix;
 use App\Models\School;
 use App\Models\SchoolAllotment;
+use App\Models\SchoolAllotmentAudit;
 use App\Models\User;
 use App\Support\WfpAllotment;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -239,6 +240,209 @@ class SchoolAllotmentTest extends TestCase
         $this->assertSame(1000.0, (float) $rows[0]->amount);
         $this->assertSame(2027, $rows[1]->year);
         $this->assertSame(2000.0, (float) $rows[1]->amount);
+    }
+
+    // ------------------------------------------------------------- save all
+
+    public function test_save_all_writes_every_entered_amount_in_one_action(): void
+    {
+        $first = $this->schoolHead('Alpha Allotment School');
+        $second = $this->schoolHead('Beta Allotment School');
+
+        $component = Livewire::actingAs($this->budgetOfficer())
+            ->test(SchoolAllotmentManager::class)
+            ->set('year', '2026')
+            ->set('amounts.'.$first->school_id, '1000')
+            ->set('amounts.'.$second->school_id, '2500.50')
+            ->call('saveAll')
+            ->assertHasNoErrors();
+
+        $this->assertSame(2, SchoolAllotment::query()->count());
+        $this->assertSame(1000.0, (float) SchoolAllotment::query()->where('school_id', $first->school_id)->value('amount'));
+        $this->assertSame(2500.5, (float) SchoolAllotment::query()->where('school_id', $second->school_id)->value('amount'));
+
+        // Both figures are echoed back in their stored form.
+        $component
+            ->assertSet('amounts.'.$first->school_id, '1000.00')
+            ->assertSet('amounts.'.$second->school_id, '2500.50');
+
+        $this->assertStringContainsString('2 set', (string) $component->get('successMessage'));
+    }
+
+    public function test_save_all_writes_nothing_when_every_row_already_matches(): void
+    {
+        $head = $this->schoolHead();
+        $other = $this->schoolHead('Other Allotment School');
+        $budget = $this->budgetOfficer();
+
+        SchoolAllotment::create([
+            'school_id' => $head->school_id,
+            'year' => 2026,
+            'amount' => 1000,
+            'set_by' => $budget->id,
+        ]);
+
+        $component = Livewire::actingAs($budget)
+            ->test(SchoolAllotmentManager::class)
+            ->set('year', '2026')
+            // The same figure in another spelling, and a blank row with
+            // nothing on record: neither is a change.
+            ->set('amounts.'.$head->school_id, '1000.00')
+            ->set('amounts.'.$other->school_id, '')
+            ->call('saveAll')
+            ->assertHasNoErrors();
+
+        $this->assertSame(1, SchoolAllotment::query()->count());
+        $this->assertSame(0, SchoolAllotmentAudit::query()->count());
+        $this->assertStringContainsString('Nothing to save', (string) $component->get('successMessage'));
+    }
+
+    public function test_save_all_reports_a_bad_row_and_still_writes_the_sound_ones(): void
+    {
+        $bad = $this->schoolHead('Bad Amount School');
+        $good = $this->schoolHead('Good Amount School');
+
+        $component = Livewire::actingAs($this->budgetOfficer())
+            ->test(SchoolAllotmentManager::class)
+            ->set('year', '2026')
+            ->set('amounts.'.$bad->school_id, 'not money')
+            ->set('amounts.'.$good->school_id, '500')
+            ->call('saveAll')
+            ->assertHasErrors('amounts.'.$bad->school_id);
+
+        $this->assertSame(1, SchoolAllotment::query()->count());
+        $this->assertSame(500.0, (float) SchoolAllotment::query()->value('amount'));
+
+        $this->assertStringContainsString('1 row(s) could not be saved', (string) $component->get('errorMessage'));
+        $this->assertStringContainsString('1 set', (string) $component->get('successMessage'));
+    }
+
+    public function test_save_all_clears_a_blanked_amount_and_audits_it(): void
+    {
+        $head = $this->schoolHead();
+
+        SchoolAllotment::create([
+            'school_id' => $head->school_id,
+            'year' => 2026,
+            'amount' => 1000,
+        ]);
+
+        $component = Livewire::actingAs($this->budgetOfficer())
+            ->test(SchoolAllotmentManager::class)
+            ->set('year', '2026')
+            ->set('amounts.'.$head->school_id, '')
+            ->call('saveAll')
+            ->assertHasNoErrors();
+
+        $this->assertSame(0, SchoolAllotment::query()->count());
+
+        $audit = SchoolAllotmentAudit::query()->firstOrFail();
+
+        $this->assertSame(SchoolAllotmentAudit::ACTION_CLEAR, $audit->action);
+        $this->assertSame(SchoolAllotmentAudit::SOURCE_SINGLE, $audit->source);
+
+        $this->assertStringContainsString('1 cleared', (string) $component->get('successMessage'));
+    }
+
+    // ------------------------------------------------------------ the filters
+
+    public function test_the_show_filter_slices_the_roster(): void
+    {
+        $allotted = $this->schoolHead('Alpha Allotment School');
+        $this->schoolHead('Beta Allotment School');
+        $district = District::create(['name' => 'Headless District']);
+        School::create(['district_id' => $district->id, 'name' => 'Gamma Headless School']);
+
+        SchoolAllotment::create([
+            'school_id' => $allotted->school_id,
+            'year' => 2026,
+            'amount' => 1000,
+        ]);
+
+        $component = Livewire::actingAs($this->budgetOfficer())
+            ->test(SchoolAllotmentManager::class)
+            ->set('year', '2026');
+
+        // Every school by default.
+        $component
+            ->assertSee('Alpha Allotment School')
+            ->assertSee('Beta Allotment School')
+            ->assertSee('Gamma Headless School');
+
+        // Only the schools a School Head works in this division.
+        $component
+            ->set('schoolFilter', 'with_head')
+            ->assertSee('Alpha Allotment School')
+            ->assertSee('Beta Allotment School')
+            ->assertDontSee('Gamma Headless School');
+
+        // Only the schools still missing an amount.
+        $component
+            ->set('schoolFilter', 'without_allotment')
+            ->assertDontSee('Alpha Allotment School')
+            ->assertSee('Beta Allotment School')
+            ->assertSee('Gamma Headless School');
+
+        // Only the schools that already carry one.
+        $component
+            ->set('schoolFilter', 'with_allotment')
+            ->assertSee('Alpha Allotment School')
+            ->assertDontSee('Beta Allotment School')
+            ->assertDontSee('Gamma Headless School');
+    }
+
+    public function test_a_crafted_show_value_falls_back_to_all_schools(): void
+    {
+        $this->schoolHead();
+
+        Livewire::actingAs($this->budgetOfficer())
+            ->test(SchoolAllotmentManager::class)
+            ->set('schoolFilter', 'anything-else')
+            ->assertSet('schoolFilter', 'all');
+    }
+
+    public function test_the_download_carries_the_filtered_roster_with_its_division_column(): void
+    {
+        $district = District::create(['name' => 'Allotment District']);
+        $alpha = School::create(['district_id' => $district->id, 'name' => 'Alpha School', 'school_id' => '12345']);
+        School::create(['district_id' => $district->id, 'name' => 'Beta School', 'school_id' => '117833']);
+
+        SchoolAllotment::create([
+            'school_id' => $alpha->id,
+            'year' => 2026,
+            'amount' => 1000,
+        ]);
+
+        Livewire::actingAs($this->budgetOfficer())
+            ->test(SchoolAllotmentManager::class)
+            ->set('year', '2026')
+            ->set('schoolFilter', 'with_allotment')
+            ->call('exportAllotments')
+            ->assertFileDownloaded(
+                'school-allotments-cy2026-elementary.csv',
+                "School ID,School Name,Division,Allotted Budget\n"
+                ."12345,Alpha School,Elementary,1000.00\n",
+            );
+    }
+
+    public function test_the_download_reports_an_empty_filtered_roster(): void
+    {
+        $head = $this->schoolHead();
+
+        SchoolAllotment::create([
+            'school_id' => $head->school_id,
+            'year' => 2026,
+            'amount' => 1000,
+        ]);
+
+        $component = Livewire::actingAs($this->budgetOfficer())
+            ->test(SchoolAllotmentManager::class)
+            ->set('year', '2026')
+            ->set('schoolFilter', 'without_allotment')
+            ->call('exportAllotments')
+            ->assertNoFileDownloaded();
+
+        $this->assertStringContainsString('no schools to download', (string) $component->get('errorMessage'));
     }
 
     // ---------------------------------------------------------- consumption

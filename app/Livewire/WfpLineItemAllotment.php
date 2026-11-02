@@ -4,6 +4,7 @@ namespace App\Livewire;
 
 use App\Models\School;
 use App\Models\User;
+use App\Support\SchoolDivision;
 use App\Support\WfpAllotment;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\Auth;
@@ -47,7 +48,7 @@ class WfpLineItemAllotment extends Component
         abort_unless(Auth::user()?->canAccessWfp(), 404);
 
         if ($this->year === '') {
-            $this->year = (string) WfpAllotment::resolveYear(Auth::user()?->school_id, 0);
+            $this->year = (string) WfpAllotment::resolveYear(Auth::user()?->school_id, 0, $this->division());
         }
     }
 
@@ -61,6 +62,12 @@ class WfpLineItemAllotment extends Component
         return $user;
     }
 
+    /** The financial division this report is read in. */
+    private function division(): string
+    {
+        return $this->user()->activeDivision();
+    }
+
     /* --------------------------------------------------------------- state */
 
     public function updatedYear(): void
@@ -68,7 +75,7 @@ class WfpLineItemAllotment extends Component
         // A year the school has no matrices for is not a year to report on: a
         // crafted value falls back to the newest year that does rather than
         // rendering a report of nothing.
-        $this->year = (string) WfpAllotment::resolveYear(Auth::user()?->school_id, (int) $this->year);
+        $this->year = (string) WfpAllotment::resolveYear(Auth::user()?->school_id, (int) $this->year, $this->division());
 
         // The figures are computed properties keyed off this year; forgetting
         // them is what makes the page re-read for the year that was picked.
@@ -93,7 +100,7 @@ class WfpLineItemAllotment extends Component
     #[Computed]
     public function years(): array
     {
-        return WfpAllotment::years(Auth::user()?->school_id);
+        return WfpAllotment::years(Auth::user()?->school_id, $this->division());
     }
 
     /**
@@ -105,7 +112,7 @@ class WfpLineItemAllotment extends Component
     #[Computed]
     public function months(): array
     {
-        return WfpAllotment::months(Auth::user()?->school_id, (int) $this->year);
+        return WfpAllotment::months(Auth::user()?->school_id, (int) $this->year, $this->division());
     }
 
     /**
@@ -122,7 +129,7 @@ class WfpLineItemAllotment extends Component
             return [];
         }
 
-        return WfpAllotment::lineItems(Auth::user()?->school_id, (int) $this->year);
+        return WfpAllotment::lineItems(Auth::user()?->school_id, (int) $this->year, $this->division());
     }
 
     /**
@@ -153,7 +160,7 @@ class WfpLineItemAllotment extends Component
         // The same helper the matrix editor reads, so the annual report and
         // the editor always put the same number on the remaining balance.
         return WfpAllotment::balance(
-            WfpAllotment::allotment($this->school?->id, (int) $this->year),
+            WfpAllotment::allotment($this->school?->id, (int) $this->year, $this->division()),
             $this->grandTotal,
         );
     }
@@ -174,6 +181,7 @@ class WfpLineItemAllotment extends Component
         return WfpAllotment::certification(
             Auth::user()?->school_id,
             (int) $this->year,
+            $this->division(),
         );
     }
 
@@ -192,6 +200,7 @@ class WfpLineItemAllotment extends Component
         return WfpAllotment::checking(
             Auth::user()?->school_id,
             (int) $this->year,
+            $this->division(),
         );
     }
 

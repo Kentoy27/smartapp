@@ -3,6 +3,7 @@
 namespace App\Livewire;
 
 use App\Models\WfpSubmission;
+use App\Support\SchoolDivision;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
@@ -45,6 +46,7 @@ class WfpMyUploadsList extends Component
     {
         return WfpSubmission::query()
             ->where('user_id', Auth::id())
+            ->where('school_division', Auth::user()?->activeDivision() ?? SchoolDivision::ELEMENTARY)
             ->latest('uploaded_at')
             ->latest('id')
             ->get();

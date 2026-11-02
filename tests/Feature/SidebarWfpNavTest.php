@@ -36,6 +36,16 @@ class SidebarWfpNavTest extends TestCase
             ->assertSee('aria-expanded="true"', false);
     }
 
+    public function test_the_wfp_group_lists_the_matrix_first_and_the_plan_last(): void
+    {
+        $items = collect(Livewire::actingAs($this->schoolHead())->test(Sidebar::class)->instance()->items());
+
+        $this->assertSame(
+            ['Monthly Expenditure Matrix', 'Per Line Item Expenditure', 'Work & Financial Plan'],
+            array_column($items->firstWhere('label', 'WFP')['children'], 'label')
+        );
+    }
+
     public function test_the_wfp_group_can_be_closed(): void
     {
         Livewire::actingAs($this->schoolHead())

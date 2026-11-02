@@ -55,6 +55,26 @@ Route::get('/home', [DashboardController::class, 'index'])->middleware('auth')->
 
 Route::middleware('auth')->group(function () {
     /* ------------------------------------------------------------------
+     * The financial division the account is working in. The choice is a
+     * preference held in the session; it is only ever honoured while the
+     * account still authorizes that division (User::activeDivision() re-checks
+     * on every read), so a crafted switch cannot widen access.
+     * ----------------------------------------------------------------- */
+
+    Route::post('/division', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User, 404);
+
+        $division = (string) request()->input('division');
+
+        abort_unless($user->canAccessDivision($division), 403);
+
+        session(['active_school_division' => $division]);
+
+        return back();
+    })->name('division.switch');
+
+    /* ------------------------------------------------------------------
      * Profile — the same page for every signed-in account.
      *
      * A digital signature belongs to an account rather than to a role, so a
@@ -211,6 +231,18 @@ Route::middleware('auth')->group(function () {
 
         return view('wfp.setup.index');
     })->name('wfp.setup.index');
+
+    // SCHOOL DIVISION MAPPING: the administrator's controlled mapping of
+    // existing financial records to Junior High / Senior High. The feature's
+    // migration leaves every legacy row as Elementary rather than guessing, so
+    // this page is the only way records move — explicitly, in one transaction,
+    // and never over a record that already exists in the target division.
+    Route::get('/admin/division-mapping', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canManageUsersAndSchools(), 404);
+
+        return view('division-mapping.index');
+    })->name('division-mapping.index');
 
     Route::get('/admin/wfp-setup/lookups/{category}', function (string $category) {
         $user = Auth::user();
@@ -700,18 +732,21 @@ Route::middleware('auth')->group(function () {
         $school = $schoolId > 0 ? School::query()->find($schoolId) : null;
         abort_if($school === null, 404);
 
-        $year = WfpAllotment::resolveYear($school->id, (int) request()->query('year'));
+        $division = $user->activeDivision();
+        $year = WfpAllotment::resolveYear($school->id, (int) request()->query('year'), $division);
 
         // The form's "Prepared by" is the school's School Head, not the
-        // Budget officer reading this copy.
+        // Budget officer reading this copy — and the School Head of this
+        // financial division, not the other high-school division's.
         $preparedBy = User::query()
             ->where('school_id', $school->id)
             ->where('role', 'user')
             ->orderBy('name')
             ->orderBy('username')
-            ->first();
+            ->get()
+            ->first(fn (User $candidate): bool => $candidate->canAccessDivision($division));
 
-        $bytes = WfpAllotmentXlsxExporter::bytes($school->id, $year, $preparedBy);
+        $bytes = WfpAllotmentXlsxExporter::bytes($school->id, $year, $preparedBy, $division);
 
         // Bytes are built BEFORE the response (a streamed callback's return
         // value is discarded and would risk a 0-byte download).
@@ -842,8 +877,9 @@ Route::middleware('auth')->group(function () {
         abort_if($user->school_id === null, 404);
 
         $schoolId = (int) $user->school_id;
-        $year = WfpAllotment::resolveYear($schoolId, (int) request()->query('year'));
-        $bytes = WfpAllotmentXlsxExporter::bytes($schoolId, $year, $user);
+        $division = $user->activeDivision();
+        $year = WfpAllotment::resolveYear($schoolId, (int) request()->query('year'), $division);
+        $bytes = WfpAllotmentXlsxExporter::bytes($schoolId, $year, $user, $division);
 
         // Bytes are built BEFORE the response (a streamed callback's return
         // value is discarded and would risk a 0-byte download).

@@ -8,6 +8,7 @@ use App\Models\SchoolAllotment;
 use App\Models\SchoolAllotmentAudit;
 use App\Models\User;
 use App\Support\SchoolAllotmentImporter;
+use App\Support\SchoolDivision;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -73,7 +74,7 @@ class SchoolAllotmentImporterTest extends TestCase
     {
         $this->school('school1', '12345');
 
-        $analysis = SchoolAllotmentImporter::analyzeText("12345, 2,000,000.00", 2026, false);
+        $analysis = SchoolAllotmentImporter::analyzeText('12345, 2,000,000.00', 2026, false);
 
         $this->assertSame(1, $analysis['readyCount']);
         $this->assertSame(2000000.0, $analysis['rows'][0]['amount']);
@@ -109,7 +110,7 @@ class SchoolAllotmentImporterTest extends TestCase
     {
         $this->school('school1', '12345');
 
-        $analysis = SchoolAllotmentImporter::analyzeText("99999, 100000", 2026, false);
+        $analysis = SchoolAllotmentImporter::analyzeText('99999, 100000', 2026, false);
 
         $this->assertSame(0, $analysis['readyCount']);
         $this->assertSame(1, $analysis['invalidCount']);
@@ -198,6 +199,274 @@ class SchoolAllotmentImporterTest extends TestCase
         $this->assertSame(2, $analysis['rows'][0]['superseded_line']);
         $this->assertFalse($analysis['rows'][1]['superseded']);
         $this->assertSame(250.0, $analysis['rows'][1]['amount']);
+    }
+
+    /* ------------------------------------------------------------- division */
+
+    public function test_a_pasted_row_may_name_its_own_division(): void
+    {
+        $this->school('school1', '12345');
+
+        $analysis = SchoolAllotmentImporter::analyzeText(
+            "12345, Senior High, 2000000\n12345, JHS, 1500000",
+            2026,
+            false,
+        );
+
+        // The same school in two divisions is two allotments, not a duplicate.
+        $this->assertSame(2, $analysis['readyCount']);
+        $this->assertSame(0, $analysis['supersededCount']);
+        $this->assertSame(0, $analysis['invalidCount']);
+
+        $this->assertSame(SchoolDivision::SENIOR_HIGH, $analysis['rows'][0]['school_division']);
+        $this->assertSame(2000000.0, $analysis['rows'][0]['amount']);
+        $this->assertSame(SchoolDivision::JUNIOR_HIGH, $analysis['rows'][1]['school_division']);
+        $this->assertSame(1500000.0, $analysis['rows'][1]['amount']);
+    }
+
+    public function test_the_division_column_accepts_the_common_spellings(): void
+    {
+        $this->school('school1', '12345');
+
+        $spellings = [
+            SchoolDivision::ELEMENTARY => ['Elementary', 'elem', 'ES'],
+            SchoolDivision::JUNIOR_HIGH => ['Junior High', 'JHS', 'junior_high'],
+            SchoolDivision::SENIOR_HIGH => ['Senior High', 'SHS', 'senior high school'],
+        ];
+
+        foreach ($spellings as $division => $values) {
+            foreach ($values as $spelling) {
+                $analysis = SchoolAllotmentImporter::analyzeText("12345, {$spelling}, 100", 2026, false);
+
+                $this->assertSame(1, $analysis['readyCount'], $spelling);
+                $this->assertSame($division, $analysis['rows'][0]['school_division'], $spelling);
+            }
+        }
+    }
+
+    public function test_a_csv_division_column_is_read_by_its_header(): void
+    {
+        $this->school('school1', '12345');
+
+        $path = $this->csv([
+            'school_id,division,allotted_budget',
+            '12345,Senior High,2000000.00',
+        ]);
+
+        $analysis = SchoolAllotmentImporter::analyzeCsv($path, 2026, false);
+
+        $this->assertSame(1, $analysis['readyCount']);
+        $this->assertSame(SchoolDivision::SENIOR_HIGH, $analysis['rows'][0]['school_division']);
+        $this->assertSame(2000000.0, $analysis['rows'][0]['amount']);
+    }
+
+    public function test_a_row_without_a_division_belongs_to_the_imports_own_division(): void
+    {
+        $this->school('school1', '12345');
+
+        $analysis = SchoolAllotmentImporter::analyzeText('12345, 2000000', 2026, false, SchoolDivision::SENIOR_HIGH);
+
+        $this->assertSame(1, $analysis['readyCount']);
+        $this->assertSame(SchoolDivision::SENIOR_HIGH, $analysis['rows'][0]['school_division']);
+    }
+
+    public function test_a_line_that_stops_after_its_division_carries_no_amount(): void
+    {
+        $this->school('school1', '12345');
+
+        $analysis = SchoolAllotmentImporter::analyzeText('12345, Senior High', 2026, false);
+
+        $this->assertSame(0, $analysis['readyCount']);
+        $this->assertContains('Amount is required.', $analysis['rows'][0]['errors']);
+        $this->assertSame(SchoolDivision::SENIOR_HIGH, $analysis['rows'][0]['school_division']);
+    }
+
+    public function test_a_division_that_names_nothing_is_refused(): void
+    {
+        $this->school('school1', '12345');
+
+        $analysis = SchoolAllotmentImporter::analyzeText('12345, College, 100', 2026, false);
+
+        $this->assertSame(0, $analysis['readyCount']);
+        $this->assertSame(1, $analysis['invalidCount']);
+        $this->assertStringContainsString('Division must be', $analysis['rows'][0]['errors'][0]);
+    }
+
+    public function test_a_row_cannot_name_a_division_the_importer_may_not_write(): void
+    {
+        $this->school('school1', '12345');
+
+        $analysis = SchoolAllotmentImporter::analyzeText(
+            '12345, Senior High, 100',
+            2026,
+            false,
+            SchoolDivision::ELEMENTARY,
+            [SchoolDivision::ELEMENTARY],
+        );
+
+        $this->assertSame(0, $analysis['readyCount']);
+        $this->assertSame(1, $analysis['invalidCount']);
+        $this->assertContains(
+            'You cannot set allotments for the Senior High School division.',
+            $analysis['rows'][0]['errors'],
+        );
+    }
+
+    public function test_commit_refuses_a_row_whose_division_is_not_allowed(): void
+    {
+        $this->school('school1', '12345');
+
+        // Analyzed without a restriction, so the row is valid in the preview —
+        // the commit must still re-check the caller's divisions rather than
+        // trust the row it was handed.
+        $analysis = SchoolAllotmentImporter::analyzeText('12345, Senior High, 100', 2026, false);
+
+        $this->assertSame(1, $analysis['readyCount']);
+
+        $report = SchoolAllotmentImporter::commit(
+            $analysis['rows'],
+            [],
+            2026,
+            $this->budgetOfficer(),
+            SchoolDivision::ELEMENTARY,
+            [SchoolDivision::ELEMENTARY],
+        );
+
+        $this->assertSame(0, $report['processed']);
+        $this->assertSame(1, $report['skipped']);
+        $this->assertStringContainsString('DIVISION_NOT_ALLOWED', $report['errors'][0]['error']);
+        $this->assertSame(SchoolDivision::SENIOR_HIGH, $report['errors'][0]['school_division']);
+        $this->assertSame(0, SchoolAllotment::query()->count());
+    }
+
+    public function test_commit_writes_each_row_to_the_division_it_names(): void
+    {
+        $school = $this->school('High School One', '12345');
+        $budget = $this->budgetOfficer();
+
+        $analysis = SchoolAllotmentImporter::analyzeText(
+            "12345, Junior High, 1000000\n12345, Senior High, 2000000",
+            2026,
+            false,
+        );
+
+        $report = SchoolAllotmentImporter::commit($analysis['rows'], [], 2026, $budget);
+
+        $this->assertSame(2, $report['created']);
+        $this->assertSame([], $report['errors']);
+
+        $rows = SchoolAllotment::query()->orderBy('school_division')->get();
+
+        $this->assertCount(2, $rows);
+        $this->assertSame($school->id, $rows[0]->school_id);
+        $this->assertSame(SchoolDivision::JUNIOR_HIGH, $rows[0]->school_division);
+        $this->assertSame(1000000.0, (float) $rows[0]->amount);
+        $this->assertSame(SchoolDivision::SENIOR_HIGH, $rows[1]->school_division);
+        $this->assertSame(2000000.0, (float) $rows[1]->amount);
+
+        // The trail carries the division the money belongs to.
+        $audits = SchoolAllotmentAudit::query()->orderBy('id')->get();
+
+        $this->assertSame(SchoolDivision::JUNIOR_HIGH, $audits[0]->school_division);
+        $this->assertSame(SchoolDivision::SENIOR_HIGH, $audits[1]->school_division);
+    }
+
+    public function test_a_duplicate_within_one_division_is_still_superseded(): void
+    {
+        $this->school('school1', '12345');
+
+        $analysis = SchoolAllotmentImporter::analyzeText(
+            "12345, Senior High, 100\n12345, Senior High, 250",
+            2026,
+            false,
+        );
+
+        $this->assertSame(1, $analysis['readyCount']);
+        $this->assertSame(1, $analysis['supersededCount']);
+        $this->assertTrue($analysis['rows'][0]['superseded']);
+        $this->assertSame(250.0, $analysis['rows'][1]['amount']);
+    }
+
+    public function test_a_senior_high_row_does_not_read_the_elementary_record(): void
+    {
+        $school = $this->school('High School One', '12345');
+
+        SchoolAllotment::create([
+            'school_id' => $school->id,
+            'school_division' => SchoolDivision::ELEMENTARY,
+            'year' => 2026,
+            'amount' => 1000,
+        ]);
+
+        $analysis = SchoolAllotmentImporter::analyzeText('12345, Senior High, 2000', 2026, false);
+
+        // The row's "current amount" is its own division's record, not the
+        // school's Elementary figure.
+        $this->assertSame('create', $analysis['rows'][0]['action']);
+        $this->assertNull($analysis['rows'][0]['previous_amount']);
+    }
+
+    public function test_the_selection_names_the_divisions_its_rows_would_write_to(): void
+    {
+        $this->school('High School One', '12345');
+
+        $analysis = SchoolAllotmentImporter::analyzeText(
+            "12345, Senior High, 100\n12345, Junior High, 200\n12345, Senior High, 300",
+            2026,
+            false,
+        );
+
+        // Line 1 is superseded by line 3; the unchecked line 2 drops out.
+        $counts = SchoolAllotmentImporter::selectionCounts($analysis['rows'], [2]);
+
+        $this->assertSame(1, $counts['selected']);
+        $this->assertSame([SchoolDivision::SENIOR_HIGH], $counts['divisions']);
+    }
+
+    public function test_the_division_summary_names_one_or_several_divisions(): void
+    {
+        $this->assertSame(
+            'Senior High School',
+            SchoolAllotmentImporter::divisionSummary([SchoolDivision::SENIOR_HIGH]),
+        );
+
+        // The canonical order holds however the list arrives.
+        $this->assertSame(
+            'Elementary and Senior High School',
+            SchoolAllotmentImporter::divisionSummary([SchoolDivision::SENIOR_HIGH, SchoolDivision::ELEMENTARY]),
+        );
+
+        $this->assertSame(
+            'Elementary, Junior High School and Senior High School',
+            SchoolAllotmentImporter::divisionSummary(SchoolDivision::all()),
+        );
+
+        $this->assertSame('', SchoolAllotmentImporter::divisionSummary([]));
+    }
+
+    public function test_export_csv_round_trips_through_the_importer(): void
+    {
+        $this->school('school1', '12345');
+
+        $csv = SchoolAllotmentImporter::exportCsv([
+            ['school_id' => '12345', 'school_name' => 'school1', 'school_division' => SchoolDivision::ELEMENTARY, 'amount' => 2000000.0],
+            ['school_id' => '12345', 'school_name' => 'school1', 'school_division' => SchoolDivision::SENIOR_HIGH, 'amount' => null],
+        ]);
+
+        $path = $this->csv(explode("\n", trim($csv)));
+
+        $analysis = SchoolAllotmentImporter::analyzeCsv($path, 2026, true);
+
+        // The export is the bulk template: its headers are the ones the
+        // importer reads, so a filled-in copy uploads as-is.
+        $this->assertSame(2, $analysis['readyCount']);
+        $this->assertSame(0, $analysis['invalidCount']);
+        $this->assertSame(SchoolDivision::ELEMENTARY, $analysis['rows'][0]['school_division']);
+        $this->assertSame(2000000.0, $analysis['rows'][0]['amount']);
+        $this->assertSame(SchoolDivision::SENIOR_HIGH, $analysis['rows'][1]['school_division']);
+        // The blank amount reads as "clear" while the toggle is on.
+        $this->assertNull($analysis['rows'][1]['amount']);
+        $this->assertSame('clear', $analysis['rows'][1]['action']);
     }
 
     /* -------------------------------------------------------- certification */
@@ -410,14 +679,15 @@ class SchoolAllotmentImporterTest extends TestCase
     {
         $csv = SchoolAllotmentImporter::errorReportCsv([
             ['line' => 2, 'school_id' => '99999', 'error' => 'School not found.'],
-            ['line' => 3, 'school_id' => '12345', 'error' => 'Superseded by row 4, the last occurrence wins.'],
+            ['line' => 3, 'school_id' => '12345', 'school_division' => SchoolDivision::SENIOR_HIGH, 'error' => 'Superseded by row 4, the last occurrence wins.'],
         ]);
 
         $lines = explode("\n", trim($csv));
 
-        $this->assertSame('Row,School ID,Reason', $lines[0]);
-        $this->assertSame('2,99999,School not found.', $lines[1]);
+        $this->assertSame('Row,School ID,Division,Reason', $lines[0]);
+        // A row with no division on record carries an empty cell.
+        $this->assertSame('2,99999,,School not found.', $lines[1]);
         // A reason carrying a comma is quoted so the report stays one row.
-        $this->assertSame('3,12345,"Superseded by row 4, the last occurrence wins."', $lines[2]);
+        $this->assertSame('3,12345,Senior High School,"Superseded by row 4, the last occurrence wins."', $lines[2]);
     }
 }

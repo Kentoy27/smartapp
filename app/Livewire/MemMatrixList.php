@@ -23,16 +23,15 @@ use RuntimeException;
  * The Monthly Expenditure Matrix index: the School Head's own school's
  * matrices, one per month of a planning year.
  *
- * The year is the primary organising key. Choosing a year ensures all twelve
- * of its months exist (January–December, in calendar order) so an SH never has
- * to create the months one at a time — see {@see MemYearInitializer}. Existing
- * months are preserved untouched; only the missing ones are inserted, as blank
- * Drafts.
+ * The year is the primary organising key. A year's twelve months
+ * (January–December, in calendar order) are created only when the SH adds
+ * that year with the "Add year" control; opening the page or filtering by a
+ * year never writes. Existing months are preserved untouched; only the
+ * missing ones are inserted, as blank Drafts — see {@see MemYearInitializer}.
  *
  * Scope is the SH's own school — every query is filtered by `school_id`, and
- * every action re-checks ownership. The year is ensured without a school by
- * doing nothing (and the page says so), because a matrix with no school could
- * be owned by nobody.
+ * every action re-checks ownership. Without a school nothing is created (and
+ * the page says so), because a matrix with no school could be owned by nobody.
  */
 #[Title('Monthly Expenditure Matrix — SmartApp')]
 class MemMatrixList extends Component
@@ -42,6 +41,9 @@ class MemMatrixList extends Component
 
     /** How many analysed rows are previewed in the workbook-import modal. */
     private const WORKBOOK_PREVIEW_LIMIT = 100;
+
+    /** How many months are listed per page. */
+    private const PER_PAGE = 25;
 
     /**
      * The selected year, or '' for "All". Lives in the URL so a refresh (or a
@@ -53,10 +55,6 @@ class MemMatrixList extends Component
 
     /** The year the "Add year" field targets. Defaults to next year. */
     public string $newYear = '';
-
-    public string $status = 'all';
-
-    public int $perPage = 25;
 
     public ?string $successMessage = null;
 
@@ -131,6 +129,12 @@ class MemMatrixList extends Component
         return $user;
     }
 
+    /** The financial division this page is working in. */
+    private function division(): string
+    {
+        return $this->user()->activeDivision();
+    }
+
     /**
      * Whether the signed-in account may edit the school's work on this page.
      * The Blade hides the write controls for a read-only reader; every
@@ -144,61 +148,10 @@ class MemMatrixList extends Component
     /* ------------------------------------------------------------ the year */
 
     /**
-     * Ensure the selected year's twelve months exist. Runs as its own
-     * (POST) request from the view on load and after the year changes, so the
-     * write never rides on a GET page render. Silent — it is a housekeeping
-     * step, not an action the user took.
-     */
-    public function initializeYear(): void
-    {
-        // A silent no-op for a read-only reader: the view does not call it
-        // for them, and a crafted call must not create months either — but
-        // it must not break the page they are on.
-        if (!$this->canEdit()) {
-            return;
-        }
-
-        $year = $this->filterYear();
-
-        if ($year !== null) {
-            $this->ensureYear($year);
-        }
-    }
-
-    /**
-     * The "Initialize Year" button: the manual recovery path when a month is
-     * missing from the year currently selected in the filter. (To bring a
-     * brand-new year into being, use {@see addYear()}.) Reports what it did.
-     */
-    public function generateYear(): void
-    {
-        $user = $this->manager();
-
-        if ($user->school_id === null) {
-            $this->errorMessage = 'Your account has no school assigned, so it cannot own a matrix. Ask an administrator to set your school first.';
-
-            return;
-        }
-
-        // "All" is not a year to initialise — fall back to the current one.
-        $year = $this->filterYear() ?? (int) now()->year;
-
-        $created = $this->ensureYear($year);
-
-        $this->year = (string) $year;
-        $this->resetPage();
-
-        $this->successMessage = $created > 0
-            ? "{$created} missing " . ($created === 1 ? 'month was' : 'months were') . " created for CY {$year}. The rest were left as they were."
-            : "All twelve months already exist for CY {$year}.";
-    }
-
-    /**
      * Add a planning year the school does not have yet.
      *
-     * The Year filter only lists years that already exist (plus the current
-     * one), so a future — or earlier — year can never be chosen from it; this
-     * is the entry point that brings one into being. Its twelve months are
+     * This control is what brings a planning year into being: opening the
+     * page, or filtering by a year, is a read. The year's twelve months are
      * ensured and the filter switches to the new year so its months show
      * immediately.
      */
@@ -252,6 +205,7 @@ class MemMatrixList extends Component
             ? null
             : MonthlyExpenditureMatrix::query()
                 ->where('school_id', $schoolId)
+                ->where('school_division', $this->division())
                 ->max('year');
 
         return max((int) ($latest ?? 0), (int) now()->year);
@@ -288,12 +242,15 @@ class MemMatrixList extends Component
             return 0;
         }
 
+        $division = $this->division();
+
         $before = MonthlyExpenditureMatrix::query()
             ->where('school_id', $schoolId)
+            ->where('school_division', $division)
             ->where('year', $year)
             ->count();
 
-        $matrices = (new MemYearInitializer)->initialize((int) $schoolId, $year, Auth::id());
+        $matrices = (new MemYearInitializer)->initialize((int) $schoolId, $year, Auth::id(), $division);
 
         return $matrices->count() - $before;
     }
@@ -355,6 +312,7 @@ class MemMatrixList extends Component
 
         $checkCleared = WfpReportCheck::query()
             ->where('school_id', $matrix->school_id)
+            ->where('school_division', $matrix->schoolDivision())
             ->where('year', $matrix->year)
             ->exists();
 
@@ -366,7 +324,7 @@ class MemMatrixList extends Component
         // The deleted month's lines were part of the year's report the
         // Bookkeeper may have checked; the check no longer describes what is
         // left, so it is cleared.
-        WfpReportCheck::clearFor((int) $matrix->school_id, (int) $matrix->year);
+        WfpReportCheck::clearFor((int) $matrix->school_id, (int) $matrix->year, $matrix->schoolDivision());
 
         $this->closeConfirmDelete();
         $this->resetPage();
@@ -485,16 +443,19 @@ class MemMatrixList extends Component
 
         $year = $this->importYear();
 
+        $division = $this->division();
+
         $checkCleared = WfpReportCheck::query()
             ->where('school_id', $user->school_id)
+            ->where('school_division', $division)
             ->where('year', $year)
             ->exists();
 
-        $result = MemWorkbookImporter::commit($analysis['valid'], (int) $user->school_id, $year, $user);
+        $result = MemWorkbookImporter::commit($analysis['valid'], (int) $user->school_id, $year, $user, $division);
 
         // The import replaced lines the report's check signed off on, so the
         // check no longer describes them: clear it (see WfpReportCheck).
-        WfpReportCheck::clearFor((int) $user->school_id, $year);
+        WfpReportCheck::clearFor((int) $user->school_id, $year, $division);
 
         $this->showWorkbookImport = false;
         $this->resetWorkbookImport();
@@ -582,21 +543,8 @@ class MemMatrixList extends Component
 
     public function updatedYear(): void
     {
-        $this->resetPage();
-
-        // Bring the newly selected year's months into existence. Done here
-        // (server-side, on the year-change request) so it happens even
-        // without JavaScript; the view's on-load ensure covers the default.
-        $this->initializeYear();
-    }
-
-    public function updatedStatus(): void
-    {
-        $this->resetPage();
-    }
-
-    public function updatedPerPage(): void
-    {
+        // Filtering is a read: it never creates the year's months. Those are
+        // created only when the SH adds the year.
         $this->resetPage();
     }
 
@@ -643,6 +591,7 @@ class MemMatrixList extends Component
             ? []
             : MonthlyExpenditureMatrix::query()
                 ->where('school_id', $schoolId)
+                ->where('school_division', $this->division())
                 ->distinct()
                 ->orderByDesc('year')
                 ->pluck('year')
@@ -670,6 +619,7 @@ class MemMatrixList extends Component
     public function rows()
     {
         $schoolId = Auth::user()?->school_id;
+        $division = $this->division();
 
         return MonthlyExpenditureMatrix::query()
             ->withCount('items')
@@ -678,12 +628,12 @@ class MemMatrixList extends Component
                 fn($query) => $query->whereRaw('1 = 0'),
                 fn($query) => $query->where('school_id', $schoolId),
             )
+            ->where('school_division', $division)
             ->when($this->year !== '', fn($query) => $query->where('year', (int) $this->year))
-            ->when($this->status !== 'all', fn($query) => $query->where('status', $this->status))
             // Months read January → December; "All" puts the newest year first.
             ->orderByDesc('year')
             ->orderBy('month')
-            ->paginate($this->perPage);
+            ->paginate(self::PER_PAGE);
     }
 
     public function render()
