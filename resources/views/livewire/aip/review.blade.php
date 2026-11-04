@@ -1,4 +1,4 @@
-<div class="aip-component" @unless ($showReview) wire:poll.15s @endunless>
+<div class="aip-component" @unless ($showReview) wire:poll.visible.60s @endunless>
     @if ($successMessage)
         <div
             wire:key="aip-review-alert-{{ md5($successMessage) }}"

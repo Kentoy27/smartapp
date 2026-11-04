@@ -1,4 +1,4 @@
-<div class="opcrf-movs-component" wire:poll.15s>
+<div class="opcrf-movs-component" wire:poll.visible.60s>
 
     {{-- SUCCESS ALERT: popped once after a resubmission, then cleared so
          later renders never re-fire it. --}}

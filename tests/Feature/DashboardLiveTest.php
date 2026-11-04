@@ -69,7 +69,7 @@ class DashboardLiveTest extends TestCase
         $this->actingAs($this->staffUser())
             ->get(route('home'))
             ->assertOk()
-            ->assertSee('wire:poll.15s', false);
+            ->assertSee('wire:poll.visible.60s', false);
 
         // A superadmin's dashboard is just the greeting — the District List
         // moved to its own page (DistrictsPageTest covers its liveness).

@@ -3,7 +3,7 @@
     x-data="{ open: false }"
     @click.outside="open = false"
     @keydown.escape.window="open = false"
-    wire:poll.15s
+    wire:poll.visible.60s
 >
     @php($returnedTaskGroups = $this->returnedTasks)
     @php($revisionCount = count($returnedTaskGroups))

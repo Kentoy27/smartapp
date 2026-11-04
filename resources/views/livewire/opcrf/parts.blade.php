@@ -6,7 +6,7 @@
      opened, and the route it points at checks again; the button is a
      convenience, never the control. --}}
 
-<div class="opcrf-parts" wire:poll.60s>
+<div class="opcrf-parts" wire:poll.visible.60s>
 
     @if (session('opcrfPartNotice'))
         @php($notice = session('opcrfPartNotice'))

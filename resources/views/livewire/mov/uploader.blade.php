@@ -1,4 +1,4 @@
-<div class="mov-page" wire:poll.30s>
+<div class="mov-page" wire:poll.visible.60s>
     @if ($successMessage)
         <div
             wire:key="mov-alert-{{ md5($successMessage) }}"

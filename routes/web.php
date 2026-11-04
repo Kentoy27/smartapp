@@ -127,6 +127,13 @@ Route::middleware('auth')->group(function () {
         return view('aip.index');
     })->name('aip.index');
 
+    Route::get('/sip', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canAccessSip(), 404);
+
+        return view('sip.index');
+    })->name('sip.index');
+
     // The superadmin's review queue. Declared before /aip/{plan} so the
     // literal path is never read as a plan id (it would not match [0-9]+
     // anyway, but the order makes the intent explicit).

@@ -467,6 +467,17 @@ class Sidebar extends Component
                 ];
             }
 
+            if (Auth::user()?->canAccessSip()) {
+                $items[] = [
+                    'label' => 'SIP',
+                    'route' => 'sip.index',
+                    'path' => 'sip',
+                    'icon' => 'school',
+                    'section' => 'Files',
+                    'order' => 12,
+                ];
+            }
+
             // The MOV checklist is its own page, deliberately not folded
             // into the OPCR upload: the checklist is the standing set of
             // evidence documents, and it is worked on independently of any
