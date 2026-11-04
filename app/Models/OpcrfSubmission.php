@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use DateTimeInterface;
 use Illuminate\Support\Facades\Storage;
 
 class OpcrfSubmission extends Model
@@ -109,7 +110,7 @@ class OpcrfSubmission extends Model
             self::STATUS_FOR_COMPLIANCE => 'For Compliance',
             self::STATUS_RETURNED => 'Returned for Revision',
             self::STATUS_RESUBMITTED => 'Resubmitted for Review',
-            self::STATUS_APPROVED => 'Compliant',
+            self::STATUS_APPROVED => 'Approved',
             default => ucfirst($status),
         };
     }
@@ -293,6 +294,118 @@ class OpcrfSubmission extends Model
     }
 
     /**
+     * Whether every XML part in the stored signed workbook is well formed.
+     */
+    public function signedFileHasValidXml(): bool
+    {
+        if (! $this->hasSignedFile()) {
+            return false;
+        }
+
+        try {
+            $workbookBytes = Storage::disk('local')->get((string) $this->signed_file_path);
+            $parts = (new \App\Support\PurePhpZipReader(
+                Storage::disk('local')->path((string) $this->signed_file_path)
+            ))->readAll();
+        } catch (\RuntimeException) {
+            return false;
+        }
+
+        $previousErrorMode = libxml_use_internal_errors(true);
+
+        try {
+            foreach ($parts as $name => $contents) {
+                if (! preg_match('/\.(?:xml|rels)$/i', $name)) {
+                    continue;
+                }
+
+                $document = new \DOMDocument;
+
+                if (! @$document->loadXML($contents, LIBXML_NONET)) {
+                    return false;
+                }
+            }
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previousErrorMode);
+        }
+
+        try {
+            return \App\Support\OpcrfSignatureStamper::signatureAnchorsMatchSlots($workbookBytes);
+        } catch (\RuntimeException) {
+            return false;
+        }
+    }
+
+    /**
+     * Rebuild a previously stamped workbook from the immutable upload when an
+     * older stamp contains malformed XML or misplaced signer pictures.
+     */
+    public function repairSignedFile(): bool
+    {
+        if (! $this->hasFile() || $this->signedFileHasValidXml()) {
+            return false;
+        }
+
+        $owner = $this->user;
+        $sourcePath = (string) $this->file_path;
+
+        if ($owner instanceof User
+            && $owner->hasSignature()
+            && Storage::disk('local')->exists((string) $owner->signature_path)) {
+            if (! $this->stampAccountSignature(
+                $owner,
+                'RATEE',
+                $sourcePath,
+                $this->submitted_at ?? now()
+            )) {
+                return false;
+            }
+
+            $sourcePath = (string) $this->signed_file_path;
+        }
+
+        $reviewersByRole = [];
+
+        foreach ($this->reviews()->with('reviewer')->orderBy('reviewed_at')->orderBy('id')->get() as $review) {
+            $role = match ($review->action) {
+                OpcrfReview::ACTION_COMPLIANCE => $review->to_id === null
+                    ? 'APPROVING AUTHORITY'
+                    : 'RATER',
+                OpcrfReview::ACTION_COMPLIANCE_FINAL => 'APPROVING AUTHORITY',
+                default => null,
+            };
+            $reviewer = $review->reviewer;
+
+            if ($role !== null
+                && $reviewer instanceof User
+                && $reviewer->hasAdminAccess()
+                && $reviewer->hasSignature()
+                && Storage::disk('local')->exists((string) $reviewer->signature_path)) {
+                $reviewersByRole[$role] = $review;
+            }
+        }
+
+        foreach ($reviewersByRole as $role => $review) {
+            $reviewer = $review->reviewer;
+
+            if (! $reviewer instanceof User
+                || ! $this->stampAccountSignature(
+                    $reviewer,
+                    $role,
+                    $sourcePath,
+                    $review->reviewed_at ?? now()
+                )) {
+                return false;
+            }
+
+            $sourcePath = (string) $this->signed_file_path;
+        }
+
+        return $this->signedFileHasValidXml();
+    }
+
+    /**
      * The stored workbook a download should serve: the stamped copy when there
      * is one, otherwise the file exactly as the staff member uploaded it, and
      * null when neither is on disk.
@@ -317,7 +430,7 @@ class OpcrfSubmission extends Model
      * stamp could not be written) shows its printed names alone — just like
      * the bytes it serves.
      *
-     * @return array{url: string, name: string}|null
+     * @return array{url: string, name: string, signed_at: string}|null
      */
     public function rateeSignature(): ?array
     {
@@ -336,6 +449,7 @@ class OpcrfSubmission extends Model
         return [
             'url' => route('opcrf.submission.signature', $this),
             'name' => (string) ($owner->name ?: $owner->username),
+            'signed_at' => $this->submitted_at?->format('M j, Y g:i A') ?? '',
         ];
     }
 
@@ -343,7 +457,7 @@ class OpcrfSubmission extends Model
      * Reviewer signatures that belong in the workbook's signer slots,
      * keyed by normalized role name for the shared review partial.
      *
-     * @return array<string, array{url: string, name: string}>
+     * @return array<string, array{url: string, name: string, signed_at: string}>
      */
     public function reviewerSignatures(): array
     {
@@ -355,7 +469,9 @@ class OpcrfSubmission extends Model
 
         foreach ($this->reviews()->with('reviewer')->get() as $review) {
             $role = match ($review->action) {
-                OpcrfReview::ACTION_COMPLIANCE => 'rater',
+                OpcrfReview::ACTION_COMPLIANCE => $review->to_id === null
+                    ? 'approvingauthority'
+                    : 'rater',
                 OpcrfReview::ACTION_COMPLIANCE_FINAL => 'approvingauthority',
                 default => null,
             };
@@ -374,6 +490,7 @@ class OpcrfSubmission extends Model
                     'review' => $review,
                 ]),
                 'name' => (string) ($reviewer->name ?: $reviewer->username),
+                'signed_at' => $review->reviewed_at?->format('M j, Y g:i A') ?? '',
             ];
         }
 
@@ -409,7 +526,12 @@ class OpcrfSubmission extends Model
             return false;
         }
 
-        return $this->stampAccountSignature($owner, 'RATEE', $this->file_path);
+        return $this->stampAccountSignature(
+            $owner,
+            'RATEE',
+            $this->file_path,
+            $this->submitted_at ?? now()
+        );
     }
 
     /**
@@ -418,7 +540,11 @@ class OpcrfSubmission extends Model
      * sign-off). The prior stamped copy is used as input so earlier signatures
      * remain embedded.
      */
-    public function stampReviewerSignature(User $reviewer, string $role): bool
+    public function stampReviewerSignature(
+        User $reviewer,
+        string $role,
+        ?DateTimeInterface $signedAt = null
+    ): bool
     {
         if (! $this->hasFile()
             || ! $reviewer->hasAdminAccess()
@@ -429,10 +555,15 @@ class OpcrfSubmission extends Model
 
         $sourcePath = $this->hasSignedFile() ? $this->signed_file_path : $this->file_path;
 
-        return $this->stampAccountSignature($reviewer, $role, (string) $sourcePath);
+        return $this->stampAccountSignature($reviewer, $role, (string) $sourcePath, $signedAt ?? now());
     }
 
-    private function stampAccountSignature(User $signer, string $role, string $sourcePath): bool
+    private function stampAccountSignature(
+        User $signer,
+        string $role,
+        string $sourcePath,
+        DateTimeInterface $signedAt
+    ): bool
     {
         $disk = Storage::disk('local');
 
@@ -449,7 +580,8 @@ class OpcrfSubmission extends Model
                 $signature,
                 pathinfo((string) ($signer->signature_original_name ?? 'signature.png'), PATHINFO_EXTENSION),
                 (string) $signer->name,
-                $role
+                $role,
+                $signedAt
             );
         } catch (\Throwable) {
             return false; // Not a workbook we can edit — it is served as uploaded.
@@ -881,12 +1013,14 @@ class OpcrfSubmission extends Model
         User $reviewer,
         ?string $remarks = null,
         ?User $routeTo = null,
-        string $action = OpcrfReview::ACTION_COMPLIANCE
+        string $action = OpcrfReview::ACTION_COMPLIANCE,
+        ?DateTimeInterface $reviewedAt = null
     ): void {
+        $reviewedAt ??= now();
         $current = $this->assigned_to ?? $this->reviewer_id;
         $previousStatus = (string) $this->status;
 
-        $this->approved_at = now();
+        $this->approved_at = $reviewedAt;
         $this->approved_by = $reviewer->id;
         $this->status = self::STATUS_FOR_COMPLIANCE;
         $this->save();
@@ -899,7 +1033,7 @@ class OpcrfSubmission extends Model
             'to_id' => $routeTo?->id,
             'previous_status' => $previousStatus,
             'new_status' => self::STATUS_FOR_COMPLIANCE,
-            'reviewed_at' => now(),
+            'reviewed_at' => $reviewedAt,
         ]);
 
         // The workflow's next hop (SY by config): the SAME submission row
@@ -957,6 +1091,8 @@ class OpcrfSubmission extends Model
      */
     public function resubmit(?string $newFilePath = null, ?string $newOriginalName = null): void
     {
+        $submittedAt = now();
+
         // Preserve the replaced workbook as the previous version.
         $this->archiveCurrentFileAsVersion();
 
@@ -973,6 +1109,7 @@ class OpcrfSubmission extends Model
         }
 
         $this->status = self::STATUS_RESUBMITTED;
+        $this->submitted_at = $submittedAt;
         $this->reviewer_task_completion = [];
         // Route back to the superadmin who returned it — via the current
         // assignment; reviewer_id keeps pointing at the original reviewer.
@@ -987,7 +1124,7 @@ class OpcrfSubmission extends Model
             'remarks' => null,
             'previous_status' => self::STATUS_RETURNED,
             'new_status' => self::STATUS_RESUBMITTED,
-            'reviewed_at' => now(),
+            'reviewed_at' => $submittedAt,
         ]);
     }
 

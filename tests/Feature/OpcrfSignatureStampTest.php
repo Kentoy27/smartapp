@@ -154,6 +154,10 @@ class OpcrfSignatureStampTest extends TestCase
         $parts = $this->partsOf($submission->signed_file_path);
 
         $this->assertSame($this->signaturePng(), $parts['xl/media/image1.png'] ?? '');
+        $this->assertMatchesRegularExpression(
+            '/<c\b[^>]*\br="D151"[^>]*>.*?Jane D\. Doe.*?<\/c>/s',
+            $parts['xl/worksheets/sheet1.xml']
+        );
         $this->assertStringContainsString('Digital Signature', $parts['xl/drawings/drawing1.xml'] ?? '');
         $this->assertStringContainsString(
             'Digital signature of Jane D. Doe',
@@ -272,10 +276,35 @@ class OpcrfSignatureStampTest extends TestCase
         Livewire::actingAs($ferdinand)
             ->test(OpcrfReview::class)
             ->call('openReview', $submission->id)
-            ->call('complianceSubmission')
+            ->call('approveSubmission')
             ->assertHasNoErrors();
 
         $submission->refresh();
+        $finalReview = $submission->reviews()
+            ->where('action', \App\Models\OpcrfReview::ACTION_COMPLIANCE)
+            ->whereNull('to_id')
+            ->firstOrFail();
+        $rateeView = Livewire::actingAs($ratee)
+            ->test(OpcrfMovs::class)
+            ->call('openSubmission', $submission->id)
+            ->assertSee(route('opcrf.review.signature', [$submission, $raterReview]), false)
+            ->assertSee(route('opcrf.review.signature', [$submission, $finalReview]), false)
+            ->assertSee('Digital signature of Chief')
+            ->assertSee('Digital signature of Ferdinand S. Sy')
+            ->assertSee($raterReview->reviewed_at->format('M j, Y g:i A'))
+            ->assertSee($finalReview->reviewed_at->format('M j, Y g:i A'))
+            ->html();
+        $this->assertSame(3, substr_count($rateeView, 'class="opcrf-sheet-signer-date"'));
+
+        $this->actingAs($ratee)
+            ->get(route('opcrf.review.signature', [$submission, $raterReview]))
+            ->assertOk()
+            ->assertStreamedContent($this->signaturePng());
+        $this->actingAs($ratee)
+            ->get(route('opcrf.review.signature', [$submission, $finalReview]))
+            ->assertOk()
+            ->assertStreamedContent($this->signaturePng());
+
         $parts = $this->partsOf($submission->signed_file_path);
         $allDrawingXml = implode('', array_filter(
             $parts,
@@ -283,6 +312,48 @@ class OpcrfSignatureStampTest extends TestCase
             ARRAY_FILTER_USE_BOTH
         ));
         $this->assertStringContainsString('Digital signature of Ferdinand S. Sy', $allDrawingXml);
+        preg_match_all('/<xdr:cNvPr\b[^>]*\bname="([^"]+)"/', $allDrawingXml, $pictureNames);
+        $this->assertCount(count(array_unique($pictureNames[1])), $pictureNames[1]);
+        $this->assertTrue(
+            \App\Support\OpcrfSignatureStamper::signatureAnchorsMatchSlots(
+                Storage::disk('local')->get((string) $submission->signed_file_path)
+            )
+        );
+        $allWorksheetXml = implode('', array_filter(
+            $parts,
+            fn (string $contents, string $name): bool => str_starts_with($name, 'xl/worksheets/sheet') && str_ends_with($name, '.xml'),
+            ARRAY_FILTER_USE_BOTH
+        ));
+        $this->assertStringContainsString($raterReview->reviewed_at->format('M j, Y g:i A'), $allWorksheetXml);
+        $this->assertStringContainsString($finalReview->reviewed_at->format('M j, Y g:i A'), $allWorksheetXml);
+
+        $brokenPath = (string) $submission->signed_file_path;
+        $parts['xl/worksheets/sheet1.xml'] = preg_replace(
+            '/(<c\b[^>]*\br="D152"[^>]*)(>)/',
+            '$1/>',
+            $parts['xl/worksheets/sheet1.xml'],
+            1,
+            $replacements
+        );
+        $this->assertSame(1, $replacements);
+        Storage::disk('local')->put($brokenPath, \App\Support\PurePhpZipWriter::create($parts));
+
+        $download = $this->actingAs($ratee)
+            ->get(route('opcrf.submission.download', $submission))
+            ->assertOk();
+        $submission->refresh();
+        $this->assertNotSame($brokenPath, $submission->signed_file_path);
+        $downloadBytes = (string) $download->getContent();
+        $this->assertStringStartsWith("PK\x03\x04", $downloadBytes);
+        $downloadPath = tempnam(sys_get_temp_dir(), 'opcrf-approved-').'.xlsx';
+        file_put_contents($downloadPath, $downloadBytes);
+        try {
+            $downloadedWorkbook = \PhpOffice\PhpSpreadsheet\IOFactory::createReader('Xlsx')->load($downloadPath);
+            $this->assertInstanceOf(\PhpOffice\PhpSpreadsheet\Spreadsheet::class, $downloadedWorkbook);
+            $downloadedWorkbook->disconnectWorksheets();
+        } finally {
+            unlink($downloadPath);
+        }
     }
 
     public function test_a_submission_filed_without_a_signature_shows_none_in_the_review(): void

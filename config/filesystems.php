@@ -5,7 +5,7 @@ return [
     'disks' => [
         'local' => [
             'driver' => 'local',
-            'root' => storage_path('app'),
+            'root' => env('SMARTAPP_LOCAL_STORAGE_ROOT') ?: storage_path('app'),
             'throw' => false,
         ],
         'public' => [

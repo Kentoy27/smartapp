@@ -19,40 +19,16 @@ class OpcrfSubmissionWorkbook
      */
     public static function sheet(OpcrfSubmission $submission): ?array
     {
-        if (! $submission->hasFile()) {
+        if (! $submission->hasFile() && ! $submission->hasSignedFile()) {
             return null;
         }
 
         try {
             $spreadsheet = new OpcrfSpreadsheet(
-                Storage::disk('local')->path((string) $submission->downloadPath())
+                self::previewPath($submission)
             );
 
-            return [
-                'title' => mb_substr($spreadsheet->title(), 0, 200),
-                'headers' => $spreadsheet->headerCells(),
-                'evaluators' => $spreadsheet->evaluatorCells(),
-                'purpose' => $spreadsheet->purposeStatement(),
-                'parts' => array_map(
-                    static fn (array $part): array => [
-                        'key' => $part['key'],
-                        'title' => mb_substr($part['title'], 0, 200),
-                        'note' => mb_substr($part['note'], 0, 600),
-                        'rows' => self::numberedRows($part['entries']),
-                        'total_score' => $part['total_score'],
-                        'has_total_row' => $part['has_total_row'],
-                        'captions' => $part['captions'] ?? [],
-                        'fields' => array_keys($part['captions'] ?? []) ?: [
-                            'kra', 'attribution', 'objective', 'timeline', 'weight',
-                            'target_value', 'target_description', 'measure', 'scale',
-                            'movs', 'accomplishments', 'rating', 'average', 'weighted_average',
-                        ],
-                        'bands' => $part['bands'] ?? ['planning' => '', 'evaluation' => ''],
-                    ],
-                    $spreadsheet->parts()
-                ),
-                'signers' => $spreadsheet->signers(),
-            ];
+            return $spreadsheet->sheetLayout();
         } catch (\RuntimeException) {
             return null;
         }
@@ -68,23 +44,19 @@ class OpcrfSubmissionWorkbook
 
         try {
             return (new OpcrfSpreadsheet(
-                Storage::disk('local')->path((string) $submission->downloadPath())
+                self::previewPath($submission)
             ))->workbook();
         } catch (\RuntimeException) {
             return null;
         }
     }
 
-    /**
-     * @param array<int, array<string, mixed>> $entries
-     * @return array<int, array<string, mixed>>
-     */
-    private static function numberedRows(array $entries): array
+    private static function previewPath(OpcrfSubmission $submission): string
     {
-        return array_map(static function (array $entry, int $index): array {
-            $entry['number'] = $index + 1;
+        $path = $submission->hasFile()
+            ? $submission->file_path
+            : $submission->downloadPath();
 
-            return $entry;
-        }, array_values($entries), array_keys(array_values($entries)));
+        return Storage::disk('local')->path((string) $path);
     }
 }

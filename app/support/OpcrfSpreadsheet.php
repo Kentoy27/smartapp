@@ -309,6 +309,61 @@ class OpcrfSpreadsheet
     }
 
     /**
+     * The common Excel-style view model used by both upload preview and
+     * submission review, so a resubmitted workbook renders the same form.
+     *
+     * @return array{
+     *     title: string,
+     *     headers: array<int, array{ref: string, label: string, value: string}>,
+     *     evaluators: array<int, array{ref: string, label: string, value: string}>,
+     *     purpose: array{ref: string, label: string, value: string},
+     *     parts: array<int, array<string, mixed>>,
+     *     signers: array<int, array{ref: string, role: string, name: string}>
+     * }
+     */
+    public function sheetLayout(): array
+    {
+        return [
+            'title' => mb_substr($this->title(), 0, 200),
+            'headers' => $this->headerCells(),
+            'evaluators' => $this->evaluatorCells(),
+            'purpose' => $this->purposeStatement(),
+            'parts' => array_map(
+                static function (array $part): array {
+                    $captions = $part['captions'] ?? [];
+                    $entries = array_values($part['entries']);
+
+                    return [
+                        'key' => $part['key'],
+                        'title' => mb_substr($part['title'], 0, 200),
+                        'note' => mb_substr($part['note'], 0, 600),
+                        'rows' => array_map(
+                            static function (array $entry, int $index): array {
+                                $entry['number'] = $index + 1;
+
+                                return $entry;
+                            },
+                            $entries,
+                            array_keys($entries)
+                        ),
+                        'total_score' => $part['total_score'],
+                        'has_total_row' => $part['has_total_row'],
+                        'captions' => $captions,
+                        'fields' => array_keys($captions) ?: [
+                            'kra', 'attribution', 'objective', 'timeline', 'weight',
+                            'target_value', 'target_description', 'measure', 'scale',
+                            'movs', 'accomplishments', 'rating', 'average', 'weighted_average',
+                        ],
+                        'bands' => $part['bands'] ?? ['planning' => '', 'evaluation' => ''],
+                    ];
+                },
+                $this->parts()
+            ),
+            'signers' => $this->signers(),
+        ];
+    }
+
+    /**
      * The signer block at the sheet's end: one row of role labels
      * (RATEE, RATER, APPROVING AUTHORITY) with each signer's name a
      * couple of rows above in the same column — the lines signed after
@@ -1494,6 +1549,10 @@ class OpcrfSpreadsheet
                 continue;
             }
 
+            if ($this->isSignatureDate($value)) {
+                continue;
+            }
+
             $looksLikeName = preg_match('/[a-z]/i', $value) === 1
                 && preg_match('/[\p{L}]\s+\p{L}/u', $value) === 1;
 
@@ -1501,6 +1560,11 @@ class OpcrfSpreadsheet
         }
 
         return '';
+    }
+
+    private function isSignatureDate(string $value): bool
+    {
+        return preg_match('/^[A-Za-z]{3} \d{1,2}, \d{4} \d{1,2}:\d{2} [AP]M$/D', $value) === 1;
     }
 
     /**
@@ -2430,6 +2494,10 @@ class OpcrfSpreadsheet
             $value = trim($cells[$column.$rowNumber] ?? '');
 
             if ($value === '') {
+                continue;
+            }
+
+            if ($this->isSignatureDate($value)) {
                 continue;
             }
 

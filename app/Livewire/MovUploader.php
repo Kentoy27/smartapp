@@ -123,6 +123,11 @@ class MovUploader extends Component
     public array $documents = [];
 
     /**
+     * Single image selected from the device camera.
+     */
+    public $cameraPhoto;
+
+    /**
      * Backward-compatible single-file property for existing Livewire callers.
      */
     public $document;
@@ -227,6 +232,7 @@ class MovUploader extends Component
 
         $this->uploadingFor = $requirementId;
         $this->documents = [];
+        $this->cameraPhoto = null;
         $this->document = null;
         $this->removingId = null;
         $this->resetValidation();
@@ -240,6 +246,7 @@ class MovUploader extends Component
         $this->uploadingFor = null;
         $this->replacingId = null;
         $this->documents = [];
+        $this->cameraPhoto = null;
         $this->document = null;
         $this->resetValidation();
     }
@@ -256,6 +263,7 @@ class MovUploader extends Component
         $this->uploadingFor = $picture->mov_requirement_id;
         $this->replacingId = $picture->id;
         $this->documents = [];
+        $this->cameraPhoto = null;
         $this->document = null;
         $this->removingId = null;
         $this->resetValidation();
@@ -365,6 +373,7 @@ class MovUploader extends Component
         $this->replacingId = null;
         $this->uploadFailedFor = null;
         $this->documents = [];
+        $this->cameraPhoto = null;
         $this->document = null;
         $this->removingId = null;
         $this->resetValidation();
@@ -988,14 +997,20 @@ class MovUploader extends Component
      */
     private function selectedDocuments(): array
     {
-        if ($this->documents !== []) {
-            return array_values(array_filter(
-                $this->documents,
-                fn (mixed $file): bool => $file instanceof TemporaryUploadedFile,
-            ));
+        $files = array_values(array_filter(
+            $this->documents,
+            fn (mixed $file): bool => $file instanceof TemporaryUploadedFile,
+        ));
+
+        if ($this->cameraPhoto instanceof TemporaryUploadedFile) {
+            $files[] = $this->cameraPhoto;
         }
 
-        return $this->document instanceof TemporaryUploadedFile ? [$this->document] : [];
+        if ($files === [] && $this->document instanceof TemporaryUploadedFile) {
+            $files[] = $this->document;
+        }
+
+        return $files;
     }
 
     /**

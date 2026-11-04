@@ -247,9 +247,14 @@ class OpcrfTemplateTest extends TestCase
             'accomplishments' => 'Saved accomplishment from Part I',
             'self_rating' => 4,
             'file_path' => $storedPath,
+            'signed_file_path' => 'opcrf-submissions/'.$staff->id.'/unreadable-signed-copy.xlsx',
             'file_original_name' => 'saved-part-one.xlsx',
             'submitted_at' => now(),
         ]);
+        Storage::disk('local')->put(
+            'opcrf-submissions/'.$staff->id.'/unreadable-signed-copy.xlsx',
+            'invalid stamped workbook'
+        );
 
         $response = $this->actingAs($staff)->get(route('opcrf.template'));
 

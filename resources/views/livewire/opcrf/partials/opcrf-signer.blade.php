@@ -11,6 +11,10 @@
     $signature = $roleKey === 'ratee'
         ? ($rateeSignature ?? null)
         : (($reviewSignatures ?? [])[$roleKey] ?? null);
+    $signatureName = trim((string) ($signature['name'] ?? ''));
+    $displayName = $roleKey === 'ratee'
+        ? ($signatureName !== '' ? $signatureName : $signer['name'])
+        : (trim((string) $signer['name']) !== '' ? $signer['name'] : $signatureName);
 @endphp
 <div
     class="opcrf-sheet-signer {{ $signature !== null ? 'opcrf-sheet-signer--signed' : '' }}"
@@ -20,13 +24,16 @@
         <span class="opcrf-sheet-signer-sig">
             <img
                 src="{{ $signature['url'] }}"
-                alt="Digital signature of {{ $signature['name'] !== '' ? $signature['name'] : 'the ratee' }}"
+                alt="Digital signature of {{ $signatureName !== '' ? $signatureName : 'the signer' }}"
             >
         </span>
     @endif
 
-    <span class="opcrf-sheet-signer-name {{ $signer['name'] === '' ? 'is-empty' : '' }}">
-        {{ $signer['name'] !== '' ? $signer['name'] : '—' }}
+    <span class="opcrf-sheet-signer-name {{ $displayName === '' ? 'is-empty' : '' }}">
+        {{ $displayName !== '' ? $displayName : '—' }}
     </span>
+    @if (trim((string) ($signature['signed_at'] ?? '')) !== '')
+        <span class="opcrf-sheet-signer-date">{{ $signature['signed_at'] }}</span>
+    @endif
     <span class="opcrf-sheet-signer-role">{{ $signer['role'] }}</span>
 </div>

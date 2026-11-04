@@ -196,6 +196,17 @@
                                                     aria-label="Superadmin remarks for Part {{ $part['key'] }} objective {{ $entry['number'] }}"
                                                     placeholder="Add remarks for objective {{ $entry['number'] }}…"
                                                 ></textarea>
+                                                @if ($showMovReview ?? false)
+                                                    <button
+                                                        type="button"
+                                                        class="btn-ghost btn-ghost--small opcrf-objective-movs"
+                                                        wire:click="openMovEvidence({{ $this->reviewSubmission()->id }}, {{ $entry['number'] }})"
+                                                        title="Review MOV {{ $entry['number'] }} evidence uploaded by this staff member"
+                                                    >
+                                                        <x-icon name="folder-open" :size="14" />
+                                                        <span>Review MOV #{{ $entry['number'] }}</span>
+                                                    </button>
+                                                @endif
                                             @else
                                                 {{ trim((string) $objectiveRemark) !== '' ? $objectiveRemark : '—' }}
                                             @endif

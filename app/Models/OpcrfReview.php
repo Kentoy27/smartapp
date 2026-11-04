@@ -11,12 +11,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * the routing (from → to). Rows are immutable — the trail is the record.
  *
  * Actions:
- *   compliance — the reviewer approved/complied the submission (status →
- *                'for_compliance', i.e. compliant as reviewed). If the
- *                workflow requires it, the compliant submission is then
+ *   compliance — the reviewer approved the submission (status →
+ *                'for_compliance'). If the workflow requires it, the
+ *                approved submission is then
  *                routed onward to the next superadmin (SY).
  *   compliance_final — the reviewer's FINAL sign-off: the submission is
- *                marked compliant and the review chain ends there — no
+ *                approved and the review chain ends there — no
  *                onward routing to the next superadmin.
  *   forward    — handed to the next superadmin without a final decision
  *                (status stays/becomes 'forwarded').
@@ -79,7 +79,7 @@ class OpcrfReview extends Model
     public function actionLabel(): string
     {
         return match ($this->action) {
-            self::ACTION_COMPLIANCE, self::ACTION_COMPLIANCE_FINAL => 'Compliant',
+            self::ACTION_COMPLIANCE, self::ACTION_COMPLIANCE_FINAL => 'Approved',
             self::ACTION_FORWARD => 'Forwarded',
             self::ACTION_RETURN => 'Returned for Revision',
             self::ACTION_RESUBMIT => 'Resubmitted',
@@ -99,7 +99,7 @@ class OpcrfReview extends Model
         }
 
         if (in_array($this->action, [self::ACTION_COMPLIANCE, self::ACTION_COMPLIANCE_FINAL], true)) {
-            return 'Compliant';
+            return 'Approved';
         }
 
         return OpcrfSubmission::statusLabel((string) $this->previous_status)

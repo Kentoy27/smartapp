@@ -3,9 +3,11 @@
 namespace App\Livewire;
 
 use App\Models\OpcrfMov;
+use App\Models\MovRequirement;
 use App\Models\OpcrfSubmission;
 use App\Models\OpcrfSubmissionVersion;
 use App\Models\User;
+use App\Models\UserMov;
 use App\Notifications\OpcrfDecided;
 use App\Support\OpcrfSubmissionWorkbook;
 use Illuminate\Support\Collection;
@@ -66,6 +68,8 @@ class OpcrfReview extends Component
      */
     public array $objectiveRemarks = [];
 
+    public ?int $reviewMovNumber = null;
+
     /**
      * Success toast after a review action (clearSuccess pattern).
      */
@@ -103,16 +107,16 @@ class OpcrfReview extends Component
     }
 
     /**
-     * The archived (stamped when available) workbook rendered as the complete
+     * The original archived workbook rendered as the complete
      * Excel-style sheet —
      * the same full layout the staff member saw before submitting (title
      * banner, header + evaluator blocks, every part's objectives table with
      * timelines, performance measures, accomplishments and per-criteria
      * ratings, part totals, overall average, signer block).
      *
-     * Null when there is no archived file or it is not a readable .xlsx
-     * workbook — the modal then falls back to the recorded summary and the
-     * Download action.
+     * The original upload takes precedence over its stamped download copy so
+     * review renders the same workbook the submitter saw before filing.
+     * Null when neither archived copy is a readable .xlsx workbook.
      */
     #[Computed]
     public function reviewSheet(): ?array
@@ -140,7 +144,7 @@ class OpcrfReview extends Component
     }
 
     /**
-     * Every tab of the archived (stamped when available) workbook beyond PART I — PART II's
+     * Every tab of the archived workbook beyond PART I — PART II's
      * competency sections, PART III's rating summary and agreement block,
      * PART IV's improvement plans, plus any non-standard tabs as raw cell
      * grids — so the review modal shows the whole file. Null when there is
@@ -151,7 +155,11 @@ class OpcrfReview extends Component
     {
         $submission = $this->reviewSubmission();
 
-        if ($submission === null || ! $submission->hasFile() || $this->reviewSheet === null) {
+        if (
+            $submission === null
+            || (! $submission->hasFile() && ! $submission->hasSignedFile())
+            || $this->reviewSheet === null
+        ) {
             return null;
         }
 
@@ -228,24 +236,131 @@ class OpcrfReview extends Component
         );
 
         $this->reviewId = $submissionId;
+        $this->reviewMovNumber = null;
         $this->reviewRemarks = '';
         $submission = OpcrfSubmission::visibleTo(Auth::user())->findOrFail($submissionId);
         $this->objectiveRemarks = $submission->reviewer_remarks ?? [];
         $this->resetValidation();
         $this->showReview = true;
 
-        unset($this->reviewSheet, $this->reviewSheetRating, $this->reviewWorkbook, $this->reviewHistory);
+        unset(
+            $this->reviewSheet,
+            $this->reviewSheetRating,
+            $this->reviewWorkbook,
+            $this->reviewHistory,
+            $this->reviewNumberedMovRequirements
+        );
     }
 
     public function closeReview(): void
     {
         $this->showReview = false;
         $this->reviewId = null;
+        $this->reviewMovNumber = null;
         $this->reviewRemarks = '';
         $this->objectiveRemarks = [];
         $this->resetValidation();
 
-        unset($this->reviewSheet, $this->reviewSheetRating, $this->reviewWorkbook, $this->reviewHistory);
+        unset(
+            $this->reviewSheet,
+            $this->reviewSheetRating,
+            $this->reviewWorkbook,
+            $this->reviewHistory,
+            $this->reviewNumberedMovRequirements
+        );
+    }
+
+    /**
+     * Open the numbered MOV evidence submitted by the owner of the OPCRF.
+     * The assignment check mirrors the review action controls.
+     */
+    public function openMovEvidence(int $submissionId, int $movNumber): void
+    {
+        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+        abort_unless($movNumber > 0, 404);
+
+        $submission = OpcrfSubmission::visibleTo(Auth::user())
+            ->whereKey($submissionId)
+            ->firstOrFail();
+
+        abort_unless($this->showReview && $this->reviewId === $submission->id, 404);
+        abort_unless($submission->isAssignedTo(Auth::user()), 403);
+        abort_unless($submission->opcrf_part === OpcrfSubmission::FULL_WORKBOOK, 404);
+
+        $this->reviewMovNumber = $movNumber;
+        unset($this->reviewNumberedMovRequirements);
+    }
+
+    public function closeMovEvidence(): void
+    {
+        $this->reviewMovNumber = null;
+        unset($this->reviewNumberedMovRequirements);
+    }
+
+    /**
+     * MOV requirements with the selected number and documents uploaded by
+     * this OPCRF's owner. Numbers repeat between categories, so keep their
+     * requirement context in the modal.
+     *
+     * @return Collection<int, MovRequirement>
+     */
+    #[Computed]
+    public function reviewNumberedMovRequirements(): Collection
+    {
+        $submission = $this->reviewSubmission();
+
+        if (
+            $submission === null
+            || $submission->opcrf_part !== OpcrfSubmission::FULL_WORKBOOK
+            || $this->reviewMovNumber === null
+        ) {
+            return collect();
+        }
+
+        return MovRequirement::query()
+            ->with([
+                'category.part',
+                'userMovs' => fn ($query) => $query
+                    ->where('user_id', $submission->user_id)
+                    ->with('reviewer')
+                    ->orderBy('uploaded_at')
+                    ->orderBy('id'),
+            ])
+            ->where('mov_number', $this->reviewMovNumber)
+            ->whereHas('userMovs', fn ($query) => $query->where('user_id', $submission->user_id))
+            ->orderBy('mov_category_id')
+            ->orderBy('display_order')
+            ->get();
+    }
+
+    /**
+     * Confirm one of this submitter's matching-number documents as legitimate.
+     */
+    public function acceptMovEvidence(int $userMovId): void
+    {
+        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+
+        $submission = $this->reviewSubmission();
+
+        abort_unless(
+            $submission !== null
+                && $submission->opcrf_part === OpcrfSubmission::FULL_WORKBOOK
+                && $submission->isAssignedTo(Auth::user()),
+            403
+        );
+        abort_unless($this->reviewMovNumber !== null, 404);
+
+        $evidence = UserMov::query()
+            ->where('user_id', $submission->user_id)
+            ->whereHas('requirement', fn ($query) => $query->where('mov_number', $this->reviewMovNumber))
+            ->findOrFail($userMovId);
+
+        abort_unless($evidence->fileExists(), 404);
+
+        $evidence->accept(Auth::user());
+
+        unset($this->reviewNumberedMovRequirements);
+        $this->successMessage = $evidence->original_name.' marked as legitimate.';
     }
 
     /**
@@ -314,8 +429,10 @@ class OpcrfReview extends Component
         // reviewer, the current reviewer's approval ends the chain.
         $routeTo = $this->resolveNextReviewer($submission);
 
-        $signatureStamped = $submission->stampReviewerSignature(Auth::user(), 'RATER');
-        $submission->markCompliant(Auth::user(), $remarks, $routeTo);
+        $signerRole = $routeTo === null ? 'APPROVING AUTHORITY' : 'RATER';
+        $signedAt = now();
+        $signatureStamped = $submission->stampReviewerSignature(Auth::user(), $signerRole, $signedAt);
+        $submission->markCompliant(Auth::user(), $remarks, $routeTo, reviewedAt: $signedAt);
 
         // The staff member's bell carries the approval and reviewer's remarks.
         $submission->user?->notify(new OpcrfDecided(
@@ -327,6 +444,7 @@ class OpcrfReview extends Component
 
         $this->showReview = false;
         $this->reviewId = null;
+        $this->reviewMovNumber = null;
         $this->reviewRemarks = '';
         $this->objectiveRemarks = [];
         $this->resetValidation();
@@ -352,9 +470,8 @@ class OpcrfReview extends Component
     }
 
     /**
-     * Return for Revision: back to the staff member with the reviewer's
-     * remarks; the status shows it in their own table. Remarks are what
-     * makes this actionable, so they are required here.
+     * Return for Revision: send the submission back to the staff member
+     * immediately, without requiring decision remarks.
      */
     public function returnSubmission(): void
     {
@@ -370,23 +487,15 @@ class OpcrfReview extends Component
         // original reviewer of a forwarded submission is read-only.
         abort_unless($submission->isAssignedTo(Auth::user()), 403);
 
-        $this->validate([
-            'reviewRemarks' => ['required', 'string', 'max:2000'],
-        ], [
-            'reviewRemarks.required' => 'Tell the staff member what to revise before returning the submission.',
-            'reviewRemarks.max' => 'Keep the remarks under 2000 characters.',
-        ], [
-            'reviewRemarks' => 'remarks',
-        ]);
-
         $submission->forceFill([
             'reviewer_remarks' => $this->validatedObjectiveRemarks(),
         ])->save();
 
-        $submission->returnForRevision(Auth::user(), trim($this->reviewRemarks));
+        $submission->returnForRevision(Auth::user());
 
         $this->showReview = false;
         $this->reviewId = null;
+        $this->reviewMovNumber = null;
         $this->reviewRemarks = '';
         $this->objectiveRemarks = [];
         $this->resetValidation();
@@ -522,6 +631,7 @@ class OpcrfReview extends Component
         $this->closeDelete();
         $this->showReview = false;
         $this->reviewId = null;
+        $this->reviewMovNumber = null;
         $this->resetValidation();
 
         unset($this->submissions, $this->reviewSubmission, $this->reviewMovs, $this->reviewSheet, $this->reviewSheetRating, $this->reviewWorkbook);

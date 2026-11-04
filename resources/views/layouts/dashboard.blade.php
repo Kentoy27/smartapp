@@ -3163,6 +3163,11 @@
             font-weight: 400;
         }
 
+        .opcrf-sheet-signer-date {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
         .opcrf-sheet-signer-role {
             font-size: 0.75rem;
             text-transform: uppercase;
@@ -3925,6 +3930,195 @@
             width: 280px;
             min-width: 280px;
             white-space: pre-line;
+        }
+
+        .opcrf-sheet-reviewer-remarks .opcrf-objective-movs {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 10px;
+            padding: 9px 14px;
+            border: 1px solid #1d4ed8;
+            border-radius: 8px;
+            background: #2563eb;
+            color: #fff;
+            box-shadow: 0 2px 5px rgba(37, 99, 235, 0.3);
+            font-size: 0.8125rem;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .opcrf-sheet-reviewer-remarks .opcrf-objective-movs:hover {
+            border-color: #1e40af;
+            background: #1d4ed8;
+            color: #fff;
+            box-shadow: 0 3px 8px rgba(37, 99, 235, 0.4);
+        }
+
+        .opcrf-sheet-reviewer-remarks .opcrf-objective-movs:focus-visible {
+            outline: 3px solid #93c5fd;
+            outline-offset: 2px;
+        }
+
+        .opcrf-mov-evidence-backdrop {
+            z-index: 310;
+        }
+
+        .opcrf-mov-evidence-modal {
+            max-width: min(980px, calc(100vw - 32px));
+            max-height: 90vh;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+        }
+
+        .opcrf-mov-evidence-subtitle {
+            margin-top: 4px;
+            color: var(--text-muted);
+            font-size: 0.75rem;
+        }
+
+        .opcrf-mov-evidence-body {
+            display: grid;
+            gap: 16px;
+            padding: 18px;
+        }
+
+        .opcrf-mov-requirement {
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 14px;
+            background: var(--bg-elevated);
+        }
+
+        .opcrf-mov-requirement-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .opcrf-mov-requirement-head h3 {
+            color: var(--text-strong);
+            font-size: 0.9375rem;
+        }
+
+        .opcrf-mov-requirement-head p {
+            margin-top: 4px;
+            color: var(--text-muted);
+            font-size: 0.78125rem;
+        }
+
+        .opcrf-mov-requirement-trail {
+            margin-bottom: 4px;
+            color: var(--text-muted);
+            font-size: 0.6875rem;
+        }
+
+        .opcrf-mov-evidence-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+            gap: 12px;
+        }
+
+        .opcrf-mov-evidence-card {
+            min-width: 0;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+            background: var(--bg-panel);
+        }
+
+        .opcrf-mov-evidence-preview {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 150px;
+            max-height: 300px;
+            overflow: hidden;
+            background: var(--bg-hover);
+        }
+
+        .opcrf-mov-evidence-preview img {
+            display: block;
+            max-width: 100%;
+            max-height: 300px;
+            object-fit: contain;
+        }
+
+        .opcrf-mov-evidence-frame {
+            display: block;
+            width: 100%;
+            height: min(60vh, 560px);
+            max-height: 60vh;
+            overflow: auto;
+            border: 0;
+            border-top: 1px solid var(--border);
+            background: #fff;
+        }
+
+        .opcrf-mov-evidence-file {
+            display: flex;
+            min-height: 44px;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            color: var(--text-muted);
+            background: var(--bg-hover);
+        }
+
+        .opcrf-mov-evidence-file svg {
+            width: 18px;
+            height: 18px;
+        }
+
+        .opcrf-mov-evidence-file span {
+            font-size: 0.6875rem;
+            font-weight: 700;
+        }
+
+        .opcrf-mov-evidence-meta,
+        .opcrf-mov-evidence-actions {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px 12px;
+            padding: 10px 12px;
+        }
+
+        .opcrf-mov-evidence-meta {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 3px;
+            font-size: 0.75rem;
+        }
+
+        .opcrf-mov-evidence-meta strong {
+            overflow-wrap: anywhere;
+            color: var(--text-strong);
+        }
+
+        .opcrf-mov-evidence-meta span,
+        .opcrf-mov-evidence-verified {
+            color: var(--text-muted);
+            font-size: 0.6875rem;
+        }
+
+        .opcrf-mov-evidence-actions {
+            border-top: 1px solid var(--border);
+        }
+
+        .opcrf-mov-evidence-verified {
+            flex-basis: 100%;
+        }
+
+        .opcrf-mov-evidence-empty {
+            border: 1px dashed var(--border);
+            border-radius: 8px;
+            padding: 24px;
+            color: var(--text-muted);
+            text-align: center;
         }
 
         .opcrf-decision-actions {
@@ -5613,6 +5807,31 @@
             height: 100%;
             opacity: 0;
             cursor: pointer;
+        }
+
+        .mov-camera-button {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            margin-top: 10px;
+            cursor: pointer;
+        }
+
+        .mov-camera-input {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        .mov-camera-button:focus-within {
+            outline: 3px solid var(--primary-soft);
+            outline-offset: 2px;
         }
 
         .mov-dropzone strong {

@@ -242,6 +242,45 @@ class OpcrfReviewTest extends TestCase
         }
     }
 
+    public function test_mov_review_is_hidden_for_commitment_and_shown_for_full_workbook(): void
+    {
+        Storage::fake('local');
+
+        $admin = $this->superadmin();
+        $staff = $this->staffUser();
+        $workbookPath = $this->buildThreePartOpcrf();
+        $bytes = file_get_contents($workbookPath);
+
+        $commitment = $this->createSubmission($staff, [
+            'reviewer_id' => $admin->id,
+            'assigned_to' => $admin->id,
+        ]);
+        $commitmentPath = 'opcrf-submissions/'.$staff->id.'/commitment.xlsx';
+        Storage::disk('local')->put($commitmentPath, $bytes);
+        $commitment->update(['file_path' => $commitmentPath]);
+
+        Livewire::actingAs($admin)
+            ->test(OpcrfReview::class)
+            ->call('openReview', $commitment->id)
+            ->assertDontSee('Review MOV #1')
+            ->call('openMovEvidence', $commitment->id, 1)
+            ->assertNotFound();
+
+        $fullWorkbook = $this->createSubmission($staff, [
+            'opcrf_part' => OpcrfSubmission::FULL_WORKBOOK,
+            'reviewer_id' => $admin->id,
+            'assigned_to' => $admin->id,
+        ]);
+        $fullWorkbookPath = 'opcrf-submissions/'.$staff->id.'/full-opcrf.xlsx';
+        Storage::disk('local')->put($fullWorkbookPath, $bytes);
+        $fullWorkbook->update(['file_path' => $fullWorkbookPath]);
+
+        Livewire::actingAs($admin)
+            ->test(OpcrfReview::class)
+            ->call('openReview', $fullWorkbook->id)
+            ->assertSee('Review MOV #1');
+    }
+
     public function test_superadmin_can_save_remarks_for_numbered_objectives(): void
     {
         Storage::fake('local');
@@ -484,7 +523,9 @@ class OpcrfReviewTest extends TestCase
         $submission->update([
             'file_path' => 'opcrf-submissions/'.$staff->id.'/same.xlsx',
             'file_original_name' => 'OPCRF-TEMPLATE.xlsx',
+            'signed_file_path' => 'opcrf-submissions/'.$staff->id.'/signed.xlsx',
         ]);
+        Storage::disk('local')->put($submission->signed_file_path, 'stamped download copy');
 
         $reviewHtml = Livewire::actingAs($admin)
             ->test(OpcrfReview::class)
@@ -844,25 +885,16 @@ class OpcrfReviewTest extends TestCase
             ->assertSee('Submission received');
     }
 
-    public function test_returning_for_revision_needs_remarks_and_shows_them_to_the_staff_member(): void
+    public function test_returning_for_revision_needs_no_decision_remarks(): void
     {
         $admin = $this->superadmin();
         $staff = $this->staffUser();
         $submission = $this->createSubmission($staff, ['reviewer_id' => $admin->id]);
 
-        // Remarks are what makes a return actionable — refused without.
         Livewire::actingAs($admin)
             ->test(OpcrfReview::class)
             ->call('openReview', $submission->id)
-            ->call('returnSubmission')
-            ->assertHasErrors(['reviewRemarks']);
-
-        $this->assertSame(OpcrfSubmission::STATUS_PENDING, $submission->fresh()->status);
-
-        Livewire::actingAs($admin)
-            ->test(OpcrfReview::class)
-            ->call('openReview', $submission->id)
-            ->set('reviewRemarks', 'Complete the accomplishments column, then resubmit.')
+            ->assertDontSee('opcrfReviewRemarks')
             ->call('returnSubmission')
             ->assertSet('showReview', false);
 
@@ -874,15 +906,13 @@ class OpcrfReviewTest extends TestCase
             'opcrf_submission_id' => $submission->id,
             'reviewer_id' => $admin->id,
             'action' => 'return',
-            'remarks' => 'Complete the accomplishments column, then resubmit.',
+            'remarks' => null,
         ]);
 
-        // The staff member sees the status and the reviewer's remarks in
-        // their own table.
+        // The staff member receives the normal return status notification.
         Livewire::actingAs($staff)
             ->test(OpcrfMovs::class)
             ->assertSee('Returned for Revision')
-            ->assertSee('Complete the accomplishments column, then resubmit.')
             ->assertSee($admin->username);
     }
 

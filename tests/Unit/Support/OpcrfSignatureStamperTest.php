@@ -188,6 +188,112 @@ class OpcrfSignatureStamperTest extends TestCase
         $this->assertStringContainsString('Digital signature of EVA M. DOLLOSA RN', $picture['xml']);
     }
 
+    public function test_approving_authority_signature_and_date_use_the_bottom_signer_block(): void
+    {
+        $signedAt = \Illuminate\Support\Carbon::parse('2026-03-04 14:25:00');
+        $stamped = OpcrfSignatureStamper::stamp(
+            (string) file_get_contents(self::SHIPPED_TEMPLATE),
+            $this->signaturePng(),
+            'png',
+            'FERDINAND S. SY PhD, CESO VI',
+            'APPROVING AUTHORITY',
+            $signedAt
+        );
+        $parts = $this->partsOf((string) $stamped);
+        $picture = $this->pictureOn($parts, 'xl/worksheets/sheet1.xml');
+
+        $this->assertSame('N147:P151', $this->anchorBand($picture['anchor']));
+        $this->assertMatchesRegularExpression(
+            '/<c\b[^>]*\br="N152"[^>]*>.*?Mar 4, 2026 2:25 PM.*?<\/c>/s',
+            $parts['xl/worksheets/sheet1.xml']
+        );
+        $this->assertMatchesRegularExpression(
+            '/<c\b[^>]*\br="I25"[^>]*>.*?<\/c>/s',
+            $parts['xl/worksheets/sheet4.xml'],
+            'The existing approving-authority name cell must remain intact.'
+        );
+        $this->assertMatchesRegularExpression(
+            '/<c\b[^>]*\br="I27"[^>]*>.*?Mar 4, 2026 2:25 PM.*?<\/c>/s',
+            $parts['xl/worksheets/sheet4.xml']
+        );
+        preg_match(
+            '/<c\b[^>]*\br="N5"[^>]*>(.*?)<\/c>/s',
+            $parts['xl/worksheets/sheet1.xml'],
+            $headerDateCell
+        );
+        $this->assertStringNotContainsString('Mar 4, 2026 2:25 PM', $headerDateCell[1] ?? '');
+        $this->assertMatchesRegularExpression(
+            '/<c\b[^>]*\br="D75"[^>]*>/',
+            $parts['xl/worksheets/sheet2.xml'],
+            'Writing the date in a self-closing cell must not consume the next role label.'
+        );
+        $this->assertTrue(OpcrfSignatureStamper::signatureAnchorsMatchSlots((string) $stamped));
+    }
+
+    public function test_a_signature_in_the_header_is_rejected_as_misaligned(): void
+    {
+        $stamped = (string) OpcrfSignatureStamper::stamp(
+            (string) file_get_contents(self::SHIPPED_TEMPLATE),
+            $this->signaturePng(),
+            'png',
+            'FERDINAND S. SY PhD, CESO VI',
+            'APPROVING AUTHORITY'
+        );
+        $parts = $this->partsOf($stamped);
+        $parts['xl/drawings/drawing1.xml'] = preg_replace_callback(
+            '/<xdr:twoCellAnchor\b[^>]*>.*?Digital signature of FERDINAND S\. SY PhD, CESO VI.*?<\/xdr:twoCellAnchor>/s',
+            static function (array $match): string {
+                $anchor = preg_replace(
+                    '/(<xdr:from>.*?<xdr:row>)\d+(<\/xdr:row>)/s',
+                    '$1 0$2',
+                    $match[0],
+                    1
+                );
+
+                return (string) preg_replace(
+                    '/(<xdr:to>.*?<xdr:row>)\d+(<\/xdr:row>)/s',
+                    '$1 3$2',
+                    (string) $anchor,
+                    1
+                );
+            },
+            $parts['xl/drawings/drawing1.xml'],
+            1,
+            $replacements
+        );
+        $this->assertSame(1, $replacements);
+
+        $drawing = new \DOMDocument;
+        $this->assertTrue(@$drawing->loadXML($parts['xl/drawings/drawing1.xml'], LIBXML_NONET));
+        $this->assertFalse(
+            OpcrfSignatureStamper::signatureAnchorsMatchSlots(\App\Support\PurePhpZipWriter::create($parts))
+        );
+    }
+
+    public function test_signing_dates_keep_existing_styled_cells_well_formed(): void
+    {
+        $stamped = OpcrfSignatureStamper::stamp(
+            (string) file_get_contents(self::SHIPPED_TEMPLATE),
+            $this->signaturePng(),
+            'png',
+            'Jane D. Doe',
+            'RATEE',
+            \Illuminate\Support\Carbon::parse('2026-03-04 14:25:00')
+        );
+        $parts = $this->partsOf((string) $stamped);
+        $this->assertMatchesRegularExpression(
+            '/<c\b[^>]*\br="D151"[^>]*>.*?Jane D\. Doe.*?<\/c>/s',
+            $parts['xl/worksheets/sheet1.xml'],
+            'The cached zero in the ratee name formula must be replaced with the signer name.'
+        );
+        $worksheet = new \DOMDocument;
+
+        $this->assertTrue(
+            @$worksheet->loadXML($parts['xl/worksheets/sheet1.xml']),
+            'Stamping a date into a styled, self-closing cell must preserve valid worksheet XML.'
+        );
+    }
+
     public function test_the_sheets_own_cells_are_copied_through_untouched(): void
     {
         $original = file_get_contents($this->buildFullOpcrfWorkbook());
@@ -328,9 +434,14 @@ class OpcrfSignatureStamperTest extends TestCase
         $this->assertStringContainsString('Digital Signature', $parts['xl/drawings/drawing1.xml']);
         $this->assertSame($this->signaturePng(), $parts['xl/media/image2.png']);
 
-        // The sheet itself is untouched: its logo drawing was already wired.
+        // The logo wiring stays intact, and the cached formula in the
+        // ratee-name cell is replaced so the signature has the right name.
         $before = $this->partsOf((string) file_get_contents(self::SHIPPED_TEMPLATE));
-        $this->assertSame($before['xl/worksheets/sheet1.xml'], $parts['xl/worksheets/sheet1.xml']);
+        $this->assertStringContainsString(
+            'r="D151" s="526" t="inlineStr"><is><t xml:space="preserve">Jane D. Doe</t>',
+            $parts['xl/worksheets/sheet1.xml']
+        );
+        $this->assertStringContainsString('<drawing r:id="rId2"/>', $before['xl/worksheets/sheet1.xml']);
 
         // And the Part-I trim the staff download goes through keeps it.
         $path = tempnam(sys_get_temp_dir(), 'opcrf-stamped-').'.xlsx';

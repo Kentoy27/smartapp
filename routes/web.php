@@ -17,6 +17,7 @@ use App\Models\WfpPlan;
 use App\Models\WfpSubmission;
 use App\Support\AipXlsxExporter;
 use App\Support\MemXlsxExporter;
+use App\Support\MovEvidencePreview;
 use App\Support\OpcrfAccess;
 use App\Support\OpcrfPartOne;
 use App\Support\OpcrfTemplatePersonalizer;
@@ -445,9 +446,13 @@ Route::middleware('auth')->group(function () {
                 ? (clone $partOneSubmissions)->approved()->latest('id')->first()
                 : null;
             $savedPartOne ??= $partOneSubmissions->latest('id')->first();
-            $savedWorkbookPath = $savedPartOne?->downloadPath();
-            $hasSavedWorkbook = $savedPartOne?->hasFile()
-                && $savedWorkbookPath !== null
+            // Merge from the submitted original, not its signature-stamped
+            // download copy: the stamp can rewrite workbook relationships
+            // that the progress reader does not need and cannot parse.
+            $savedWorkbookPath = $savedPartOne?->hasFile()
+                ? $savedPartOne->file_path
+                : ($savedPartOne?->hasSignedFile() ? $savedPartOne->signed_file_path : null);
+            $hasSavedWorkbook = $savedWorkbookPath !== null
                 && Storage::disk('local')->exists($savedWorkbookPath);
 
             if ($hasSavedWorkbook) {
@@ -457,14 +462,31 @@ Route::middleware('auth')->group(function () {
                 );
             }
 
+            $identity = OpcrfTemplatePersonalizer::identityFor($user);
+
+            if ($hasSavedWorkbook && $savedPartOne !== null) {
+                foreach ([
+                    'employee_name' => 'name',
+                    'position' => 'position',
+                    'review_period' => 'review_period',
+                    'division_office' => 'division_office',
+                ] as $submissionField => $identityField) {
+                    $value = trim((string) $savedPartOne->{$submissionField});
+
+                    if ($value !== '') {
+                        $identity[$identityField] = $value;
+                    }
+                }
+            }
+
             $bytes = OpcrfTemplatePersonalizer::personalize(
                 $templateBytes,
-                OpcrfTemplatePersonalizer::identityFor($user),
+                $identity,
                 $user->id,
                 (string) config('opcrf.template.version', '2026.1')
             );
 
-            if ($savedPartOne !== null) {
+            if ($savedPartOne !== null && !$hasSavedWorkbook) {
                 $bytes = OpcrfWorkbookProgress::mergeSubmissionData(
                     $bytes,
                     [
@@ -476,7 +498,7 @@ Route::middleware('auth')->group(function () {
                         'accomplishments' => $savedPartOne->accomplishments,
                         'self_rating' => $savedPartOne->self_rating,
                     ],
-                    !$hasSavedWorkbook
+                    true
                 );
             }
         } catch (RuntimeException $e) {
@@ -521,6 +543,14 @@ Route::middleware('auth')->group(function () {
 
         abort_unless($submission->canBeDownloadedBy($user), 404);
         abort_unless($submission->hasFile(), 404);
+
+        if ($submission->hasSignedFile() && ! $submission->signedFileHasValidXml()) {
+            abort_unless(
+                $submission->repairSignedFile(),
+                500,
+                'The signed OPCRF workbook could not be repaired.'
+            );
+        }
 
         $storedPath = Storage::disk('local')->path((string) $submission->downloadPath());
 
@@ -580,7 +610,8 @@ Route::middleware('auth')->group(function () {
     })->name('opcrf.submission.signature')->where('submission', '[0-9]+');
 
     // A reviewer signature can only be fetched for a compliance action on
-    // this submission, by an administrator allowed to review the workbook.
+    // this submission by someone allowed to read its workbook: the owner or
+    // an administrator assigned to review it.
     Route::get('/opcrf-submissions/{submission}/review-signature/{review}', function (OpcrfSubmission $submission, \App\Models\OpcrfReview $review) {
         $viewer = Auth::user();
 
@@ -588,8 +619,7 @@ Route::middleware('auth')->group(function () {
             abort(404);
         }
 
-        abort_unless($viewer->hasAdminAccess(), 404);
-        abort_unless($submission->canBeReviewedBy($viewer), 404);
+        abort_unless($submission->canBeDownloadedBy($viewer), 404);
         abort_unless((int) $review->opcrf_submission_id === (int) $submission->id, 404);
         abort_unless(in_array($review->action, [
             \App\Models\OpcrfReview::ACTION_COMPLIANCE,
@@ -971,6 +1001,44 @@ Route::middleware('auth')->group(function () {
 
         return $response;
     })->name('mov.view')->where('mov', '[0-9]+');
+
+    Route::get('/movs/{mov}/preview', function (UserMov $mov) {
+        /** @var FilesystemAdapter $disk */
+        $disk = Storage::disk(config('mov.disk', 'local'));
+
+        abort_unless($mov->canBeAccessedBy(Auth::user()), 403);
+        abort_unless($mov->fileExists(), 404);
+
+        $extension = strtolower(pathinfo($mov->downloadName(), PATHINFO_EXTENSION));
+        $inlineTypes = [
+            'pdf' => 'application/pdf',
+            'jpg' => 'image/jpeg',
+            'jpeg' => 'image/jpeg',
+            'png' => 'image/png',
+            'webp' => 'image/webp',
+        ];
+
+        if (isset($inlineTypes[$extension])) {
+            $response = $disk->response($mov->stored_path, $mov->downloadName());
+            $response->headers->set('Content-Type', $inlineTypes[$extension]);
+            $response->headers->set(
+                'Content-Disposition',
+                $response->headers->makeDisposition(
+                    ResponseHeaderBag::DISPOSITION_INLINE,
+                    $mov->downloadName()
+                )
+            );
+            $response->headers->set('X-Content-Type-Options', 'nosniff');
+
+            return $response;
+        }
+
+        return response()
+            ->view('mov.preview', ['preview' => MovEvidencePreview::for($mov)])
+            ->header('Content-Type', 'text/html; charset=UTF-8')
+            ->header('X-Content-Type-Options', 'nosniff')
+            ->header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'");
+    })->name('mov.preview')->where('mov', '[0-9]+');
 
     // The same file as a download. Owner or superadmin only — the storage
     // path is never exposed and never lives under a public URL.

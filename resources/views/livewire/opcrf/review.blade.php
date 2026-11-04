@@ -17,6 +17,8 @@
         ></div>
     @endif
 
+    @include('livewire.opcrf.partials.mov-evidence-modal')
+
     {{-- SUBMISSIONS TABLE: every staff submission, newest first. --}}
     <div class="card">
         <div class="card-head">
@@ -139,8 +141,8 @@
                     Enter feedback in the Superadmin Remarks column beside
                     each numbered objective; the School Head can view those
                     notes with the submitted OPCRF. Add any decision remarks,
-                    then mark it compliant (the submission then
-                    routes onward to the next superadmin automatically) or
+                    then approve it (the submission then routes onward to the
+                    next superadmin automatically) or
                     return it for revision — the submitted file is never
                     replaced.
                 </p>
@@ -217,6 +219,7 @@
                                     'reviewSignatures' => $this->reviewSignatures,
                                     'reviewerRemarks' => $this->objectiveRemarks,
                                     'canEditObjectiveRemarks' => $this->reviewSubmission()->isAssignedTo(auth()->user()),
+                                    'showMovReview' => $this->reviewSubmission()->opcrf_part === \App\Models\OpcrfSubmission::FULL_WORKBOOK,
                                     'workbook' => $this->reviewWorkbook ?? ['tabs' => [], 'part_two' => ['sections' => [], 'total_rows' => [], 'signers' => [], 'scale' => ['title' => '', 'levels' => []]], 'part_three' => ['components' => [], 'agreement' => [], 'overall' => null, 'rating' => '', 'rating_table' => [], 'signatures' => []], 'part_four' => ['office_plan' => [], 'office_feedback' => '', 'development_plan' => [], 'development_feedback' => '', 'signers' => [], 'sections' => []], 'extra_sheets' => []],
                                     'uid' => 'rv',
                                 ])
@@ -275,8 +278,7 @@
 
                         {{-- REVIEW DECISION: the review's write step. The
                              superadmin holding the review step adds remarks,
-                             then either marks the submission
-                             compliant/approved — which auto-routes the same
+                             then approves the submission — which auto-routes the same
                              submission onward to the workflow's next
                              superadmin (SY), no manual forwarding step — or
                              returns it to the staff member for revision.
@@ -294,21 +296,10 @@
                             @if ($this->reviewSubmission()->isAssignedTo(auth()->user()))
                                 <p class="opcrf-review-card-desc">
                                     Review the submission and choose an appropriate action.
-                                    Add remarks when necessary. <strong>Approve</strong> records your
-                                    approval and routes it to the next reviewer when one is configured.
+                                    <strong>Approve</strong> records your approval and routes it to the next reviewer when one is configured,
+                                    or choose <strong>Return for Revision</strong> to send it back to the staff member.
                                     The final reviewer’s approval ends the review chain.
                                 </p>
-
-                                <label for="opcrfReviewRemarks">Remarks / Comments</label>
-                                <textarea
-                                    id="opcrfReviewRemarks"
-                                    class="opcrf-remarks-textarea"
-                                    wire:model="reviewRemarks"
-                                    rows="6"
-                                    placeholder="Enter remarks or instructions for the next reviewer..."
-                                    @class(['error' => $errors->has('reviewRemarks')])
-                                ></textarea>
-                                @error('reviewRemarks') <div class="error-text">{{ $message }}</div> @enderror
 
                                 <div class="opcrf-decision-actions">
                                     <button
@@ -317,7 +308,7 @@
                                         wire:click="returnSubmission"
                                         wire:loading.attr="disabled"
                                         wire:target="returnSubmission"
-                                        title="Send it back to the staff member for revision (remarks required)"
+                                        title="Send it back to the staff member for revision"
                                     >
                                         <x-icon name="undo-2" :size="14" />
                                         <span wire:loading.remove wire:target="returnSubmission">Return for Revision</span>

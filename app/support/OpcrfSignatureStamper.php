@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use DateTimeInterface;
 use RuntimeException;
 
 /**
@@ -105,6 +106,7 @@ final class OpcrfSignatureStamper
      *                                   whose it is
      * @param  string  $role  the workbook signer slot to stamp, such as RATEE,
      *                        RATER, or APPROVING AUTHORITY
+     * @param  DateTimeInterface|null  $signedAt  written below the signer's name
      * @return string|null the stamped workbook, or null when the workbook has
      *                     no signer block to stamp (nothing is changed and the
      *                     caller keeps the file it had)
@@ -116,7 +118,8 @@ final class OpcrfSignatureStamper
         string $signatureBytes,
         string $extension = 'png',
         ?string $signerName = null,
-        string $role = 'RATEE'
+        string $role = 'RATEE',
+        ?DateTimeInterface $signedAt = null
     ): ?string {
         if (trim($signatureBytes) === '') {
             return null;
@@ -150,20 +153,250 @@ final class OpcrfSignatureStamper
             $format
         );
 
-        $pictureNumber = 1;
-
         foreach ($anchors as $sheetPart => $anchor) {
+            if ($signedAt !== null) {
+                $parts[$sheetPart] = self::stampSignerDate(
+                    $parts[$sheetPart],
+                    $shared,
+                    $role,
+                    $signedAt->format('M j, Y g:i A')
+                );
+            }
+
+            if ($signerName !== null && trim($signerName) !== '') {
+                $parts[$sheetPart] = self::setInlineStringCell(
+                    $parts[$sheetPart],
+                    $anchor['name_cell'],
+                    trim($signerName)
+                );
+            }
+
             $parts = self::stampSheet(
                 $parts,
                 $sheetPart,
                 $anchor,
                 $mediaPart,
-                $pictureNumber++,
                 $signerName
             );
         }
 
         return PurePhpZipWriter::create($parts);
+    }
+
+    /**
+     * Verify that stamped images sit over an actual signer slot, not a
+     * same-named role label elsewhere in the worksheet header.
+     */
+    public static function signatureAnchorsMatchSlots(string $workbookBytes): bool
+    {
+        $parts = self::readParts($workbookBytes);
+        $shared = self::sharedStrings($parts);
+
+        foreach (self::worksheetParts($parts) as $sheetPart) {
+            $sheetRels = $parts[self::relationshipsPart($sheetPart)] ?? null;
+            $drawing = self::drawingForSheet($parts, $sheetPart, $sheetRels);
+
+            if ($drawing === null) {
+                continue;
+            }
+
+            $drawingXml = $parts[$drawing['part']] ?? '';
+            $document = new \DOMDocument;
+
+            if (! @$document->loadXML($drawingXml, LIBXML_NONET)) {
+                return false;
+            }
+
+            $xpath = new \DOMXPath($document);
+            $xpath->registerNamespace('xdr', self::DRAWING_NS);
+            $anchors = $xpath->query(
+                '//xdr:twoCellAnchor[xdr:pic/xdr:nvPicPr/xdr:cNvPr[starts-with(@descr, "Digital signature of ")]]'
+            );
+
+            if ($anchors === false) {
+                return false;
+            }
+
+            $sheetCells = self::cells($parts[$sheetPart], $shared);
+            $expected = [];
+
+            foreach (['RATEE', 'RATER', 'APPROVING AUTHORITY'] as $role) {
+                $slot = self::signatureAnchor($parts[$sheetPart], $shared, $role);
+
+                if ($slot !== null) {
+                    $expected[implode(':', [
+                        $slot['from_col'],
+                        $slot['from_row'],
+                        $slot['to_col'],
+                        $slot['to_row'],
+                    ])] = $slot['name_cell'];
+                }
+            }
+
+            foreach ($anchors as $anchorNode) {
+                $from = $xpath->query('./xdr:from', $anchorNode)->item(0);
+                $to = $xpath->query('./xdr:to', $anchorNode)->item(0);
+
+                if (! $from instanceof \DOMElement || ! $to instanceof \DOMElement) {
+                    return false;
+                }
+
+                $position = [];
+
+                foreach ([$from, $to] as $corner) {
+                    foreach (['col', 'row'] as $coordinate) {
+                        $value = $xpath->query('./xdr:'.$coordinate, $corner)->item(0)?->textContent;
+
+                        if ($value === null || ! ctype_digit($value)) {
+                            return false;
+                        }
+
+                        $position[] = (int) $value;
+                    }
+                }
+
+                $nameCell = $expected[implode(':', $position)] ?? null;
+                $description = $xpath->query(
+                    './xdr:pic/xdr:nvPicPr/xdr:cNvPr/@descr',
+                    $anchorNode
+                )->item(0)?->nodeValue;
+
+                if ($nameCell === null
+                    || ! is_string($description)
+                    || preg_match('/^Digital signature of (.+)$/', $description, $signerName) !== 1
+                    || trim($sheetCells[$nameCell] ?? '') !== trim($signerName[1])) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Write the signing time in the blank cell immediately above the role
+     * label, which is the row below the printed name in the OPCRF signer block.
+     *
+     * @param  array<int, string>  $shared
+     */
+    private static function stampSignerDate(
+        string $sheetXml,
+        array $shared,
+        string $role,
+        string $signedAt
+    ): string {
+        $roleCell = self::roleCell($sheetXml, $shared, $role);
+
+        if ($roleCell === null) {
+            throw new RuntimeException('The signer role disappeared while stamping the workbook.');
+        }
+
+        preg_match('/^([A-Z]+)(\d+)$/', $roleCell, $position);
+        $column = $position[1];
+        $roleRow = (int) $position[2];
+        $row = $roleRow - 1;
+        $cells = self::cells($sheetXml, $shared);
+
+        if (($cells[$column.$row] ?? '') !== ''
+            && ! self::isStampedDate($cells[$column.$row])) {
+            $row = $roleRow + 1;
+
+            if (($cells[$column.$row] ?? '') !== ''
+                && ! self::isStampedDate($cells[$column.$row])) {
+                throw new RuntimeException('The signer date cell is not empty.');
+            }
+        }
+
+        if ($row < 1) {
+            throw new RuntimeException('The signer date cell is outside the worksheet.');
+        }
+
+        return self::setInlineStringCell($sheetXml, $column.$row, $signedAt);
+    }
+
+    private static function setInlineStringCell(string $sheetXml, string $ref, string $value): string
+    {
+        $cellPattern = '/<c\b([^>]*?\br="'.preg_quote($ref, '/').'"[^>]*?)(?:\/>|>.*?<\/c>)/s';
+        $escaped = htmlspecialchars($value, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+
+        if (preg_match($cellPattern, $sheetXml) === 1) {
+            return (string) preg_replace_callback(
+                $cellPattern,
+                static function (array $match) use ($escaped): string {
+                    $attributes = (string) preg_replace('/\s+t="[^"]*"/', '', $match[1]);
+                    $attributes = rtrim(rtrim($attributes), '/');
+
+                    return '<c'.$attributes.' t="inlineStr"><is><t xml:space="preserve">'
+                        .$escaped.'</t></is></c>';
+                },
+                $sheetXml,
+                1
+            );
+        }
+
+        if (preg_match('/<sheetData>(.*?)<\/sheetData>/s', $sheetXml, $sheetData) !== 1) {
+            throw new RuntimeException('The signer date cell could not be added to the worksheet.');
+        }
+
+        preg_match('/^([A-Z]+)/', $ref, $columnMatch);
+        preg_match('/(\d+)$/', $ref, $rowMatch);
+        $column = $columnMatch[1] ?? '';
+        $row = (int) ($rowMatch[1] ?? 0);
+
+        if ($column === '' || $row < 1) {
+            throw new RuntimeException('The signer date cell reference is invalid.');
+        }
+
+        $cell = '<c r="'.$ref.'" t="inlineStr"><is><t xml:space="preserve">'
+            .$escaped.'</t></is></c>';
+        $inner = $sheetData[1];
+        $rowPattern = '/<row\b([^>]*\br="'.$row.'"[^>]*)>(.*?)<\/row>/s';
+
+        if (preg_match($rowPattern, $inner, $rowMatch) === 1) {
+            $rowCells = $rowMatch[2];
+            $insertAt = strlen($rowCells);
+
+            if (preg_match_all('/<c\b[^>]*\br="([A-Z]+)\d+"[^>]*(?:\/>|>.*?<\/c>)/s', $rowCells, $existingCells, PREG_OFFSET_CAPTURE) > 0) {
+                foreach ($existingCells[0] as $index => $existingCell) {
+                    if (self::columnIndex($existingCells[1][$index][0]) > self::columnIndex($column)) {
+                        $insertAt = $existingCell[1];
+
+                        break;
+                    }
+                }
+            }
+
+            $updatedRow = substr($rowCells, 0, $insertAt).$cell.substr($rowCells, $insertAt);
+            $updatedInner = preg_replace_callback(
+                $rowPattern,
+                static fn (array $match): string => '<row'.$match[1].'>'.$updatedRow.'</row>',
+                $inner,
+                1
+            );
+        } else {
+            $newRow = '<row r="'.$row.'">'.$cell.'</row>';
+            $updatedInner = $inner;
+            $insertAt = strlen($inner);
+
+            if (preg_match_all('/<row\b[^>]*\br="(\d+)"[^>]*>.*?<\/row>/s', $inner, $existingRows, PREG_OFFSET_CAPTURE) > 0) {
+                foreach ($existingRows[0] as $index => $existingRow) {
+                    if ((int) $existingRows[1][$index][0] > $row) {
+                        $insertAt = $existingRow[1];
+
+                        break;
+                    }
+                }
+            }
+
+            $updatedInner = substr($inner, 0, $insertAt).$newRow.substr($inner, $insertAt);
+        }
+
+        return (string) preg_replace_callback(
+            '/<sheetData>.*?<\/sheetData>/s',
+            static fn (array $match): string => '<sheetData>'.$updatedInner.'</sheetData>',
+            $sheetXml,
+            1
+        );
     }
 
     /* ------------------------------------------------------------------
@@ -183,31 +416,22 @@ final class OpcrfSignatureStamper
      * Null when the sheet has no matching role label.
      *
      * @param  array<int, string>  $shared
-     * @return array{from_col: int, from_row: int, to_col: int, to_row: int, first_column: string, last_column: string, first_row: int, last_row: int, geometry: array<string, mixed>}|null
+     * @return array{from_col: int, from_row: int, to_col: int, to_row: int, first_column: string, last_column: string, first_row: int, last_row: int, name_cell: string, geometry: array<string, mixed>}|null
      *         the anchor's zero-based from/to cell plus the 1-based band it covers
      */
     private static function signatureAnchor(string $sheetXml, array $shared, string $role): ?array
     {
         $cells = self::cells($sheetXml, $shared);
 
-        $rolesRef = null;
-
-        $targetRole = self::normalizeLabel($role);
-
-        foreach ($cells as $ref => $value) {
-            if ($value !== '' && self::normalizeLabel($value) === $targetRole) {
-                $rolesRef = $ref;
-
-                break;
-            }
-        }
+        $rolesRef = self::roleCell($sheetXml, $shared, $role);
 
         if ($rolesRef === null) {
             return null;
         }
 
         $column = (string) preg_replace('/\d+/', '', $rolesRef);
-        $rolesRow = (int) substr($rolesRef, 1);
+        preg_match('/^[A-Z]+(\d+)$/', $rolesRef, $rolePosition);
+        $rolesRow = (int) $rolePosition[1];
 
         $nameRow = null;
 
@@ -255,9 +479,39 @@ final class OpcrfSignatureStamper
             'last_column' => $lastColumn,
             'first_row' => $firstRow,
             'last_row' => $lastRow,
+            'name_cell' => $column.$nameRow,
             // The band's own measurements, for the picture's <a:ext>.
             'geometry' => self::sheetGeometry($sheetXml, $firstRow, $lastRow),
         ];
+    }
+
+    /**
+     * The bottom-most matching label is the signer block; earlier matches may
+     * be explanatory text in the form's header.
+     *
+     * @param  array<int, string>  $shared
+     */
+    private static function roleCell(string $sheetXml, array $shared, string $role): ?string
+    {
+        $targetRole = self::normalizeLabel($role);
+        $roleCell = null;
+        $lastRow = 0;
+
+        foreach (self::cells($sheetXml, $shared) as $ref => $value) {
+            if ($value === '' || self::normalizeLabel($value) !== $targetRole
+                || preg_match('/^[A-Z]+(\d+)$/', $ref, $position) !== 1) {
+                continue;
+            }
+
+            $row = (int) $position[1];
+
+            if ($row > $lastRow) {
+                $roleCell = $ref;
+                $lastRow = $row;
+            }
+        }
+
+        return $roleCell;
     }
 
     /**
@@ -268,6 +522,11 @@ final class OpcrfSignatureStamper
     {
         return preg_match('/[a-z]/i', $value) === 1
             && preg_match('/\p{L}\s+\p{L}/u', $value) === 1;
+    }
+
+    private static function isStampedDate(string $value): bool
+    {
+        return preg_match('/^[A-Z][a-z]{2} \d{1,2}, \d{4} \d{1,2}:\d{2} [AP]M$/', $value) === 1;
     }
 
     /**
@@ -300,7 +559,6 @@ final class OpcrfSignatureStamper
         string $sheetPart,
         array $anchor,
         string $mediaPart,
-        int $pictureNumber,
         ?string $signerName
     ): array {
         $sheetRelsPart = self::relationshipsPart($sheetPart);
@@ -356,7 +614,6 @@ final class OpcrfSignatureStamper
             $parts[$drawingPart],
             $anchor,
             $imageRid,
-            $pictureNumber,
             $xdr,
             $a,
             $signerName
@@ -378,7 +635,6 @@ final class OpcrfSignatureStamper
         string $drawingXml,
         array $anchor,
         string $imageRid,
-        int $pictureNumber,
         string $xdr,
         string $a,
         ?string $signerName
@@ -401,7 +657,7 @@ final class OpcrfSignatureStamper
             .'</'.$xdr.':to>'
             .'<'.$xdr.':pic>'
             .'<'.$xdr.':nvPicPr>'
-            .'<'.$xdr.':cNvPr id="'.$id.'" name="Digital Signature '.$pictureNumber.'" descr="'
+            .'<'.$xdr.':cNvPr id="'.$id.'" name="Digital Signature '.$id.'" descr="'
             .htmlspecialchars($description, ENT_XML1 | ENT_QUOTES, 'UTF-8').'"/>'
             .'<'.$xdr.':cNvPicPr><'.$a.':picLocks noChangeAspect="1"/></'.$xdr.':cNvPicPr>'
             .'</'.$xdr.':nvPicPr>'

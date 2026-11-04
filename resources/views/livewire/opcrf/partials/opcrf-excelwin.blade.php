@@ -30,6 +30,7 @@
                 'reviewSignatures' => $reviewSignatures ?? [],
                 'reviewerRemarks' => $reviewerRemarks ?? [],
                 'canEditObjectiveRemarks' => $canEditObjectiveRemarks ?? false,
+                'showMovReview' => $showMovReview ?? false,
             ])
         </div>
 

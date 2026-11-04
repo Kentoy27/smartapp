@@ -189,7 +189,7 @@
                 </div>
 
                 <label
-                    class="mov-dropzone{{ $documents !== [] ? ' has-file' : '' }}"
+                    class="mov-dropzone{{ $documents !== [] || $cameraPhoto ? ' has-file' : '' }}"
                     for="mov-evidence-file"
                     wire:key="mov-dropzone-{{ $focused }}-{{ $replacingId ?? 'new' }}"
                 >
@@ -201,9 +201,9 @@
                         @unless ($replacingId !== null) multiple @endunless
                         aria-label="Choose MOV evidence files"
                     >
-                    @if ($documents !== [])
+                    @if ($documents !== [] || $cameraPhoto)
                         <span class="mov-dropzone__icon" aria-hidden="true"><x-icon name="file-text" :size="24" /></span>
-                        <strong>{{ count($documents) }} {{ \Illuminate\Support\Str::plural('file', count($documents)) }} selected</strong>
+                        <strong>{{ count($documents) + ($cameraPhoto ? 1 : 0) }} {{ \Illuminate\Support\Str::plural('file', count($documents) + ($cameraPhoto ? 1 : 0)) }} selected</strong>
                         <span><span class="mov-dropzone__action">Choose more files</span></span>
                     @else
                         <span class="mov-dropzone__icon" aria-hidden="true"><x-icon name="upload" :size="24" /></span>
@@ -216,7 +216,21 @@
                     </span>
                 </label>
 
-                @if ($documents !== [])
+                <label class="mov-camera-button btn-ghost btn-ghost--small" for="mov-camera-file">
+                    <input
+                        id="mov-camera-file"
+                        class="mov-camera-input"
+                        type="file"
+                        wire:model="cameraPhoto"
+                        accept="image/*"
+                        capture="environment"
+                        aria-label="Take a MOV evidence photo"
+                    >
+                    <x-icon name="image" :size="16" />
+                    <span>Take Photo</span>
+                </label>
+
+                @if ($documents !== [] || $cameraPhoto)
                     <ul class="mov-selected-files" aria-label="Selected files">
                         @foreach ($documents as $selectedFile)
                             @php($extension = strtoupper(pathinfo($selectedFile->getClientOriginalName(), PATHINFO_EXTENSION)))
@@ -226,6 +240,14 @@
                                 <span class="mov-selected-files__size">{{ number_format($selectedFile->getSize() / 1048576, 2) }} MB</span>
                             </li>
                         @endforeach
+                        @if ($cameraPhoto)
+                            @php($cameraExtension = strtoupper(pathinfo($cameraPhoto->getClientOriginalName(), PATHINFO_EXTENSION)))
+                            <li wire:key="mov-selected-camera-file">
+                                <span class="mov-selected-files__type">{{ $cameraExtension ?: 'IMAGE' }}</span>
+                                <span class="mov-selected-files__name">{{ $cameraPhoto->getClientOriginalName() }}</span>
+                                <span class="mov-selected-files__size">{{ number_format($cameraPhoto->getSize() / 1048576, 2) }} MB</span>
+                            </li>
+                        @endif
                     </ul>
                 @endif
 
@@ -237,14 +259,22 @@
                         <span></span>
                     </div>
                 </div>
+                <div class="mov-upload-progress" wire:loading wire:target="cameraPhoto" role="status" aria-live="polite">
+                    <div class="mov-upload-progress__label">
+                        <span>Uploading captured photo…</span>
+                    </div>
+                    <div class="mov-upload-progress__track" aria-hidden="true">
+                        <span></span>
+                    </div>
+                </div>
                 <div class="mov-upload-progress" wire:loading wire:target="saveDocuments({{ $mov['id'] }})" role="status" aria-live="polite">
                     <div class="mov-upload-progress__label">
                         <span>Checking and saving files…</span>
                     </div>
                 </div>
 
-                @if ($uploadFailedFor === $mov['id'] && ($errors->has('documents') || $errors->has('documents.*') || $errors->has('document')))
-                    <div class="error-text" role="alert">{{ $errors->first('documents') ?: $errors->first('documents.*') ?: $errors->first('document') }}</div>
+                @if ($uploadFailedFor === $mov['id'] && ($errors->has('documents') || $errors->has('documents.*') || $errors->has('document') || $errors->has('cameraPhoto')))
+                    <div class="error-text" role="alert">{{ $errors->first('documents') ?: $errors->first('documents.*') ?: $errors->first('document') ?: $errors->first('cameraPhoto') }}</div>
                 @endif
 
                 <div class="mov-upload-panel__actions">
@@ -257,9 +287,9 @@
                         wire:click="saveDocuments({{ $mov['id'] }})"
                         wire:loading.attr="disabled"
                         wire:target="saveDocuments({{ $mov['id'] }})"
-                        @disabled($documents === [] && ! $document)
+                        @disabled($documents === [] && ! $cameraPhoto && ! $document)
                     >
-                        <span wire:loading.remove wire:target="saveDocuments({{ $mov['id'] }})">{{ $replacingId !== null ? 'Replace File' : 'Upload '.($documents !== [] ? count($documents).' Files' : 'Files') }}</span>
+                        <span wire:loading.remove wire:target="saveDocuments({{ $mov['id'] }})">{{ $replacingId !== null ? 'Replace File' : 'Upload '.((count($documents) + ($cameraPhoto ? 1 : 0)) > 0 ? (count($documents) + ($cameraPhoto ? 1 : 0)).' Files' : 'Files') }}</span>
                         <span wire:loading wire:target="saveDocuments({{ $mov['id'] }})">
                             <span class="mov-upload-spinner" aria-hidden="true"></span>
                             Checking and saving files…

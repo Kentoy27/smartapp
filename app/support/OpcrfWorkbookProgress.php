@@ -314,8 +314,17 @@ final class OpcrfWorkbookProgress
     private static function worksheetCells(DOMDocument $document): array
     {
         $cells = [];
+        $xpath = new \DOMXPath($document);
+        $xpath->registerNamespace('main', self::MAIN_NS);
+        $nodes = $xpath->query('//main:c');
 
-        foreach ($document->getElementsByTagNameNS(self::MAIN_NS, 'c') as $cell) {
+        if ($nodes === false) {
+            throw new RuntimeException('The OPCRF worksheet cells could not be read.');
+        }
+
+        // XPath returns an efficient snapshot; walking the live DOMNodeList
+        // is pathologically slow for large workbooks on XAMPP PHP 8.2.
+        foreach ($nodes as $cell) {
             if ($cell instanceof DOMElement) {
                 $reference = $cell->getAttribute('r');
 

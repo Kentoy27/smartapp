@@ -515,23 +515,7 @@ class OpcrfUpload extends Component
         // layouts, plus any non-standard tabs as raw cell grids.
         $this->workbook = $spreadsheet->workbook();
 
-        $this->sheet = [
-            'title' => mb_substr($spreadsheet->title(), 0, 200),
-            'headers' => $spreadsheet->headerCells(),
-            'evaluators' => $spreadsheet->evaluatorCells(),
-            'parts' => array_map(
-                fn(array $part): array => [
-                    'key' => $part['key'],
-                    'title' => mb_substr($part['title'], 0, 200),
-                    'note' => mb_substr($part['note'], 0, 600),
-                    'rows' => $this->numberedRows($part['entries']),
-                    'total_score' => $part['total_score'],
-                    'has_total_row' => $part['has_total_row'],
-                ],
-                $spreadsheet->parts()
-            ),
-            'signers' => $spreadsheet->signers(),
-        ];
+        $this->sheet = $spreadsheet->sheetLayout();
     }
 
     /**
@@ -593,22 +577,6 @@ class OpcrfUpload extends Component
             ],
             true
         );
-    }
-
-    /**
-     * 1-based numbering for the objectives table's first column (the
-     * template numbers objectives implicitly by row order).
-     *
-     * @param  array<int, array{row: int, objectives: string, timeline: string, criteria: array<int, array{label: string, accomplishments: string, rating: ?float}>}>  $entries
-     * @return array<int, array{row: int, number: int, objectives: string, timeline: string, criteria: array<int, array{label: string, accomplishments: string, rating: ?float}>}>
-     */
-    private function numberedRows(array $entries): array
-    {
-        return array_map(function (array $entry, int $index): array {
-            $entry['number'] = $index + 1;
-
-            return $entry;
-        }, array_values($entries), array_keys(array_values($entries)));
     }
 
     /**

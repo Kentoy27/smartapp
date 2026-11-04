@@ -1085,6 +1085,33 @@ class MovUploadTest extends TestCase
         }
     }
 
+    public function test_a_camera_photo_can_be_uploaded_as_mov_evidence(): void
+    {
+        Storage::fake('local');
+        $this->seedChecklist();
+        $staff = $this->staff();
+        $requirement = $this->wfpRequirement();
+
+        Livewire::actingAs($staff)
+            ->withQueryParams(['mov' => $requirement->id])
+            ->test(MovUploader::class)
+            ->call('openUpload', $requirement->id)
+            ->assertSee('Take Photo')
+            ->assertSee('capture="environment"', false)
+            ->set('cameraPhoto', UploadedFile::fake()->image('captured-mov.jpg'))
+            ->assertSee('captured-mov.jpg')
+            ->call('saveDocuments', $requirement->id)
+            ->assertHasNoErrors()
+            ->assertSee('1 file added');
+
+        $uploaded = UserMov::forUser($staff)
+            ->where('mov_requirement_id', $requirement->id)
+            ->sole();
+
+        $this->assertSame('captured-mov.jpg', $uploaded->original_name);
+        Storage::disk('local')->assertExists($uploaded->stored_path);
+    }
+
     public function test_a_file_over_the_configured_size_limit_is_refused(): void
     {
         Storage::fake('local');
