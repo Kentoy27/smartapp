@@ -7479,14 +7479,14 @@
                         <x-icon name="moon" :size="20" class="icon-moon" />
                     </button>
                     <button type="button" class="user-menu-trigger" id="userMenuTrigger" aria-haspopup="true" aria-expanded="false" title="Account menu">
-                        <div class="avatar" id="userMenuAvatar">{{ strtoupper(substr(Auth::user()->username, 0, 2)) }}</div>
-                        <span class="name"><strong id="userMenuUsername">{{ Auth::user()->username }}</strong></span>
+                        <div class="avatar" id="userMenuAvatar">{{ strtoupper(substr(Auth::user()->name ?: Auth::user()->username, 0, 2)) }}</div>
+                        <span class="name"><strong id="userMenuUsername">{{ Auth::user()->name ?: Auth::user()->username }}</strong></span>
                         <span class="chevron" aria-hidden="true"><x-icon name="chevron-down" :size="14" /></span>
                     </button>
 
                     <div class="user-dropdown" id="userDropdown" role="menu">
                         <div class="user-dropdown-header">
-                            <strong id="userDropdownUsername">{{ Auth::user()->username }}</strong>
+                            <strong id="userDropdownUsername">{{ Auth::user()->name ?: Auth::user()->username }}</strong>
                             @if(Auth::user()->email)
                                 <span id="userDropdownEmail">{{ Auth::user()->email }}</span>
                             @endif
@@ -7630,14 +7630,15 @@
                         var detail = event.detail || {};
                         if (!detail.username) return;
 
+                        var displayName = detail.name || detail.username;
                         var name = document.getElementById('userMenuUsername');
-                        if (name) name.textContent = detail.username;
+                        if (name) name.textContent = displayName;
 
                         var initials = document.getElementById('userMenuAvatar');
-                        if (initials) initials.textContent = detail.username.slice(0, 2).toUpperCase();
+                        if (initials) initials.textContent = displayName.slice(0, 2).toUpperCase();
 
                         var menuName = document.getElementById('userDropdownUsername');
-                        if (menuName) menuName.textContent = detail.username;
+                        if (menuName) menuName.textContent = displayName;
 
                         var menuEmail = document.getElementById('userDropdownEmail');
                         if (menuEmail && detail.email) menuEmail.textContent = detail.email;

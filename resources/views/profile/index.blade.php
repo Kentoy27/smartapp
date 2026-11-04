@@ -13,7 +13,7 @@
     {{-- ACCOUNT SUMMARY --}}
     <div class="profile-card">
         <div class="profile-identity">
-            <div class="profile-avatar">{{ strtoupper(substr($account->username, 0, 2)) }}</div>
+            <div class="profile-avatar">{{ strtoupper(substr($account->name ?: $account->username, 0, 2)) }}</div>
             <div class="profile-identity-text">
                 <strong>{{ $account->name ?: $account->username }}</strong>
                 <span class="profile-role">{{ $account->roleLabel() }}</span>

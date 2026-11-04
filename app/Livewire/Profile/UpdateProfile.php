@@ -129,9 +129,13 @@ class UpdateProfile extends Component
 
         $this->successMessage = 'Your profile has been updated.';
 
-        // The account menu spells the username and its initials, so it has to
-        // hear about a rename instead of waiting for the next page load.
-        $this->dispatch('smartapp-profile-updated', username: $account->username, email: $account->email);
+        // Keep the account menu in sync when the displayed real name changes.
+        $this->dispatch(
+            'smartapp-profile-updated',
+            name: $account->name,
+            username: $account->username,
+            email: $account->email,
+        );
     }
 
     /**

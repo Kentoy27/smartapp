@@ -77,6 +77,22 @@ class UpdateProfileTest extends TestCase
             ->assertSee('Save changes');
     }
 
+    public function test_account_menu_and_profile_show_the_real_name_instead_of_username(): void
+    {
+        $account = $this->staff('12345');
+        $account->forceFill(['name' => 'Juan Dela Cruz'])->save();
+
+        $this->actingAs($account)
+            ->get(route('profile.index'))
+            ->assertOk()
+            ->assertSee('id="userMenuUsername">Juan Dela Cruz</strong>', false)
+            ->assertSee('id="userDropdownUsername">Juan Dela Cruz</strong>', false)
+            ->assertSee('>JU</div>', false)
+            ->assertSee('class="profile-avatar">JU</div>', false)
+            ->assertSee('Juan Dela Cruz')
+            ->assertDontSee('id="userMenuUsername">12345</strong>', false);
+    }
+
     public function test_opening_the_modal_fills_it_from_the_signed_in_account(): void
     {
         foreach ([$this->staff(), $this->superadmin()] as $account) {
@@ -109,7 +125,8 @@ class UpdateProfileTest extends TestCase
             ->set('email', 'juan.dc@deped.gov.ph')
             ->call('save')
             ->assertHasNoErrors()
-            ->assertSet('successMessage', 'Your profile has been updated.');
+            ->assertSet('successMessage', 'Your profile has been updated.')
+            ->assertDispatched('smartapp-profile-updated', name: 'Juan Dela Cruz', username: 'juan_dc');
 
         $account->refresh();
 
