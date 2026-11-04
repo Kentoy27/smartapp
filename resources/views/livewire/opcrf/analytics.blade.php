@@ -6,7 +6,7 @@
      completed on the Review Opcrf page lands here without a reload. Every
      number is scoped to the submissions the signed-in superadmin may see
      (see OpcrfAnalytics). --}}
-<div class="card opcrf-analytics" wire:poll.15s>
+<div class="card opcrf-analytics" wire:poll.visible.60s>
     <div class="card-head">
         <div class="card-title">OPCRF Analytics</div>
         <a href="{{ route('opcrf.review') }}" class="card-link">Go to Review Opcrf →</a>

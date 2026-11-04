@@ -6,7 +6,7 @@
      here with a download that serves the archived copy. Polls like the
      rest of the dashboard's data-driven cards, so an upload made moments
      ago lands here without a reload. --}}
-<div class="card wfp-uploads-list" wire:poll.15s>
+<div class="card wfp-uploads-list" wire:poll.visible.60s>
     <div class="card-head">
         <div class="card-title">{{ auth()->user()?->canReviewAllOpcrfSubmissions() ? 'WFP Review' : 'WFP Uploads' }}</div>
         <span class="wfp-uploads-count">

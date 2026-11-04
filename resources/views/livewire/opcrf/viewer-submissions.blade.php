@@ -1,4 +1,4 @@
-<div class="opcrf-viewer-submissions" wire:poll.15s>
+<div class="opcrf-viewer-submissions" wire:poll.visible.60s>
     <div class="card">
         <div class="card-head">
             <div class="card-title">Submitted OPCRFs from School Heads</div>

@@ -1,4 +1,4 @@
-<div class="dashboard-summary" wire:poll.15s>
+<div class="dashboard-summary" wire:poll.visible.60s>
 
     {{-- OPCR tools: staff-facing only. The card's lock state follows the
          Part 1/Parts 2–4 template windows and submission status live — no reload needed.

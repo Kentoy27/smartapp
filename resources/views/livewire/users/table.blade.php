@@ -1,7 +1,7 @@
-<div class="users-table-component" wire:poll>
+<div class="users-table-component" wire:poll.visible.60s>
     <div class="page-header">
         <h1>Users</h1>
-        <p>Every account in the system, updated live every few seconds.</p>
+        <p>Every account in the system, updated automatically while you view this page.</p>
     </div>
 
     {{-- SUCCESS ALERT: the server sets $successMessage after a create;

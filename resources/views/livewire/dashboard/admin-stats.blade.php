@@ -1,4 +1,4 @@
-<section class="card admin-dashboard-stats" wire:poll.15s aria-labelledby="admin-dashboard-stats-title">
+<section class="card admin-dashboard-stats" wire:poll.visible.60s aria-labelledby="admin-dashboard-stats-title">
     <div class="card-head">
         <h2 class="card-title" id="admin-dashboard-stats-title">System Overview</h2>
         <span class="admin-dashboard-stats__scope">Across all schools</span>

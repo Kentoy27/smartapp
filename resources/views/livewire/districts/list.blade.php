@@ -2,7 +2,7 @@
      the management modal straight at that district; the header button opens
      the modal at the full list. Rendered both as the dashboard's summary card
      and as the whole Districts & Schools page, so it polls for itself. --}}
-<div class="district-list" wire:poll.15s>
+<div class="district-list" wire:poll.visible.60s>
     <div class="card">
         <div class="card-head">
             <div class="card-title">District List</div>

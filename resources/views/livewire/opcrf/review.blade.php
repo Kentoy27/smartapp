@@ -1,4 +1,4 @@
-<div class="opcrf-review-component" wire:poll.15s>
+<div class="opcrf-review-component" wire:poll.visible.60s>
 
     {{-- SUCCESS ALERT: popped once after an approval, then cleared so later
          renders never re-fire it. --}}
