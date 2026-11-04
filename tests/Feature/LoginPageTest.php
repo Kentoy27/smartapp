@@ -142,7 +142,11 @@ class LoginPageTest extends TestCase
             ->assertRedirect(route('login'))
             ->assertSessionHas('success', 'Logout successful. See you again soon!');
 
-        $this->get(route('login'))->assertOk();
+        $this->get(route('login'))
+            ->assertOk()
+            ->assertSee('data-success-title="Logout successful"', false)
+            ->assertSee('Logout successful. See you again soon!', false)
+            ->assertDontSee('data-success-title="Login successful"', false);
         $this->get('/')->assertRedirect(route('login'));
         $this->get(route('home'))->assertRedirect(route('login'));
     }

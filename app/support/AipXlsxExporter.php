@@ -60,6 +60,10 @@ final class AipXlsxExporter
     /** Build the workbook's bytes. */
     public static function bytes(AipPlan $plan, ?User $exporter = null): string
     {
+        if ($plan->form_data !== null) {
+            return self::formDataBytes($plan);
+        }
+
         $school = $plan->school;
         $district = $school?->district;
 
@@ -303,6 +307,195 @@ final class AipXlsxExporter
 
             'xl/styles.xml' => self::stylesXml(),
 
+            'xl/worksheets/sheet1.xml' => $sheetXml,
+        ]);
+    }
+
+    private static function formDataBytes(AipPlan $plan): string
+    {
+        $rows = [];
+        $merges = [];
+        $rowNumber = 0;
+        $addRow = static function (string $cells) use (&$rows, &$rowNumber): void {
+            $rows[++$rowNumber] = $cells;
+        };
+        $mergeRow = static function (int $row, string $start, string $end, int $style, string $value) use (&$merges): string {
+            if ($start !== $end) {
+                $merges[] = $start.$row.':'.$end.$row;
+            }
+
+            return self::cell($row, $start, $style, $value);
+        };
+
+        foreach ([
+            $plan->school?->name ?: 'School',
+            $plan->school?->district?->name ?: '(District)',
+            'FY '.$plan->year.' ANNUAL IMPLEMENTATION PLAN',
+        ] as $header) {
+            $number = $rowNumber + 1;
+            $style = $number === 1 ? self::S_HEAD_BOLD : self::S_HEAD_LINE;
+            $addRow($mergeRow($number, 'A', 'G', $style, $header));
+        }
+
+        $number = $rowNumber + 1;
+        $purpose = str_replace(':year', (string) $plan->year, (string) config('aip.template.purpose'));
+        $addRow($mergeRow($number, 'A', 'G', self::S_TEXT, $purpose));
+
+        $headers = [
+            'Strategic Objective (Based on SIP)',
+            'Strategy',
+            'Updated Programs, Projects, and Activities (PPAs)',
+            'Resources / Materials Needed',
+            'Budget (If the fund source is MOOE, type "c/o approved WFP". If the fund source is not MOOE, indicate the amount.)',
+            'Persons Responsible',
+            'Indicative Timeline (Indicate the month(s) covered)',
+        ];
+        $headerRow = $rowNumber + 1;
+        $headerCells = '';
+
+        foreach ($headers as $index => $header) {
+            $column = chr(ord('A') + $index);
+            $headerCells .= self::cell($headerRow, $column, self::S_TH, $header);
+        }
+
+        $addRow($headerCells);
+        $formRows = $plan->form_data['rows'] ?? [];
+        $groups = collect($formRows)->groupBy(
+            static fn (array $formRow): string => trim((string) ($formRow['pillar'] ?? '')),
+        );
+        $pillars = collect(config('aip.pillars', []))
+            ->merge($groups->keys()->filter())
+            ->unique()
+            ->values();
+
+        foreach ($pillars as $pillar) {
+            $number = $rowNumber + 1;
+            $pillarCells = self::cell($number, 'A', self::S_PROJECT, (string) $pillar);
+
+            foreach (range(1, 6) as $index) {
+                $pillarCells .= self::blankCell($number, chr(ord('A') + $index), self::S_PROJECT);
+            }
+
+            $addRow($pillarCells);
+            $merges[] = 'A'.$number.':G'.$number;
+            $pillarRows = $groups->get((string) $pillar, collect());
+
+            if ($pillarRows->isEmpty()) {
+                $number = $rowNumber + 1;
+                $addRow(implode('', array_map(
+                    static fn (int $index): string => self::blankCell($number, chr(ord('A') + $index), self::S_TEXT),
+                    range(0, 6),
+                )));
+
+                continue;
+            }
+
+            foreach ($pillarRows as $formRow) {
+                $number = $rowNumber + 1;
+                $values = [
+                    (string) ($formRow['strategic_objective'] ?? ''),
+                    (string) ($formRow['strategy'] ?? ''),
+                    (string) ($formRow['ppa'] ?? ''),
+                    (string) ($formRow['resources'] ?? ''),
+                    (string) ($formRow['budget'] ?? ''),
+                    (string) ($formRow['persons_responsible'] ?? ''),
+                    (string) ($formRow['timeline'] ?? ''),
+                ];
+                $cells = '';
+
+                foreach ($values as $index => $value) {
+                    $cells .= self::cell($number, chr(ord('A') + $index), self::S_TEXT, $value);
+                }
+
+                $addRow($cells);
+            }
+        }
+
+        $number = $rowNumber + 1;
+        $note = 'Note: Rows may be added as needed.';
+        $addRow($mergeRow($number, 'A', 'G', self::S_PLAIN, $note));
+
+        $number = $rowNumber + 1;
+        $addRow(
+            $mergeRow($number, 'A', 'C', self::S_LABEL, 'Prepared by:')
+            .$mergeRow($number, 'D', 'G', self::S_LABEL, 'Reviewed by:')
+        );
+        $number = $rowNumber + 1;
+        $addRow(
+            $mergeRow($number, 'A', 'C', self::S_PLAIN, (string) ($plan->creator?->name ?? ''))
+            .$mergeRow($number, 'D', 'G', self::S_PLAIN, (string) config('aip.template.reviewed_by.name'))
+        );
+        $number = $rowNumber + 1;
+        $addRow(
+            $mergeRow($number, 'A', 'C', self::S_PLAIN, (string) ($plan->creator?->position ?: 'Position/Designation'))
+            .$mergeRow($number, 'D', 'G', self::S_PLAIN, (string) config('aip.template.reviewed_by.role'))
+        );
+
+        $number = $rowNumber + 1;
+        $addRow(
+            $mergeRow($number, 'A', 'C', self::S_LABEL, 'Recommending Approval')
+            .$mergeRow($number, 'D', 'G', self::S_LABEL, 'Approved:')
+        );
+        $number = $rowNumber + 1;
+        $addRow(
+            $mergeRow($number, 'A', 'C', self::S_PLAIN, (string) config('aip.template.recommending_approval.name'))
+            .$mergeRow($number, 'D', 'G', self::S_PLAIN, (string) config('aip.template.approved_by.name'))
+        );
+        $number = $rowNumber + 1;
+        $addRow(
+            $mergeRow($number, 'A', 'C', self::S_PLAIN, (string) config('aip.template.recommending_approval.role'))
+            .$mergeRow($number, 'D', 'G', self::S_PLAIN, (string) config('aip.template.approved_by.role'))
+        );
+
+        $sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            .'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            .'<cols>'
+            .'<col min="1" max="1" width="34" customWidth="1"/>'
+            .'<col min="2" max="2" width="25" customWidth="1"/>'
+            .'<col min="3" max="3" width="36" customWidth="1"/>'
+            .'<col min="4" max="4" width="28" customWidth="1"/>'
+            .'<col min="5" max="5" width="30" customWidth="1"/>'
+            .'<col min="6" max="6" width="24" customWidth="1"/>'
+            .'<col min="7" max="7" width="30" customWidth="1"/>'
+            .'</cols><sheetData>';
+
+        foreach ($rows as $number => $cells) {
+            $sheetXml .= '<row r="'.$number.'">'.$cells.'</row>';
+        }
+
+        $sheetXml .= '</sheetData>';
+
+        $sheetXml .= '<mergeCells count="'.count($merges).'">';
+
+        foreach ($merges as $merge) {
+            $sheetXml .= '<mergeCell ref="'.$merge.'"/>';
+        }
+
+        $sheetXml .= '</mergeCells><pageMargins left="1" right="1" top="1" bottom="1" header="0.5" footer="0.6"/>'
+            .'<pageSetup paperSize="5" orientation="landscape" fitToWidth="1" fitToHeight="0"/></worksheet>';
+
+        return PurePhpZipWriter::create([
+            '[Content_Types].xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                .'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+                .'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+                .'<Default Extension="xml" ContentType="application/xml"/>'
+                .'<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+                .'<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+                .'<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+                .'</Types>',
+            '_rels/.rels' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                .'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                .'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+                .'</Relationships>',
+            'xl/workbook.xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                .'<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+                .'<sheets><sheet name="AIP" sheetId="1" r:id="rId1"/></sheets></workbook>',
+            'xl/_rels/workbook.xml.rels' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                .'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                .'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+                .'<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+                .'</Relationships>',
+            'xl/styles.xml' => self::stylesXml(),
             'xl/worksheets/sheet1.xml' => $sheetXml,
         ]);
     }

@@ -1130,13 +1130,70 @@ body.sorting .mem-drag-handle { cursor: grabbing; }
     white-space: nowrap;
 }
 
+.aip-start__submit-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.aip-template-upload {
+    flex-basis: 100%;
+}
+
+.aip-template-upload .field-hint {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
 @media (max-width: 560px) {
     .aip-start__form { align-items: stretch; }
     .aip-field--year input { width: 100%; }
+    .aip-start__submit-wrap { flex-direction: column; align-items: stretch; }
     .aip-start__submit { width: 100%; }
 }
 
 .aip-actions { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.aip-template-import { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.aip-template-import input { max-width: 230px; }
+.aip-template-import .error-text { flex-basis: 100%; }
+.aip-official-form__scroll { overflow-x: auto; }
+.aip-official-grid { min-width: 1280px; }
+.aip-official-grid th,
+.aip-official-grid td { min-width: 145px; vertical-align: top; }
+.aip-official-grid th:first-child,
+.aip-official-grid td:first-child { min-width: 190px; }
+.aip-template-heading { padding: 18px 22px; text-align: center; border-bottom: 1px solid var(--border); }
+.aip-template-heading p { margin: 4px auto; max-width: 100ch; text-align: left; }
+.aip-template-heading h2,
+.aip-template-heading h3 { margin: 12px 0 8px; font-size: 1rem; letter-spacing: 0.04em; }
+.aip-template-school { font-weight: 700; }
+.aip-template-district { font-size: 0.875rem; }
+.aip-template-heading--review { padding: 8px 0; border: 0; }
+.aip-template-heading--review h3 { font-size: 0.9rem; }
+.aip-official-grid select,
+.aip-official-grid textarea {
+    width: 100%;
+    min-width: 130px;
+    padding: 7px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-elevated);
+    color: var(--text-strong);
+    font: inherit;
+    font-size: 0.75rem;
+}
+.aip-official-grid textarea { min-height: 76px; resize: vertical; }
+.aip-official-grid td:first-child select { margin-bottom: 6px; }
+.aip-official-grid tr.aip-review-pillar th { min-width: 0; background: var(--bg-hover); font-weight: 700; text-align: left; }
+.aip-official-form__head { align-items: center; }
+.aip-official-form__footer { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; padding: 14px 18px; border-top: 1px solid var(--border); }
+.aip-template-note { margin: 10px 18px; color: var(--text-muted); font-size: 0.75rem; }
+.aip-template-signatures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; padding: 24px 18px 18px; font-size: 0.75rem; }
+.aip-template-signature { display: flex; flex-direction: column; min-width: 0; gap: 3px; }
+.aip-template-signature strong { margin-top: 22px; }
+.aip-template-signatures--review { padding-inline: 0; }
+@media (max-width: 560px) { .aip-template-signatures { grid-template-columns: 1fr; } }
 .aip-wfp-note { margin: 0 0 4px; }
 .aip-title-card { padding: 18px 22px; border-left: 4px solid var(--border); transition: border-color 0.2s ease; }
 .aip-title-card:has(input:focus) { border-left-color: var(--primary); }
@@ -2437,5 +2494,3 @@ a.mem-month-tab:hover .mem-month-tab__total { color: var(--text-muted); }
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-
-

@@ -1006,6 +1006,7 @@
 
     @php
         $loginSuccessMessage = session('success');
+        $loginSuccessTitle = session('success_title', 'Login successful');
         $loginErrorMessage = $errors->first();
         /* Set by the dashboard's session-expiry handler (see the ?expired=1
            query flag and the smartappSessionExpired sessionStorage flag). */
@@ -1016,6 +1017,7 @@
     <div
         id="loginFeedback"
         data-success="{{ $loginSuccessMessage }}"
+        data-success-title="{{ $loginSuccessTitle }}"
         data-error="{{ $loginErrorMessage }}"
         data-expired="{{ $loginExpiredMessage }}"
         hidden
@@ -1024,13 +1026,14 @@
     <script>
         var loginFeedback = document.getElementById('loginFeedback');
         var loginSuccessMessage = loginFeedback ? loginFeedback.dataset.success : '';
+        var loginSuccessTitle = loginFeedback ? loginFeedback.dataset.successTitle : 'Login successful';
         var loginErrorMessage = loginFeedback ? loginFeedback.dataset.error : '';
         var loginExpiredMessage = loginFeedback ? loginFeedback.dataset.expired : '';
 
         if (window.Swal && loginSuccessMessage) {
             Swal.fire({
                 icon: 'success',
-                title: 'Login successful',
+                title: loginSuccessTitle,
                 text: loginSuccessMessage,
                 toast: true,
                 position: 'top-end',

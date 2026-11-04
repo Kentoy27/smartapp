@@ -24,7 +24,7 @@
         <p>
             {{ $plan->school?->name ?? 'Your school' }} ·
             <span class="badge {{ $plan->statusBadgeClass() }}">{{ $plan->statusLabelFor(auth()->user()) }}</span>
-            · {{ count($projects) }} project(s) · {{ number_format($this->totals['grand'], 2) }} total budget
+            · {{ $isOfficialForm ? count($formRows).' AIP row(s)' : count($projects).' project(s)' }} · {{ number_format($this->totals['grand'], 2) }} total budget
         </p>
     </div>
 
@@ -69,10 +69,27 @@
                         <span wire:loading wire:target="submit">Submitting…</span>
                     </button>
 
-                    <button type="button" class="ac-import-btn" wire:click="importFromWfp" wire:loading.attr="disabled" wire:target="importFromWfp">
-                        <x-icon name="chart-column" :size="16" />
-                        <span>Copy from WFP</span>
-                    </button>
+                    @unless ($isOfficialForm)
+                        <button type="button" class="ac-import-btn" wire:click="importFromWfp" wire:loading.attr="disabled" wire:target="importFromWfp">
+                            <x-icon name="chart-column" :size="16" />
+                            <span>Copy from WFP</span>
+                        </button>
+                    @endunless
+
+                    <form class="aip-template-import" wire:submit="importTemplate">
+                        <input
+                            type="file"
+                            accept=".docx"
+                            wire:model="templateFile"
+                            aria-label="Choose a completed AIP Word document to import"
+                        >
+                        @error('templateFile') <span class="error-text">{{ $message }}</span> @enderror
+                        <button type="submit" class="ac-import-btn" wire:loading.attr="disabled" wire:target="importTemplate,templateFile" @disabled(! $templateFile)>
+                            <x-icon name="upload" :size="16" />
+                            <span wire:loading.remove wire:target="importTemplate">Import AIP DOCX</span>
+                            <span wire:loading wire:target="importTemplate">Importing…</span>
+                        </button>
+                    </form>
                 @endif
 
                 <button type="button" class="ac-import-btn" wire:click="openPreview">
@@ -110,6 +127,7 @@
         @endif
     </div>
 
+    @unless ($isOfficialForm)
     <div class="card aip-title-card">
         <div class="aip-title-card__intro">
             <div class="aip-title-card__icon">
@@ -133,11 +151,130 @@
             @error('title') <div class="error-text">{{ $message }}</div> @enderror
         </div>
     </div>
+    @endunless
 
     @error('projects')
         <div class="ac-import-error mem-banner" role="alert">{{ $message }}</div>
     @enderror
 
+    @if ($isOfficialForm)
+        @error('formRows')
+            <div class="ac-import-error mem-banner" role="alert">{{ $message }}</div>
+        @enderror
+
+        <section class="card aip-official-form">
+            <div class="aip-template-heading">
+                <p class="aip-template-school">{{ $plan->school?->name ?? '(NAME OF SCHOOL)' }}</p>
+                <p class="aip-template-district">{{ $plan->school?->district?->name ?? '(District)' }}</p>
+                <h2>FY {{ $plan->year }} ANNUAL IMPLEMENTATION PLAN</h2>
+                <p>{{ str_replace(':year', (string) $plan->year, config('aip.template.purpose')) }}</p>
+            </div>
+
+            <div class="card-head aip-official-form__head">
+                <div>
+                    <h3 class="card-title">Plan matrix</h3>
+                    <p class="mem-toolbar-copy">Complete the strategy and PPA fields under each SIP pillar. Follow the budget instruction shown below the matrix.</p>
+                </div>
+                @if ($this->canEdit)
+                    <a href="{{ route('aip.template.download') }}" class="btn-ghost btn-ghost--small">Download blank template</a>
+                @endif
+            </div>
+
+            <div class="table-wrap aip-official-form__scroll">
+                <table class="data-table aip-official-grid">
+                    <thead>
+                        <tr>
+                            <th scope="col">Strategic Objective (Based on SIP)</th>
+                            <th scope="col">Strategy</th>
+                            <th scope="col">Updated Programs, Projects, and Activities (PPAs)</th>
+                            <th scope="col">Resources / Materials Needed</th>
+                            <th scope="col">Budget (If the fund source is MOOE, type “c/o approved WFP”. If the fund source is not MOOE, indicate the amount.)</th>
+                            <th scope="col">Persons Responsible</th>
+                            <th scope="col">Indicative Timeline (Indicate the month(s) covered)</th>
+                            @if ($this->canEdit)<th scope="col">Action</th>@endif
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @forelse ($formRows as $ri => $row)
+                            <tr wire:key="aip-form-row-{{ $row['_key'] }}">
+                                <td>
+                                    <select wire:model="formRows.{{ $ri }}.pillar" aria-label="Pillar for row {{ $ri + 1 }}" @disabled(! $this->canEdit)>
+                                        <option value="">Select pillar</option>
+                                        @if ($row['pillar'] !== '' && ! in_array($row['pillar'], config('aip.pillars', []), true))
+                                            <option value="{{ $row['pillar'] }}">{{ $row['pillar'] }}</option>
+                                        @endif
+                                        @foreach (config('aip.pillars', []) as $pillarOption)
+                                            <option value="{{ $pillarOption }}">{{ $pillarOption }}</option>
+                                        @endforeach
+                                    </select>
+                                    @error("formRows.{$ri}.pillar") <span class="error-text">{{ $message }}</span> @enderror
+                                    <textarea rows="3" maxlength="1000" wire:model="formRows.{{ $ri }}.strategic_objective" aria-label="Strategic objective for row {{ $ri + 1 }}" @disabled(! $this->canEdit)></textarea>
+                                    @error("formRows.{$ri}.strategic_objective") <span class="error-text">{{ $message }}</span> @enderror
+                                </td>
+                                <td>
+                                    <textarea rows="3" maxlength="2000" wire:model="formRows.{{ $ri }}.strategy" aria-label="Strategy for row {{ $ri + 1 }}" @disabled(! $this->canEdit)></textarea>
+                                    @error("formRows.{$ri}.strategy") <span class="error-text">{{ $message }}</span> @enderror
+                                </td>
+                                <td>
+                                    <textarea rows="3" maxlength="2000" wire:model="formRows.{{ $ri }}.ppa" aria-label="Updated PPA for row {{ $ri + 1 }}" @disabled(! $this->canEdit)></textarea>
+                                    @error("formRows.{$ri}.ppa") <span class="error-text">{{ $message }}</span> @enderror
+                                </td>
+                                <td>
+                                    <textarea rows="3" maxlength="2000" wire:model="formRows.{{ $ri }}.resources" aria-label="Resources for row {{ $ri + 1 }}" @disabled(! $this->canEdit)></textarea>
+                                    @error("formRows.{$ri}.resources") <span class="error-text">{{ $message }}</span> @enderror
+                                </td>
+                                <td>
+                                    <textarea rows="3" maxlength="255" wire:model="formRows.{{ $ri }}.budget" aria-label="Budget for row {{ $ri + 1 }}" placeholder="e.g. c/o approved WFP" @disabled(! $this->canEdit)></textarea>
+                                    @error("formRows.{$ri}.budget") <span class="error-text">{{ $message }}</span> @enderror
+                                </td>
+                                <td>
+                                    <textarea rows="3" maxlength="255" wire:model="formRows.{{ $ri }}.persons_responsible" aria-label="Persons responsible for row {{ $ri + 1 }}" @disabled(! $this->canEdit)></textarea>
+                                    @error("formRows.{$ri}.persons_responsible") <span class="error-text">{{ $message }}</span> @enderror
+                                </td>
+                                <td>
+                                    <textarea rows="3" maxlength="255" wire:model="formRows.{{ $ri }}.timeline" aria-label="Indicative timeline for row {{ $ri + 1 }}" placeholder="e.g. July–September" @disabled(! $this->canEdit)></textarea>
+                                    @error("formRows.{$ri}.timeline") <span class="error-text">{{ $message }}</span> @enderror
+                                </td>
+                                @if ($this->canEdit)
+                                    <td>
+                                        <button type="button" class="users-action users-action--danger" wire:click="removeFormRow('{{ $row['_key'] }}')" aria-label="Remove AIP row {{ $ri + 1 }}">
+                                            <span class="users-action-inner"><x-icon name="trash" :size="14" /><span>Remove</span></span>
+                                        </button>
+                                    </td>
+                                @endif
+                            </tr>
+                        @empty
+                            <tr><td class="table-empty" colspan="{{ $this->canEdit ? 8 : 7 }}">No AIP rows yet. Add a row or import a completed DOCX template.</td></tr>
+                        @endforelse
+                    </tbody>
+                </table>
+            </div>
+
+            @if ($this->canEdit)
+                <div class="aip-official-form__footer">
+                    <button type="button" class="btn-primary" wire:click="addFormRow"><x-icon name="plus" :size="16" /><span>Add AIP row</span></button>
+                    <span class="aip-project__subtotal">Numeric budget total: {{ number_format($this->totals['grand'], 2) }}</span>
+                </div>
+            @endif
+            <p class="aip-template-note">Budget: For MOOE, type “c/o approved WFP”. For non-MOOE fund sources, indicate the amount. Note: Rows may be added as needed.</p>
+
+            <div class="aip-template-signatures">
+                <div class="aip-template-signature">
+                    <span>Prepared by:</span>
+                    <strong>{{ $plan->creator?->name ?? auth()->user()?->name }}</strong>
+                    <span>{{ $plan->creator?->position ?: 'Position/Designation' }}</span>
+                </div>
+                @foreach (['reviewed_by' => 'Reviewed by:', 'recommending_approval' => 'Recommending Approval', 'approved_by' => 'Approved:'] as $key => $label)
+                    @php($signatory = config('aip.template.'.$key))
+                    <div class="aip-template-signature">
+                        <span>{{ $label }}</span>
+                        <strong>{{ $signatory['name'] }}</strong>
+                        <span>{{ $signatory['role'] }}</span>
+                    </div>
+                @endforeach
+            </div>
+        </section>
+    @else
     @forelse ($projects as $pi => $project)
         <section class="card mem-group aip-project" wire:key="aip-project-{{ $project['_key'] }}">
             <div class="aip-project__head">
@@ -314,6 +451,7 @@
             <span class="mem-linetotal mem-linetotal--grand">{{ number_format($this->totals['grand'], 2) }}</span>
         </div>
     @endif
+    @endif
 
     <datalist id="aip-budget-sources">
         @foreach ($this->budgetSources as $source)
@@ -333,11 +471,58 @@
                 <div class="modal-form aip-preview-body">
                     <p class="role-modal-description">
                         <strong>{{ $plan->school?->name ?? 'Your school' }}</strong> ·
-                        School Year {{ $plan->fiscalYearLabel() }} ·
-                        {{ count($projects) }} project(s) ·
+                        {{ $plan->school?->district?->name ?? '(District)' }} ·
+                        FY {{ $plan->year }} ·
+                        {{ $isOfficialForm ? count($formRows).' AIP row(s)' : count($projects).' project(s)' }} ·
                         {{ number_format($this->totals['grand'], 2) }} total
                     </p>
 
+                    @if ($isOfficialForm)
+                        <div class="aip-template-heading aip-template-heading--review">
+                            <h3>FY {{ $plan->year }} ANNUAL IMPLEMENTATION PLAN</h3>
+                            <p>{{ str_replace(':year', (string) $plan->year, config('aip.template.purpose')) }}</p>
+                        </div>
+                        @php($previewRows = collect($formRows))
+                        @php($previewPillars = collect(config('aip.pillars', []))->merge($previewRows->pluck('pillar')->filter()->unique())->unique()->values())
+                        <div class="table-wrap aip-official-form__scroll">
+                            <table class="data-table aip-official-grid">
+                                <thead>
+                                    <tr>
+                                        <th>Strategic Objective (Based on SIP)</th><th>Strategy</th>
+                                        <th>Updated Programs, Projects, and Activities (PPAs)</th><th>Resources / Materials Needed</th>
+                                        <th>Budget (If the fund source is MOOE, type “c/o approved WFP”. If the fund source is not MOOE, indicate the amount.)</th>
+                                        <th>Persons Responsible</th><th>Indicative Timeline (Indicate the month(s) covered)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach ($previewPillars as $pillar)
+                                        <tr class="aip-review-pillar"><th scope="rowgroup" colspan="7">{{ $pillar }}</th></tr>
+                                        @php($pillarRows = $previewRows->filter(fn (array $row): bool => ($row['pillar'] ?? '') === $pillar))
+                                        @forelse ($pillarRows as $row)
+                                            <tr>
+                                                <td>{{ $row['strategic_objective'] ?: '—' }}</td>
+                                                <td>{{ $row['strategy'] ?: '—' }}</td>
+                                                <td>{{ $row['ppa'] ?: '—' }}</td>
+                                                <td>{{ $row['resources'] ?: '—' }}</td>
+                                                <td>{{ $row['budget'] ?: '—' }}</td>
+                                                <td>{{ $row['persons_responsible'] ?: '—' }}</td>
+                                                <td>{{ $row['timeline'] ?: '—' }}</td>
+                                            </tr>
+                                        @empty
+                                            <tr><td colspan="7">&nbsp;</td></tr>
+                                        @endforelse
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+                        <p class="aip-template-note">Budget: For MOOE, type “c/o approved WFP”. For non-MOOE fund sources, indicate the amount. Note: Rows may be added as needed.</p>
+                        <div class="aip-template-signatures aip-template-signatures--review">
+                            <div><strong>Prepared by:</strong> {{ $plan->creator?->name ?? auth()->user()?->name }}<br>{{ $plan->creator?->position ?: 'Position/Designation' }}</div>
+                            <div><strong>Reviewed by:</strong> {{ config('aip.template.reviewed_by.name') }}<br>{{ config('aip.template.reviewed_by.role') }}</div>
+                            <div><strong>Recommending Approval</strong><br>{{ config('aip.template.recommending_approval.name') }}<br>{{ config('aip.template.recommending_approval.role') }}</div>
+                            <div><strong>Approved:</strong><br>{{ config('aip.template.approved_by.name') }}<br>{{ config('aip.template.approved_by.role') }}</div>
+                        </div>
+                    @else
                     @forelse ($projects as $pi => $project)
                         <div class="aip-preview-project">
                             <h3>{{ $pi + 1 }}. {{ $project['title'] !== '' ? $project['title'] : '(untitled project)' }}</h3>
@@ -380,6 +565,7 @@
                     @empty
                         <p class="table-empty">Nothing to preview yet.</p>
                     @endforelse
+                    @endif
 
                     <div class="modal-actions">
                         <a href="{{ route('aip.plans.print', ['plan' => $plan->id]) }}" class="btn-ghost" target="_blank" rel="noopener">

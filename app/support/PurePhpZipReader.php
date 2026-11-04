@@ -83,7 +83,7 @@ final class PurePhpZipReader
      * to inspect one small manifest — the workbook.xml an OPCRF template
      * stamp lives in — would inflate megabytes for nothing.
      */
-    public function part(string $name): ?string
+    public function part(string $name, ?int $maxUncompressedBytes = null): ?string
     {
         $eocd = $this->findEndOfCentralDirectory();
 
@@ -101,6 +101,7 @@ final class PurePhpZipReader
 
             $method = unpack('v', substr($this->data, $offset + 10, 2))[1];
             $compressedSize = unpack('V', substr($this->data, $offset + 20, 4))[1];
+            $uncompressedSize = unpack('V', substr($this->data, $offset + 24, 4))[1];
             $nameLength = unpack('v', substr($this->data, $offset + 28, 2))[1];
             $extraLength = unpack('v', substr($this->data, $offset + 30, 2))[1];
             $commentLength = unpack('v', substr($this->data, $offset + 32, 2))[1];
@@ -108,8 +109,12 @@ final class PurePhpZipReader
             $entryName = substr($this->data, $offset + 46, $nameLength);
 
             if ($entryName === $name) {
+                if ($maxUncompressedBytes !== null && $uncompressedSize > $maxUncompressedBytes) {
+                    throw new RuntimeException('The document contains an oversized part.');
+                }
+
                 return $compressedSize > 0
-                    ? $this->extractToMemory($localOffset, $method, $compressedSize)
+                    ? $this->extractToMemory($localOffset, $method, $compressedSize, $maxUncompressedBytes)
                     : '';
             }
 
@@ -139,7 +144,12 @@ final class PurePhpZipReader
      * Read one entry via its local file header (the central directory
      * points at it), then inflate or copy the payload.
      */
-    private function extractToMemory(int $localOffset, int $method, int $compressedSize): string
+    private function extractToMemory(
+        int $localOffset,
+        int $method,
+        int $compressedSize,
+        ?int $maxUncompressedBytes = null,
+    ): string
     {
         if (substr($this->data, $localOffset, 4) !== "PK\x03\x04") {
             throw new RuntimeException('The file is not a valid .xlsx workbook.');
@@ -159,13 +169,19 @@ final class PurePhpZipReader
         }
 
         if ($method === 0) { // stored
+            if ($maxUncompressedBytes !== null && strlen($payload) > $maxUncompressedBytes) {
+                throw new RuntimeException('The document contains an oversized part.');
+            }
+
             return $payload;
         }
 
         if ($method === 8) { // deflate
-            $inflated = @gzinflate($payload);
+            $inflated = $maxUncompressedBytes !== null
+                ? @gzinflate($payload, $maxUncompressedBytes)
+                : @gzinflate($payload);
 
-            if ($inflated === false) {
+            if ($inflated === false || ($maxUncompressedBytes !== null && strlen($inflated) > $maxUncompressedBytes)) {
                 throw new RuntimeException('The file is not a valid .xlsx workbook.');
             }
 

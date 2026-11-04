@@ -52,23 +52,22 @@
         }
 
         .head { text-align: center; line-height: 1.5; }
-        .head .republic { font-size: 12px; }
-        .head .department { font-size: 12px; }
-        .head .division { font-size: 12px; }
         .head .school { font-weight: 700; font-size: 13px; }
+        .head .district { font-size: 12px; }
         .head h1 {
             font-size: 15px;
             letter-spacing: 0.06em;
-            margin: 8px 0 2px;
+            margin: 12px 0 8px;
             text-transform: uppercase;
         }
-        .head .sy { font-size: 12px; }
-        .head .title { font-size: 12px; font-style: italic; margin-top: 2px; }
+        .head .purpose { max-width: 1000px; margin: 8px auto 0; text-align: left; }
 
         table.aip {
             width: 100%;
             border-collapse: collapse;
+            table-layout: fixed;
             margin-top: 16px;
+            font-size: 9px;
         }
 
         table.aip th,
@@ -80,12 +79,13 @@
         }
 
         table.aip th {
-            background: #e2e8f0;
-            font-size: 10px;
-            text-transform: uppercase;
+            background: #bdc0bf;
+            font-size: 8px;
             text-align: center;
             font-weight: 700;
         }
+        table.aip tr.pillar td { background: #bdc0bf; font-weight: 700; }
+        .template-note { margin-top: 8px; font-size: 10px; }
 
         td.money { text-align: right; white-space: nowrap; }
         tr.total td { font-weight: 700; }
@@ -94,15 +94,17 @@
         tr.subtotal td.label { text-align: right; }
 
         .signatures {
-            display: flex;
-            justify-content: space-between;
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 24px;
             margin-top: 34px;
         }
 
-        .signatures .sig { flex: 1; }
-        .signatures .sig .who { font-weight: 700; margin-top: 26px; }
+        .signatures .sig { min-width: 0; }
+        .signatures .sig .line { height: 28px; }
+        .signatures .sig .who { font-weight: 700; text-transform: uppercase; }
         .signatures .sig .role { font-size: 11px; }
+        .signatures .sig .label { min-height: 18px; }
 
         .status-line {
             margin-top: 18px;
@@ -115,7 +117,7 @@
             .print-toolbar { display: none; }
             .sheet { border: 0; padding: 0; max-width: none; }
             table.aip th, table.aip td { padding: 3px 4px; }
-            @page { size: landscape; margin: 10mm; }
+            @page { size: legal landscape; margin: 1in; }
         }
     </style>
 </head>
@@ -127,17 +129,49 @@
 
     <div class="sheet">
         <div class="head">
-            <div class="republic">Republic of the Philippines</div>
-            <div class="department">Department of Education</div>
-            <div class="division">{{ $plan->school?->district?->name ?? 'Schools Division Office' }}</div>
-            <div class="school">{{ $plan->school?->name ?? 'School' }}</div>
-            <h1>Annual Implementation Plan</h1>
-            <div class="sy">School Year {{ $plan->fiscalYearLabel() }}</div>
-            @if (trim((string) $plan->title) !== '')
-                <div class="title">{{ $plan->title }}</div>
-            @endif
+            <div class="school">{{ $plan->school?->name ?? '(NAME OF SCHOOL)' }}</div>
+            <div class="district">{{ $plan->school?->district?->name ?? '(District)' }}</div>
+            <h1>FY {{ $plan->year }} ANNUAL IMPLEMENTATION PLAN</h1>
+            <p class="purpose">{{ str_replace(':year', (string) $plan->year, config('aip.template.purpose')) }}</p>
         </div>
 
+        @if ($plan->form_data !== null)
+            @php($formRows = collect($plan->form_data['rows'] ?? []))
+            @php($pillars = collect(config('aip.pillars', []))->merge($formRows->pluck('pillar')->filter()->unique())->unique()->values())
+            <table class="aip">
+                <thead>
+                    <tr>
+                        <th scope="col">Strategic Objective (Based on SIP)</th>
+                        <th scope="col">Strategy</th>
+                        <th scope="col">Updated Programs, Projects, and Activities (PPAs)</th>
+                        <th scope="col">Resources / Materials Needed</th>
+                        <th scope="col">Budget (If the fund source is MOOE, type “c/o approved WFP”. If the fund source is not MOOE, indicate the amount.)</th>
+                        <th scope="col">Persons Responsible</th>
+                        <th scope="col">Indicative Timeline (Indicate the month(s) covered)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach ($pillars as $pillar)
+                        <tr class="pillar"><td colspan="7">{{ $pillar }}</td></tr>
+                        @php($pillarRows = $formRows->filter(fn (array $row): bool => ($row['pillar'] ?? '') === $pillar))
+                        @forelse ($pillarRows as $row)
+                            <tr>
+                                <td>{{ $row['strategic_objective'] ?: '—' }}</td>
+                                <td>{{ $row['strategy'] ?: '—' }}</td>
+                                <td>{{ $row['ppa'] ?: '—' }}</td>
+                                <td>{{ $row['resources'] ?: '—' }}</td>
+                                <td>{{ $row['budget'] ?: '—' }}</td>
+                                <td>{{ $row['persons_responsible'] ?: '—' }}</td>
+                                <td>{{ $row['timeline'] ?: '—' }}</td>
+                            </tr>
+                        @empty
+                            <tr><td colspan="7">&nbsp;</td></tr>
+                        @endforelse
+                    @endforeach
+                </tbody>
+            </table>
+            <p class="template-note">Note: Rows may be added as needed.</p>
+        @else
         <table class="aip">
             <thead>
                 <tr>
@@ -195,30 +229,42 @@
                 @endif
             </tbody>
         </table>
+        @endif
 
         <div class="signatures">
             <div class="sig">
-                <div>Prepared by:</div>
+                <div class="label">Prepared by:</div>
+                <div class="line"></div>
                 <div class="who">{{ $plan->creator?->name ?? '' }}</div>
-                <div class="role">School Head</div>
+                <div class="role">{{ $plan->creator?->position ?: 'Position/Designation' }}</div>
             </div>
             <div class="sig">
-                <div>Reviewed by:</div>
-                <div class="who">{{ $plan->approvedBy?->name ?? '' }}</div>
-                <div class="role">Schools Division Office</div>
+                <div class="label">Reviewed by:</div>
+                <div class="line"></div>
+                <div class="who">{{ config('aip.template.reviewed_by.name') }}</div>
+                <div class="role">{{ config('aip.template.reviewed_by.role') }}</div>
             </div>
             <div class="sig">
-                <div>Approved by:</div>
-                <div class="who"></div>
-                <div class="role">Schools Division Superintendent</div>
+                <div class="label">Recommending Approval</div>
+                <div class="line"></div>
+                <div class="who">{{ config('aip.template.recommending_approval.name') }}</div>
+                <div class="role">{{ config('aip.template.recommending_approval.role') }}</div>
+            </div>
+            <div class="sig">
+                <div class="label">Approved:</div>
+                <div class="line"></div>
+                <div class="who">{{ config('aip.template.approved_by.name') }}</div>
+                <div class="role">{{ config('aip.template.approved_by.role') }}</div>
             </div>
         </div>
 
-        <div class="status-line">
-            Status: {{ \App\Models\AipPlan::statusLabel((string) $plan->status) }}
-            @if ($plan->submitted_at) · Submitted {{ $plan->submitted_at->format('M j, Y g:i A') }} @endif
-            @if ($plan->approved_at) · Approved {{ $plan->approved_at->format('M j, Y g:i A') }} @endif
-        </div>
+        @unless ($plan->form_data !== null)
+            <div class="status-line">
+                Status: {{ \App\Models\AipPlan::statusLabel((string) $plan->status) }}
+                @if ($plan->submitted_at) · Submitted {{ $plan->submitted_at->format('M j, Y g:i A') }} @endif
+                @if ($plan->approved_at) · Approved {{ $plan->approved_at->format('M j, Y g:i A') }} @endif
+            </div>
+        @endunless
     </div>
 </body>
 </html>

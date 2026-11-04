@@ -15,9 +15,12 @@ use App\Models\User;
 use App\Models\UserMov;
 use App\Models\WfpItem;
 use App\Models\WfpPlan;
+use App\Support\AipTemplateImporter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use Tests\TestCase;
 
 /**
@@ -99,6 +102,122 @@ class AipModuleTest extends TestCase
         Livewire::actingAs($sh)->test(AipManager::class)->set('year', 2026)->call('create');
 
         $this->assertSame(1, AipPlan::count());
+    }
+
+    public function test_the_fy_word_template_is_parsed_into_its_pillar_rows(): void
+    {
+        $template = storage_path('forms/FY-2026-ANNUAL-IMPLEMENTATION-PLAN-1.docx');
+        $imported = AipTemplateImporter::import($template);
+
+        $this->assertSame(2027, $imported['detected_year']);
+        $this->assertNotEmpty($imported['rows']);
+        $this->assertSame('Pillar 1: ACCESS', $imported['rows'][0]['pillar']);
+        $this->assertSame('SO 1.1', $imported['rows'][0]['strategic_objective']);
+        $this->assertEqualsCanonicalizing(config('aip.pillars'), array_values(array_unique(array_column($imported['rows'], 'pillar'))));
+
+        $this->get(route('aip.template.download'))
+            ->assertRedirect(route('login'));
+    }
+
+    public function test_a_school_head_can_create_edit_submit_and_export_the_new_template_form(): void
+    {
+        Storage::fake('local');
+        $sh = $this->schoolHead();
+
+        Livewire::actingAs($sh)
+            ->test(AipManager::class)
+            ->set('year', 2026)
+            ->call('create')
+            ->assertRedirect(route('aip.plans.edit', ['plan' => AipPlan::first()->id]));
+
+        $plan = AipPlan::firstOrFail();
+        $this->assertNotNull($plan->form_data);
+        $this->assertCount(5, $plan->form_data['rows'], 'A new online plan starts with the five template pillar sections.');
+
+        $editor = Livewire::actingAs($sh)
+            ->test(AipEditor::class, ['plan' => $plan])
+            ->assertSee('Indicative Timeline')
+            ->assertSee('Purpose: This matrix is used to summarize')
+            ->assertSee('Strategic Objective (Based on SIP)')
+            ->call('addFormRow')
+            ->set('formRows.0.strategic_objective', 'SO 1.1')
+            ->set('formRows.0.ppa', 'Reading intervention')
+            ->set('formRows.0.budget', 'c/o approved WFP')
+            ->set('formRows.0.persons_responsible', 'School Head')
+            ->set('formRows.0.timeline', 'July–September')
+            ->call('saveDraft')
+            ->assertHasNoErrors();
+
+        $plan->refresh();
+        $this->assertSame('Reading intervention', $plan->form_data['rows'][0]['ppa']);
+        $this->assertSame(0.0, $plan->annualBudgetTotal(), 'Text instructions in the budget cell are not treated as an amount.');
+
+        $editor->call('submit')->assertHasNoErrors();
+        $version = $plan->versions()->firstOrFail();
+        $this->assertSame('Reading intervention', $version->snapshot['form_data']['rows'][0]['ppa']);
+
+        $admin = $this->superadmin();
+        Livewire::actingAs($admin)
+            ->test(AipReview::class)
+            ->call('openReview', $plan->id)
+            ->assertSee('Pillar 1: ACCESS')
+            ->assertSee('Reading intervention')
+            ->assertSee('Indicative Timeline')
+            ->assertSee('Purpose: This matrix is used to summarize')
+            ->assertSee('REBONIE F. EMBOLTORIO PhD')
+            ->assertSee('FERDINAND S. SY PhD, CESO VI');
+
+        $export = $this->actingAs($sh)->get(route('aip.plans.export', ['plan' => $plan->id]))->assertOk();
+        $xlsxPath = tempnam(sys_get_temp_dir(), 'aip-export-').'.xlsx';
+        file_put_contents($xlsxPath, (string) $export->getContent());
+        $workbook = IOFactory::load($xlsxPath);
+        $sheet = $workbook->getActiveSheet();
+        $this->assertSame('FY 2026 ANNUAL IMPLEMENTATION PLAN', $sheet->getCell('A3')->getFormattedValue());
+        $this->assertStringContainsString('SIP 2023–2028', $sheet->getCell('A4')->getFormattedValue());
+        $this->assertSame('Updated Programs, Projects, and Activities (PPAs)', $workbook->getActiveSheet()->getCell('C5')->getFormattedValue());
+        $this->assertSame('Pillar 1: ACCESS', $sheet->getCell('A6')->getFormattedValue());
+        $this->assertSame('Reading intervention', $sheet->getCell('C7')->getFormattedValue());
+        $this->assertSame('REBONIE F. EMBOLTORIO PhD', $sheet->getCell('D18')->getFormattedValue());
+        $workbook->disconnectWorksheets();
+        unlink($xlsxPath);
+
+        $this->actingAs($admin)
+            ->get(route('aip.plans.print', ['plan' => $plan->id]))
+            ->assertOk()
+            ->assertSee('Updated Programs, Projects, and Activities (PPAs)')
+            ->assertSee('Reading intervention')
+            ->assertSee('Purpose: This matrix is used to summarize')
+            ->assertSee('Note: Rows may be added as needed.')
+            ->assertSee('REBONIE F. EMBOLTORIO PhD')
+            ->assertSee('EVA M. DOLLOSA RN')
+            ->assertSee('FERDINAND S. SY PhD, CESO VI');
+    }
+
+    public function test_a_school_head_can_create_an_aip_from_a_completed_word_template(): void
+    {
+        $sh = $this->schoolHead();
+        $contents = file_get_contents(storage_path('forms/FY-2026-ANNUAL-IMPLEMENTATION-PLAN-1.docx'));
+        $template = UploadedFile::fake()->createWithContent('completed-aip.docx', $contents);
+
+        Livewire::actingAs($sh)
+            ->test(AipManager::class)
+            ->set('year', 2026)
+            ->set('templateFile', $template)
+            ->call('create')
+            ->assertSet('errorMessage', fn (?string $message): bool => str_contains((string) $message, 'labeled FY 2027'));
+
+        $this->assertSame(0, AipPlan::count(), 'A template for a different year must not create a mismatched plan.');
+
+        Livewire::actingAs($sh)
+            ->test(AipManager::class)
+            ->set('year', 2027)
+            ->set('templateFile', $template)
+            ->call('create')
+            ->assertRedirect(route('aip.plans.edit', ['plan' => AipPlan::first()->id]));
+
+        $plan = AipPlan::firstOrFail();
+        $this->assertSame('SO 1.1', $plan->form_data['rows'][0]['strategic_objective']);
+        $this->assertSame('Pillar 1: ACCESS', $plan->form_data['rows'][0]['pillar']);
     }
 
     public function test_an_account_without_a_school_is_refused_a_plan(): void

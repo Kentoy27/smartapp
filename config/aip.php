@@ -5,23 +5,13 @@
 | Annual Implementation Plan (AIP)
 |--------------------------------------------------------------------------
 |
-| The AIP is the school's one-year operational breakdown of its School
-| Improvement Plan (SIP): every School Improvement Project is listed with
-| its objective and the output for the year, and each project's activities
-| carry who is responsible, when/where, the budget per activity and the
-| budget source.
+| AIP records support both the legacy project/activity form and the current
+| FY matrix template. The FY form follows the supplied Annual Implementation
+| Plan document: SIP pillars and objectives, strategy, PPAs, resources,
+| budget, responsible persons, timeline, purpose, and approval blocks.
 |
-| The column set follows the official form — "Annex 10: Annual
-| Implementation Plan Template" of the enhanced SIP Guidebook (DepEd Order
-| No. 44, s. 2015):
-|
-|   SCHOOL IMPROVEMENT PROJECT TITLE · PROJECT OBJECTIVE ·
-|   OUTPUT FOR THE YEAR · ACTIVITIES · PERSON(S) RESPONSIBLE ·
-|   SCHEDULE/VENUE · BUDGET PER ACTIVITY · BUDGET SOURCE
-|
-| The module deliberately does NOT invent extra official columns: the
-| fields above are the form. Everything else the module stores (status,
-| versions, reviewer, remarks) is workflow, not part of the printed form.
+| The eight-column legacy form remains available for existing records.
+| New online and DOCX-imported plans use the seven-column FY template below.
 |
 */
 
@@ -89,6 +79,33 @@ return [
         'Donation',
         'General Fund',
         'Other',
+    ],
+
+    /*
+    | The newer annual form groups implementation rows under these SIP pillars.
+    */
+    'pillars' => [
+        'Pillar 1: ACCESS',
+        'Pillar 2: EQUITY',
+        'Pillar 3: QUALITY',
+        'Pillar 4: RESILIENCE & WELL-BEING',
+        'ENABLING MECHANISMS',
+    ],
+
+    'template' => [
+        'purpose' => 'Purpose: This matrix is used to summarize the adjustments made to the SIP 2023–2028 for FY :year based on school needs, accomplishments, and contextual changes.',
+        'reviewed_by' => [
+            'name' => 'REBONIE F. EMBOLTORIO PhD',
+            'role' => 'Senior Education program Specialist',
+        ],
+        'recommending_approval' => [
+            'name' => 'EVA M. DOLLOSA RN',
+            'role' => 'Assistant Schools Division Superintendent',
+        ],
+        'approved_by' => [
+            'name' => 'FERDINAND S. SY PhD, CESO VI',
+            'role' => 'Schools Division Superintendent',
+        ],
     ],
 
 ];

@@ -46,7 +46,7 @@
                 </span>
 
                 <div class="aip-start__text">
-                    <h2 class="card-title" id="aip-new-title">Start a plan</h2>
+                    <h2 class="card-title" id="aip-new-title">Create an AIP</h2>
                     <p class="aip-start__copy">
                         One plan exists per school and year — starting a year that already has a
                         plan opens it instead of creating a second one.
@@ -71,25 +71,35 @@
 
                 <div class="aip-field aip-field--grow">
                     <label for="aip-title">
-                        Title
+                        Record label
                         <span class="aip-field__optional">optional</span>
                     </label>
                     <input
                         id="aip-title"
                         type="text"
                         maxlength="255"
-                        placeholder="Annual Implementation Plan — School Year {{ $year }}"
+                        placeholder="FY {{ $year }} AIP"
                         wire:model="title"
-                        aria-label="Title"
+                        aria-label="Optional record label"
                     >
                     @error('title') <div class="error-text">{{ $message }}</div> @enderror
                 </div>
 
-                <button type="submit" class="btn-primary aip-start__submit" wire:loading.attr="disabled" wire:target="create">
+                <div class="aip-field aip-field--grow aip-template-upload">
+                    <label for="aip-template-file">Import a completed AIP <span class="aip-field__optional">optional DOCX</span></label>
+                    <input id="aip-template-file" type="file" accept=".docx" wire:model="templateFile" aria-label="Upload a completed AIP Word document">
+                    <span class="field-hint">Upload the FY AIP Word template to import its rows, or leave this blank to create the plan online.</span>
+                    @error('templateFile') <div class="error-text">{{ $message }}</div> @enderror
+                </div>
+
+                <div class="aip-start__submit-wrap">
+                    <button type="submit" class="btn-primary aip-start__submit" wire:loading.attr="disabled" wire:target="create,templateFile">
                     <x-icon name="file-text" :size="16" />
-                    <span wire:loading.remove wire:target="create">Open plan</span>
-                    <span wire:loading wire:target="create">Opening…</span>
-                </button>
+                    <span wire:loading.remove wire:target="create">Create / Open AIP</span>
+                    <span wire:loading wire:target="create">Preparing plan…</span>
+                    </button>
+                    <a href="{{ route('aip.template.download') }}" class="btn-ghost btn-ghost--small">Download blank template</a>
+                </div>
             </form>
         </section>
     @endunless
@@ -106,8 +116,8 @@
                     <thead>
                         <tr>
                             <th scope="col">Plan</th>
-                            <th scope="col">Projects</th>
-                            <th scope="col">Activities</th>
+                            <th scope="col">Objectives / Projects</th>
+                            <th scope="col">PPAs / Activities</th>
                             <th scope="col">Budget</th>
                             <th scope="col">WFP</th>
                             <th scope="col">Status</th>
@@ -121,8 +131,8 @@
                                     <span class="cell-strong">{{ $plan->label() }}</span>
                                     <div class="aip-sub">{{ $plan->fiscalYearLabel() }}</div>
                                 </td>
-                                <td>{{ $plan->projects_count }}</td>
-                                <td>{{ $plan->activities_count }}</td>
+                                <td>{{ $plan->projectCount() }}</td>
+                                <td>{{ $plan->activityCount() }}</td>
                                 <td class="mem-linetotal">{{ number_format($plan->annualBudgetTotal(), 2) }}</td>
                                 <td>
                                     @if ($plan->wfpPlan)

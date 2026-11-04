@@ -56,7 +56,8 @@ class LoginController extends Controller
 
         return redirect()
             ->route('home')
-            ->with('success', 'Login successful. Welcome back!');
+            ->with('success', 'Login successful. Welcome back!')
+            ->with('success_title', 'Login successful');
     }
 
     public function logout(Request $request)
@@ -70,6 +71,7 @@ class LoginController extends Controller
 
         return redirect()
             ->route('login')
-            ->with('success', 'Logout successful. See you again soon!');
+            ->with('success', 'Logout successful. See you again soon!')
+            ->with('success_title', 'Logout successful');
     }
 }

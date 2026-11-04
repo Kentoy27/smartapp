@@ -127,6 +127,16 @@ Route::middleware('auth')->group(function () {
         return view('aip.index');
     })->name('aip.index');
 
+    Route::get('/aip-template/download', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canAccessAip(), 404);
+
+        $path = storage_path('forms/FY-2026-ANNUAL-IMPLEMENTATION-PLAN-1.docx');
+        abort_unless(is_file($path), 404);
+
+        return response()->download($path, 'FY-2026-ANNUAL-IMPLEMENTATION-PLAN-1.docx');
+    })->name('aip.template.download');
+
     Route::get('/sip', function () {
         $user = Auth::user();
         abort_unless($user instanceof User && $user->canAccessSip(), 404);

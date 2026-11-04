@@ -32,8 +32,8 @@
                     <tr>
                         <th scope="col">School</th>
                         <th scope="col">Year</th>
-                        <th scope="col">Projects</th>
-                        <th scope="col">Activities</th>
+                        <th scope="col">Objectives / Projects</th>
+                        <th scope="col">PPAs / Activities</th>
                         <th scope="col">Budget</th>
                         <th scope="col">Submitted</th>
                         <th scope="col">Status</th>
@@ -48,8 +48,8 @@
                                 <div class="aip-sub">{{ $plan->label() }}</div>
                             </td>
                             <td>{{ $plan->fiscalYearLabel() }}</td>
-                            <td>{{ $plan->projects_count }}</td>
-                            <td>{{ $plan->activities_count }}</td>
+                            <td>{{ $plan->projectCount() }}</td>
+                            <td>{{ $plan->activityCount() }}</td>
                             <td class="mem-linetotal">{{ number_format($plan->annualBudgetTotal(), 2) }}</td>
                             <td>{{ $plan->submitted_at?->format('M j, Y g:i A') ?? '—' }}</td>
                             <td>
@@ -115,7 +115,8 @@
                 <div class="modal-form aip-review-body">
                     <p class="role-modal-description">
                         <strong>{{ $reviewPlan->school?->name ?? 'School' }}</strong> ·
-                        School Year {{ $reviewPlan->fiscalYearLabel() }} ·
+                        {{ $reviewPlan->school?->district?->name ?? '(District)' }} ·
+                        FY {{ $reviewPlan->year }} ·
                         <span class="badge {{ $reviewPlan->statusBadgeClass() }}">{{ $reviewPlan->statusLabelFor(auth()->user()) }}</span>
                     </p>
 
@@ -151,8 +152,58 @@
                         </p>
                     @endif
 
+                    <div class="aip-template-heading aip-template-heading--review">
+                        <h3>FY {{ $reviewPlan->year }} ANNUAL IMPLEMENTATION PLAN</h3>
+                        <p>{{ str_replace(':year', (string) $reviewPlan->year, config('aip.template.purpose')) }}</p>
+                    </div>
+
                     <div class="aip-review-contents">
                         @php($contents = $this->reviewContents)
+                        @if (isset($contents['form_data']))
+                            @php($reviewRows = collect($contents['form_data']['rows'] ?? []))
+                            @php($reviewPillars = collect(config('aip.pillars', []))->merge($reviewRows->pluck('pillar')->filter()->unique())->unique()->values())
+                            <div class="table-wrap aip-official-form__scroll">
+                                <table class="data-table aip-official-grid">
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">Strategic Objective (Based on SIP)</th>
+                                            <th scope="col">Strategy</th>
+                                            <th scope="col">Updated Programs, Projects, and Activities (PPAs)</th>
+                                            <th scope="col">Resources / Materials Needed</th>
+                                            <th scope="col">Budget (If the fund source is MOOE, type “c/o approved WFP”. If the fund source is not MOOE, indicate the amount.)</th>
+                                            <th scope="col">Persons Responsible</th>
+                                            <th scope="col">Indicative Timeline (Indicate the month(s) covered)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach ($reviewPillars as $pillar)
+                                            <tr class="aip-review-pillar"><th scope="rowgroup" colspan="7">{{ $pillar }}</th></tr>
+                                            @php($pillarRows = $reviewRows->filter(fn (array $row): bool => ($row['pillar'] ?? '') === $pillar))
+                                            @forelse ($pillarRows as $row)
+                                                <tr>
+                                                    <td>{{ $row['strategic_objective'] ?: '—' }}</td>
+                                                    <td>{{ $row['strategy'] ?: '—' }}</td>
+                                                    <td>{{ $row['ppa'] ?: '—' }}</td>
+                                                    <td>{{ $row['resources'] ?: '—' }}</td>
+                                                    <td>{{ $row['budget'] ?: '—' }}</td>
+                                                    <td>{{ $row['persons_responsible'] ?: '—' }}</td>
+                                                    <td>{{ $row['timeline'] ?: '—' }}</td>
+                                                </tr>
+                                            @empty
+                                                <tr><td colspan="7">&nbsp;</td></tr>
+                                            @endforelse
+                                        @endforeach
+                                    </tbody>
+                                </table>
+                            </div>
+                            <p class="aip-template-note">Note: Rows may be added as needed.</p>
+                            <div class="aip-template-signatures aip-template-signatures--review">
+                                <div><strong>Prepared by:</strong> {{ $reviewPlan->creator?->name }}<br>{{ $reviewPlan->creator?->position ?: 'Position/Designation' }}</div>
+                                <div><strong>Reviewed by:</strong> {{ config('aip.template.reviewed_by.name') }}<br>{{ config('aip.template.reviewed_by.role') }}</div>
+                                <div><strong>Recommending Approval</strong><br>{{ config('aip.template.recommending_approval.name') }}<br>{{ config('aip.template.recommending_approval.role') }}</div>
+                                <div><strong>Approved:</strong><br>{{ config('aip.template.approved_by.name') }}<br>{{ config('aip.template.approved_by.role') }}</div>
+                            </div>
+                        @else
                         @forelse ($contents['projects'] ?? [] as $pi => $project)
                             <div class="aip-preview-project">
                                 <h3>{{ $pi + 1 }}. {{ $project['title'] ?? '(untitled project)' }}</h3>
@@ -195,6 +246,7 @@
                         @empty
                             <p class="table-empty">This plan has no projects.</p>
                         @endforelse
+                        @endif
 
                         <p class="aip-total-line">
                             <strong>Total budget:</strong>

@@ -51,6 +51,7 @@ class AipPlan extends Model
         'school_id',
         'year',
         'title',
+        'form_data',
         'status',
         'version',
         'wfp_plan_id',
@@ -67,6 +68,7 @@ class AipPlan extends Model
 
     protected $casts = [
         'year' => 'integer',
+        'form_data' => 'array',
         'version' => 'integer',
         'submitted_at' => 'datetime',
         'reviewed_at' => 'datetime',
@@ -364,7 +366,47 @@ class AipPlan extends Model
     /** The annual budget: the sum of every activity's budget per activity. */
     public function annualBudgetTotal(): float
     {
+        if ($this->form_data !== null) {
+            return round(array_sum(array_map(
+                static fn (array $row): float => self::numericBudget($row['budget'] ?? ''),
+                $this->form_data['rows'] ?? [],
+            )), 2);
+        }
+
         return round((float) $this->activities()->sum('budget'), 2);
+    }
+
+    /** Number of distinct pillar/objective groups shown in the annual form. */
+    public function projectCount(): int
+    {
+        if ($this->form_data === null) {
+            return $this->projects()->count();
+        }
+
+        return collect($this->form_data['rows'] ?? [])
+            ->map(fn (array $row): string => trim((string) ($row['pillar'] ?? '')).'|'.trim((string) ($row['strategic_objective'] ?? '')))
+            ->filter(fn (string $key): bool => $key !== '|')
+            ->unique()
+            ->count();
+    }
+
+    /** Number of implementation rows containing a PPA. */
+    public function activityCount(): int
+    {
+        if ($this->form_data === null) {
+            return $this->activities()->count();
+        }
+
+        return collect($this->form_data['rows'] ?? [])
+            ->filter(fn (array $row): bool => trim((string) ($row['ppa'] ?? '')) !== '')
+            ->count();
+    }
+
+    private static function numericBudget(mixed $budget): float
+    {
+        $value = preg_replace('/[,\s₱]/u', '', (string) $budget) ?? '';
+
+        return is_numeric($value) ? (float) $value : 0.0;
     }
 
     /** Budgets grouped by their source, for the export's summary block. */
@@ -377,11 +419,6 @@ class AipPlan extends Model
             ->pluck('total', 'source')
             ->map(fn ($total): float => round((float) $total, 2))
             ->all();
-    }
-
-    public function projectCount(): int
-    {
-        return $this->projects()->count();
     }
 
     /**
@@ -400,11 +437,6 @@ class AipPlan extends Model
         $this->save();
 
         return $this->version;
-    }
-
-    public function activityCount(): int
-    {
-        return $this->activities()->count();
     }
 
     /* ------------------------------------------------------------ workflow */
@@ -558,6 +590,7 @@ class AipPlan extends Model
             'title' => $this->title,
             'year' => (int) $this->year,
             'school' => $this->school?->name,
+            'form_data' => $this->form_data,
             'projects' => $this->projects()->with('activities')->get()
                 ->map(fn (AipProject $project): array => [
                     'title' => $project->title,

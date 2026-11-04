@@ -5,12 +5,16 @@ namespace App\Livewire;
 use App\Models\AipPlan;
 use App\Models\User;
 use App\Models\WfpPlan;
+use App\Support\AipTemplateImporter;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
+use Livewire\WithFileUploads;
+use RuntimeException;
 
 /**
  * The /aip landing page: the school's Annual Implementation Plans.
@@ -27,11 +31,15 @@ use Livewire\Component;
 #[Title('Annual Implementation Plan — SmartApp')]
 class AipManager extends Component
 {
+    use WithFileUploads;
+
     /** The year the "start a new plan" form will use. */
     public int $year = 0;
 
     /** An optional title for the new plan (defaults to the year's plan). */
     public string $title = '';
+
+    public $templateFile;
 
     public ?string $successMessage = null;
 
@@ -111,21 +119,56 @@ class AipManager extends Component
         $this->validate([
             'year' => ['required', 'integer', 'min:2000', 'max:2100'],
             'title' => ['nullable', 'string', 'max:255'],
+            'templateFile' => ['nullable', 'file', 'extensions:docx', 'max:'.(int) config('aip.max_kb', 10240)],
         ], [
             'year.required' => 'Choose the school year the plan covers.',
             'year.min' => 'Enter a valid four-digit school year.',
             'year.max' => 'Enter a valid four-digit school year.',
             'title.max' => 'Keep the title under 255 characters.',
+            'templateFile.extensions' => 'Upload the completed AIP template as a DOCX Word document.',
+            'templateFile.max' => 'The AIP template must be no larger than '.number_format((int) config('aip.max_kb', 10240) / 1024, 1).' MB.',
         ], [
             'year' => 'school year',
             'title' => 'title',
         ]);
 
-        $plan = DB::transaction(function () use ($user): AipPlan {
+        $existing = AipPlan::query()
+            ->where('school_id', $user->school_id)
+            ->where('year', $this->year)
+            ->first();
+
+        if ($existing !== null && $this->templateFile instanceof TemporaryUploadedFile) {
+            $this->errorMessage = 'A plan already exists for this school year. Open it and use Import AIP Template to replace or add its rows.';
+
+            return;
+        }
+
+        $formData = ['rows' => AipTemplateImporter::blankRows()];
+
+        if ($this->templateFile instanceof TemporaryUploadedFile) {
+            try {
+                $imported = AipTemplateImporter::import($this->templateFile->getRealPath());
+            } catch (RuntimeException $exception) {
+                $this->errorMessage = $exception->getMessage();
+
+                return;
+            }
+
+            if ($imported['detected_year'] !== null && $imported['detected_year'] !== $this->year) {
+                $this->errorMessage = 'The uploaded document is labeled FY '.$imported['detected_year'].'. Set the school year to '.$imported['detected_year'].' before creating this plan.';
+
+                return;
+            }
+
+            $formData = ['rows' => $imported['rows']];
+        }
+
+        $plan = DB::transaction(function () use ($user, $formData): AipPlan {
             $plan = AipPlan::firstOrCreate(
                 ['school_id' => $user->school_id, 'year' => $this->year],
                 [
                     'title' => trim($this->title) !== '' ? trim($this->title) : null,
+                    'form_data' => $formData,
                     'status' => AipPlan::STATUS_DRAFT,
                     'created_by' => $user->id,
                 ],

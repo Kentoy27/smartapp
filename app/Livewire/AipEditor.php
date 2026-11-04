@@ -8,6 +8,7 @@ use App\Models\AipProject;
 use App\Models\MonthlyExpenditureMatrix;
 use App\Models\User;
 use App\Models\UserMov;
+use App\Support\AipTemplateImporter;
 use App\Support\AipXlsxExporter;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -16,6 +17,9 @@ use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\Title;
 use Livewire\Component;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
+use Livewire\WithFileUploads;
+use RuntimeException;
 
 /**
  * The AIP editor: the school's plan as a spreadsheet.
@@ -42,6 +46,8 @@ use Livewire\Component;
 #[Title('Annual Implementation Plan — SmartApp')]
 class AipEditor extends Component
 {
+    use WithFileUploads;
+
     #[Locked]
     public int $planId = 0;
 
@@ -50,6 +56,14 @@ class AipEditor extends Component
 
     /** The plan's title (the header line of the printed form). */
     public string $title = '';
+
+    #[Locked]
+    public bool $isOfficialForm = false;
+
+    /** @var array<int, array<string, string>> */
+    public array $formRows = [];
+
+    public $templateFile;
 
     /** @var array<int, array<string, mixed>> */
     public array $projects = [];
@@ -68,7 +82,9 @@ class AipEditor extends Component
         $this->planId = $plan->id;
         $this->loadedVersion = (int) $plan->version;
         $this->title = (string) ($plan->title ?? '');
+        $this->isOfficialForm = $plan->form_data !== null;
         $this->loadProjects($plan);
+        $this->loadFormRows($plan);
     }
 
     /* -------------------------------------------------------------- guards */
@@ -105,6 +121,53 @@ class AipEditor extends Component
                 'activities' => $project->activities
                     ->map(fn (AipActivity $activity): array => self::activityFromModel($activity))
                     ->all(),
+            ])
+            ->all();
+    }
+
+    private function loadFormRows(AipPlan $plan): void
+    {
+        $groups = collect($plan->form_data['rows'] ?? [])
+            ->groupBy(static fn (array $row): string => (string) ($row['pillar'] ?? ''));
+        $rows = [];
+        $knownPillars = [];
+
+        foreach (AipTemplateImporter::blankRows() as $blankRow) {
+            $pillar = $blankRow['pillar'];
+            $knownPillars[] = $pillar;
+            $savedRows = $groups->get($pillar);
+
+            if ($savedRows === null || $savedRows->isEmpty()) {
+                $rows[] = $blankRow;
+                continue;
+            }
+
+            foreach ($savedRows as $savedRow) {
+                $rows[] = $savedRow;
+            }
+        }
+
+        foreach ($groups as $pillar => $savedRows) {
+            if (in_array($pillar, $knownPillars, true)) {
+                continue;
+            }
+
+            foreach ($savedRows as $savedRow) {
+                $rows[] = $savedRow;
+            }
+        }
+
+        $this->formRows = collect($rows)
+            ->map(fn (array $row): array => [
+                '_key' => 'row-'.bin2hex(random_bytes(6)),
+                'pillar' => (string) ($row['pillar'] ?? ''),
+                'strategic_objective' => (string) ($row['strategic_objective'] ?? ''),
+                'strategy' => (string) ($row['strategy'] ?? ''),
+                'ppa' => (string) ($row['ppa'] ?? ''),
+                'resources' => (string) ($row['resources'] ?? ''),
+                'budget' => (string) ($row['budget'] ?? ''),
+                'persons_responsible' => (string) ($row['persons_responsible'] ?? ''),
+                'timeline' => (string) ($row['timeline'] ?? ''),
             ])
             ->all();
     }
@@ -161,6 +224,21 @@ class AipEditor extends Component
      */
     protected function rules(): array
     {
+        if ($this->isOfficialForm) {
+            return [
+                'title' => ['nullable', 'string', 'max:255'],
+                'formRows' => ['array', 'max:500'],
+                'formRows.*.pillar' => ['required', 'string', 'max:120'],
+                'formRows.*.strategic_objective' => ['nullable', 'string', 'max:1000'],
+                'formRows.*.strategy' => ['nullable', 'string', 'max:2000'],
+                'formRows.*.ppa' => ['nullable', 'string', 'max:2000'],
+                'formRows.*.resources' => ['nullable', 'string', 'max:2000'],
+                'formRows.*.budget' => ['nullable', 'string', 'max:255'],
+                'formRows.*.persons_responsible' => ['nullable', 'string', 'max:255'],
+                'formRows.*.timeline' => ['nullable', 'string', 'max:255'],
+            ];
+        }
+
         return [
             'title' => ['nullable', 'string', 'max:255'],
             'projects' => ['array'],
@@ -201,6 +279,79 @@ class AipEditor extends Component
         $this->assertEditable($plan);
 
         $this->projects[] = $this->blankProject();
+    }
+
+    public function addFormRow(): void
+    {
+        $plan = $this->guard();
+        $this->assertEditable($plan);
+
+        $this->isOfficialForm = true;
+        $this->formRows[] = [
+            '_key' => 'row-'.bin2hex(random_bytes(6)),
+            'pillar' => (string) (config('aip.pillars.0') ?? ''),
+            'strategic_objective' => '',
+            'strategy' => '',
+            'ppa' => '',
+            'resources' => '',
+            'budget' => '',
+            'persons_responsible' => '',
+            'timeline' => '',
+        ];
+    }
+
+    public function removeFormRow(string $key): void
+    {
+        $plan = $this->guard();
+        $this->assertEditable($plan);
+
+        $this->formRows = array_values(array_filter(
+            $this->formRows,
+            fn (array $row): bool => ($row['_key'] ?? null) !== $key,
+        ));
+    }
+
+    public function importTemplate(): void
+    {
+        $plan = $this->guard();
+        $this->assertEditable($plan);
+
+        $this->validate([
+            'templateFile' => ['required', 'file', 'extensions:docx', 'max:'.(int) config('aip.max_kb', 10240)],
+        ], [
+            'templateFile.required' => 'Choose a completed AIP Word document to import.',
+            'templateFile.extensions' => 'Upload the completed AIP template as a DOCX Word document.',
+            'templateFile.max' => 'The AIP template must be no larger than '.number_format((int) config('aip.max_kb', 10240) / 1024, 1).' MB.',
+        ]);
+
+        if (! $this->templateFile instanceof TemporaryUploadedFile) {
+            $this->addError('templateFile', 'Choose a completed AIP Word document to import.');
+
+            return;
+        }
+
+        try {
+            $imported = AipTemplateImporter::import($this->templateFile->getRealPath());
+        } catch (RuntimeException $exception) {
+            $this->errorMessage = $exception->getMessage();
+
+            return;
+        }
+
+        if ($imported['detected_year'] !== null && $imported['detected_year'] !== (int) $plan->year) {
+            $this->errorMessage = 'The uploaded document is labeled FY '.$imported['detected_year'].', but this plan is '.$plan->fiscalYearLabel().'. Open the matching school-year plan to import it.';
+
+            return;
+        }
+
+        $this->formRows = array_map(
+            fn (array $row): array => ['_key' => 'row-'.bin2hex(random_bytes(6)), ...$row],
+            $imported['rows'],
+        );
+        $this->isOfficialForm = true;
+        $this->templateFile = null;
+        $this->resetValidation();
+        $this->successMessage = 'Imported '.count($this->formRows).' AIP row(s). Review and save the draft before submitting.';
     }
 
     public function removeProject(string $key): void
@@ -319,6 +470,17 @@ class AipEditor extends Component
     #[Computed]
     public function totals(): array
     {
+        if ($this->isOfficialForm) {
+            $grand = 0.0;
+
+            foreach ($this->formRows as $row) {
+                $budget = preg_replace('/[,\s₱]/u', '', (string) ($row['budget'] ?? '')) ?? '';
+                $grand += is_numeric($budget) ? (float) $budget : 0.0;
+            }
+
+            return ['projects' => [], 'grand' => round($grand, 2)];
+        }
+
         $projects = [];
 
         foreach ($this->projects as $index => $project) {
@@ -369,6 +531,14 @@ class AipEditor extends Component
         $plan = $this->guard();
         $this->assertEditable($plan);
 
+        if ($this->isOfficialForm && ! collect($this->formRows)->contains(
+            fn (array $row): bool => trim((string) ($row['ppa'] ?? '')) !== '',
+        )) {
+            $this->errorMessage = 'Add at least one updated PPA before submitting the AIP for review.';
+
+            return;
+        }
+
         if (! $this->persist()) {
             return;
         }
@@ -402,6 +572,10 @@ class AipEditor extends Component
             $this->errorMessage = 'This plan is out for review or already approved, so it can no longer be edited.';
 
             return false;
+        }
+
+        if ($this->isOfficialForm) {
+            return $this->persistFormData($plan);
         }
 
         // Drop rows the owner added but never filled, then validate what
@@ -513,11 +687,77 @@ class AipEditor extends Component
         return true;
     }
 
+    private function persistFormData(AipPlan $plan): bool
+    {
+        $this->formRows = array_values(array_filter(
+            $this->formRows,
+            fn (array $row): bool => ! self::isBlankFormRow($row),
+        ));
+
+        $this->validate();
+
+        $currentVersion = (int) AipPlan::whereKey($plan->id)->value('version');
+
+        if ($currentVersion !== $this->loadedVersion) {
+            $this->errorMessage = 'This plan changed elsewhere — reload the page before saving.';
+
+            return false;
+        }
+
+        DB::transaction(function () use ($plan): void {
+            $plan->title = self::nullIfBlank($this->title);
+            $plan->form_data = [
+                'rows' => array_map(
+                    static fn (array $row): array => [
+                        'pillar' => trim((string) ($row['pillar'] ?? '')),
+                        'strategic_objective' => trim((string) ($row['strategic_objective'] ?? '')),
+                        'strategy' => trim((string) ($row['strategy'] ?? '')),
+                        'ppa' => trim((string) ($row['ppa'] ?? '')),
+                        'resources' => trim((string) ($row['resources'] ?? '')),
+                        'budget' => trim((string) ($row['budget'] ?? '')),
+                        'persons_responsible' => trim((string) ($row['persons_responsible'] ?? '')),
+                        'timeline' => trim((string) ($row['timeline'] ?? '')),
+                    ],
+                    $this->formRows,
+                ),
+            ];
+            $plan->updated_by = Auth::id();
+            $plan->save();
+            $plan->bumpVersion();
+        });
+
+        $this->reload(AipPlan::findOrFail($plan->id));
+
+        return true;
+    }
+
     private function reload(AipPlan $plan): void
     {
         $this->loadedVersion = (int) $plan->version;
         $this->title = (string) ($plan->title ?? '');
+        $this->isOfficialForm = $plan->form_data !== null;
         $this->loadProjects($plan);
+        $this->loadFormRows($plan);
+    }
+
+    /** @param array<string, mixed> $row */
+    private static function isBlankFormRow(array $row): bool
+    {
+        foreach ([
+            'strategic_objective',
+            'strategy',
+            'ppa',
+            'resources',
+            'budget',
+            'persons_responsible',
+            'timeline',
+        ] as $field) {
+            if (trim((string) ($row[$field] ?? '')) !== '') {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /** @param array<string, mixed> $project */
@@ -568,6 +808,12 @@ class AipEditor extends Component
     {
         $plan = $this->guard();
         $this->assertEditable($plan);
+
+        if ($this->isOfficialForm) {
+            $this->errorMessage = 'Copy from WFP is available only in the legacy project/activity form.';
+
+            return;
+        }
 
         if ($this->projects !== []) {
             $this->errorMessage = 'The plan already has projects. Clear them first if you want to start again from the WFP.';
