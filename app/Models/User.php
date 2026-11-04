@@ -358,6 +358,17 @@ class User extends Authenticatable
     }
 
     /**
+     * Whether this account may view the School Improvement Plan landing page.
+     *
+     * School Heads and SDS Viewers may see the page; administrative and
+     * finance roles do not have a SIP destination.
+     */
+    public function canAccessSip(): bool
+    {
+        return ! $this->is_superadmin && in_array($this->role, ['user', 'viewer'], true);
+    }
+
+    /**
      * The account's one digital signature. It belongs to the account, not to a
      * role: a user and a superadmin manage theirs the same way, on the same
      * profile page.
