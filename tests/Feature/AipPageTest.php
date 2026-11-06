@@ -76,6 +76,48 @@ class AipPageTest extends TestCase
         );
     }
 
+    public function test_school_heads_only_see_their_own_aip_submissions(): void
+    {
+        $district = District::create(['name' => 'District I']);
+        $school = School::create(['name' => 'Alpha Elementary School', 'district_id' => $district->id]);
+        $owner = $this->schoolHead();
+        $otherHead = $this->schoolHead();
+        $owner->update(['school_id' => $school->id]);
+        $otherHead->update(['school_id' => $school->id]);
+
+        $ownPlan = AipPlan::create([
+            'school_id' => $school->id,
+            'year' => 2026,
+            'created_by' => $owner->id,
+            'original_file_name' => 'my-school-aip.docx',
+        ]);
+        $otherPlan = AipPlan::create([
+            'school_id' => $school->id,
+            'year' => 2027,
+            'created_by' => $otherHead->id,
+            'original_file_name' => 'another-head-aip.docx',
+        ]);
+
+        $this->actingAs($owner)
+            ->get(route('aip.index'))
+            ->assertOk()
+            ->assertSee('my-school-aip.docx')
+            ->assertDontSee('another-head-aip.docx');
+
+        $this->actingAs($owner)
+            ->get(route('aip.plans.export', ['plan' => $otherPlan->id]))
+            ->assertNotFound();
+
+        $this->actingAs($otherHead)
+            ->get(route('aip.index'))
+            ->assertOk()
+            ->assertSee('another-head-aip.docx')
+            ->assertDontSee('my-school-aip.docx');
+
+        $this->assertTrue($ownPlan->managedBy($owner));
+        $this->assertFalse($otherPlan->managedBy($owner));
+    }
+
     public function test_the_authoring_page_is_closed_to_superadmins_and_viewers(): void
     {
         $this->actingAs($this->superadmin())->get(route('aip.index'))->assertNotFound();

@@ -104,6 +104,30 @@ class AipModuleTest extends TestCase
         $this->assertSame(1, AipPlan::count());
     }
 
+    public function test_a_school_head_cannot_open_another_heads_plan_for_the_same_school(): void
+    {
+        $owner = $this->schoolHead();
+        $otherHead = $this->schoolHead();
+        $plan = $this->draftPlan($owner);
+
+        Livewire::actingAs($otherHead)
+            ->test(AipManager::class)
+            ->set('year', $plan->year)
+            ->call('create')
+            ->assertSet(
+                'errorMessage',
+                'An AIP already exists for this school year under another School Head account. Contact an administrator if this plan should be transferred.'
+            );
+
+        Livewire::actingAs($otherHead)
+            ->test(AipEditor::class, ['plan' => $plan])
+            ->assertNotFound();
+
+        $this->actingAs($otherHead)
+            ->get(route('aip.plans.export', ['plan' => $plan->id]))
+            ->assertNotFound();
+    }
+
     public function test_the_fy_word_template_is_parsed_into_its_pillar_rows(): void
     {
         $template = storage_path('forms/FY-2026-ANNUAL-IMPLEMENTATION-PLAN-1.docx');

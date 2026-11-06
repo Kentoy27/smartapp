@@ -13,8 +13,8 @@ use Illuminate\Support\Facades\Storage;
  * An Annual Implementation Plan (AIP) for one school and one year — the
  * school's operational breakdown of its School Improvement Plan.
  *
- * A plan is owned by a SCHOOL (not a user), so a change of school head does
- * not strand it; authorization is by school (see managedBy()). The contents
+ * A plan is attached to a SCHOOL, while School Head access is limited to the
+ * account that created it (see managedBy()). The contents
  * are two levels — School Improvement Projects, each with its activities —
  * matching the official form (Annex 10, DepEd Order No. 44, s. 2015).
  *
@@ -340,13 +340,14 @@ class AipPlan extends Model
 
     /* ------------------------------------------------------------ authority */
 
-    /** Only the School Head of this school may author it. */
+    /** Only the School Head who created this plan may access it. */
     public function managedBy(?User $user): bool
     {
         return $user !== null
             && $user->canAccessAip()
             && $this->school_id !== null
-            && (int) $this->school_id === (int) $user->school_id;
+            && (int) $this->school_id === (int) $user->school_id
+            && (int) $this->created_by === (int) $user->id;
     }
 
     /**

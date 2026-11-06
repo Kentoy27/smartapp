@@ -77,6 +77,7 @@ class AipManager extends Component
 
         return AipPlan::query()
             ->where('school_id', $user->school_id)
+            ->where('created_by', $user->id)
             ->withCount('projects', 'activities')
             ->with(['approvedBy', 'wfpPlan'])
             ->orderByDesc('year')
@@ -137,6 +138,12 @@ class AipManager extends Component
             ->where('year', $this->year)
             ->first();
 
+        if ($existing !== null && ! $existing->managedBy($user)) {
+            $this->errorMessage = 'An AIP already exists for this school year under another School Head account. Contact an administrator if this plan should be transferred.';
+
+            return;
+        }
+
         if ($existing !== null && $this->templateFile instanceof TemporaryUploadedFile) {
             $this->errorMessage = 'A plan already exists for this school year. Open it and use Import AIP Template to replace or add its rows.';
 
@@ -174,6 +181,10 @@ class AipManager extends Component
                 ],
             );
 
+            if (! $plan->managedBy($user)) {
+                return $plan;
+            }
+
             // Connect the plan to the school's WFP for the same year, when one
             // exists — the AIP is financed by the WFP, so the link is recorded
             // rather than retyped.
@@ -191,6 +202,12 @@ class AipManager extends Component
 
             return $plan;
         });
+
+        if (! $plan->managedBy($user)) {
+            $this->errorMessage = 'An AIP already exists for this school year under another School Head account. Contact an administrator if this plan should be transferred.';
+
+            return;
+        }
 
         $this->redirect(route('aip.plans.edit', ['plan' => $plan->id]), navigate: true);
     }

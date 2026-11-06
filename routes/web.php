@@ -123,6 +123,7 @@ Route::middleware('auth')->group(function () {
             ? collect()
             : AipPlan::query()
                 ->where('school_id', $user->school_id)
+                ->where('created_by', $user->id)
                 ->with(['latestReview.reviewer'])
                 ->orderByDesc('year')
                 ->orderByDesc('id')
