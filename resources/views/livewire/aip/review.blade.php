@@ -353,6 +353,13 @@
                         </p>
 
                         <div class="modal-actions">
+                            @if ($reviewPlan->isReturned() && auth()->user()->canReviewAllOpcrfSubmissions())
+                                <a
+                                    class="btn-ghost"
+                                    href="{{ route('aip.plans.edit', ['plan' => $reviewPlan->id]) }}"
+                                    wire:navigate
+                                >Update returned AIP</a>
+                            @endif
                             <button type="button" class="btn-primary" wire:click="closeReview">Close</button>
                         </div>
                     @endif

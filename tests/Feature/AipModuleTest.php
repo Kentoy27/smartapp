@@ -348,6 +348,75 @@ class AipModuleTest extends TestCase
         Livewire::actingAs($intruder)->test(AipEditor::class, ['plan' => $plan])->assertStatus(404);
     }
 
+    public function test_viewer_can_update_any_aip_returned_for_revision(): void
+    {
+        $owner = $this->schoolHead();
+        $viewer = User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]);
+        $plan = $this->draftPlan($owner);
+        $plan->projects()->create(['position' => 1, 'title' => 'Original project']);
+        $plan->forceFill([
+            'status' => AipPlan::STATUS_RETURNED,
+            'submitted_at' => now(),
+            'reviewer_id' => $this->superadmin()->id,
+            'assigned_to' => null,
+            'review_remarks' => 'Please update this plan.',
+        ])->save();
+
+        $this->actingAs($viewer)
+            ->get(route('aip.plans.edit', ['plan' => $plan->id]))
+            ->assertOk()
+            ->assertSee('Save draft')
+            ->assertSee('Returned for Revision');
+
+        Livewire::actingAs($viewer)
+            ->test(AipReview::class)
+            ->call('openReview', $plan->id)
+            ->assertSee('Update returned AIP');
+
+        Livewire::actingAs($viewer)
+            ->test(AipEditor::class, ['plan' => $plan])
+            ->set('projects.0.title', 'Updated by SDS Viewer')
+            ->call('saveDraft')
+            ->assertHasNoErrors();
+
+        $plan->refresh();
+        $this->assertSame('Updated by SDS Viewer', $plan->projects()->firstOrFail()->title);
+        $this->assertSame($viewer->id, $plan->updated_by);
+        $this->assertSame(AipPlan::STATUS_RETURNED, $plan->status);
+
+        Livewire::actingAs($viewer)
+            ->test(AipEditor::class, ['plan' => $plan])
+            ->set('projects.0.title', 'Submitted revision')
+            ->call('submit')
+            ->assertHasNoErrors();
+
+        $this->assertSame(AipPlan::STATUS_RESUBMITTED, $plan->fresh()->status);
+        $this->assertDatabaseHas('aip_reviews', [
+            'aip_plan_id' => $plan->id,
+            'reviewer_id' => $viewer->id,
+            'action' => 'resubmit',
+        ]);
+    }
+
+    public function test_viewer_cannot_edit_an_aip_that_is_not_returned(): void
+    {
+        $owner = $this->schoolHead();
+        $viewer = User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]);
+        $plan = $this->draftPlan($owner);
+        $plan->forceFill([
+            'status' => AipPlan::STATUS_PENDING,
+            'submitted_at' => now(),
+        ])->save();
+
+        $this->actingAs($viewer)
+            ->get(route('aip.plans.edit', ['plan' => $plan->id]))
+            ->assertNotFound();
+
+        Livewire::actingAs($viewer)
+            ->test(AipEditor::class, ['plan' => $plan])
+            ->assertStatus(404);
+    }
+
     /* ---------------------------------------------------------- workflow */
 
     public function test_submitting_archives_a_version_and_review_approves_it(): void

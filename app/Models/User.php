@@ -362,7 +362,7 @@ class User extends Authenticatable
             'administrator' => 'Administrator',
             'bookkeeper' => 'Bookkeeper',
             'budget' => 'Budget',
-            'viewer' => 'SDS Viewer',
+            'viewer' => 'SDS Viewer / Validator',
             default => 'SH',
         };
     }

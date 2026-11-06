@@ -137,10 +137,8 @@ class OpcrfUpload extends Component
     public ?string $templateVersion = null;
 
     /**
-     * The superadmin every submission is routed to — resolved
-     * automatically at submit time (config('opcrf.review_route'), by
-     * username, falling back to the first superadmin by username), never
-     * picked by the staff member.
+     * The superadmin commitment submissions are routed to automatically.
+     * The full workbook uses the SDS Viewer/Validator before this reviewer.
      */
     public $reviewer_id = '';
 
@@ -287,6 +285,34 @@ class OpcrfUpload extends Component
             ->where('user_id', Auth::id())
             ->where('opcrf_part', $part)
             ->latest('id')
+            ->first();
+    }
+
+    /**
+     * Full Parts I–IV workbooks go through the SDS Viewer/Validator first.
+     * A configured username takes precedence; otherwise use the first viewer
+     * account so new submissions never bypass validation.
+     */
+    private function resolveFullWorkbookValidator(): ?User
+    {
+        $configured = trim((string) config('opcrf.validator_route', ''));
+
+        if ($configured !== '') {
+            $validator = User::query()
+                ->where('role', 'viewer')
+                ->where('is_superadmin', false)
+                ->where('username', $configured)
+                ->first();
+
+            if ($validator !== null) {
+                return $validator;
+            }
+        }
+
+        return User::query()
+            ->where('role', 'viewer')
+            ->where('is_superadmin', false)
+            ->orderBy('username')
             ->first();
     }
 
@@ -746,6 +772,16 @@ class OpcrfUpload extends Component
             return;
         }
 
+        $validator = $this->resolveFullWorkbookValidator();
+        if ($validator === null) {
+            $this->addError(
+                'file',
+                'No SDS Viewer/Validator account exists yet — ask an administrator to create one before submitting the full OPCRF.'
+            );
+
+            return;
+        }
+
         $originalName = $this->file->getClientOriginalName();
         $archivedPath = 'opcrf-submissions/' . Auth::id() . '/' . uniqid() . '-' . $originalName;
 
@@ -771,26 +807,18 @@ class OpcrfUpload extends Component
 
         if ($existingSubmission !== null) {
             $existingSubmission->resubmit($archivedPath, $originalName);
-            $existingSubmission->fill($partOneData)->save();
+            $existingSubmission->forceFill([
+                ...$partOneData,
+                'reviewer_id' => $validator->id,
+                'assigned_to' => $validator->id,
+            ])->save();
             $submission = $existingSubmission;
-            $reviewer = $submission->assignedTo ?? $submission->reviewer;
         } else {
-            $reviewer = $this->resolveAutoReviewer();
-
-            if ($reviewer === null) {
-                Storage::disk('local')->delete($archivedPath);
-                $this->addError(
-                    'file',
-                    'No superadmin account exists yet — ask an administrator to create one before you can submit your OPCRF.'
-                );
-
-                return;
-            }
-
             $submission = OpcrfSubmission::create([
                 'user_id' => Auth::id(),
                 'opcrf_part' => OpcrfSubmission::FULL_WORKBOOK,
-                'reviewer_id' => $reviewer->id,
+                'reviewer_id' => $validator->id,
+                'assigned_to' => $validator->id,
                 ...$partOneData,
                 'remarks' => null,
                 'file_path' => $archivedPath,
@@ -801,9 +829,9 @@ class OpcrfUpload extends Component
         }
 
         $submission->stampSignature();
-        $reviewer?->notify(new OpcrfSubmitted($submission));
+        $validator->notify(new OpcrfSubmitted($submission));
 
-        $this->finishUpload('Full OPCRF submitted — the approved Part I was kept in sync and the complete workbook was sent for review.');
+        $this->finishUpload('Full OPCRF submitted — the approved Part I was kept in sync and the complete workbook was sent to the SDS Viewer/Validator.');
     }
 
     private function finishUpload(string $successMessage): void

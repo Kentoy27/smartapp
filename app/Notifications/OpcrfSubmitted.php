@@ -7,8 +7,8 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Notifications\Notification;
 
 /**
- * "OPCRF Submitted" — sent to the superadmin a staff member routed their
- * OPCR to, the moment the submission is confirmed. Without it the reviewer's
+ * "OPCRF Submitted" — sent to the current reviewer or validator when a
+ * staff member files or routes their OPCRF. Without it the reviewer's
  * queue only changes when they happen to open Review Opcrf; the bell in the
  * topbar is what tells them work arrived.
  */

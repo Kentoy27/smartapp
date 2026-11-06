@@ -112,6 +112,14 @@ class OpcrfUploadTest extends TestCase
     {
         Carbon::setTestNow('2026-06-15 10:00:00');
         $user = $this->staffUser();
+        $validator = User::create([
+            'name' => 'SDS Viewer',
+            'username' => 'validator',
+            'email' => 'validator@example.com',
+            'password' => Hash::make('password123'),
+            'role' => 'viewer',
+            'is_superadmin' => false,
+        ]);
         $this->partsTwoToFourSchedule();
 
         $approvedPath = $this->buildFilledOpcrf(['F16' => 'Approved Part I objective']);
@@ -156,6 +164,8 @@ class OpcrfUploadTest extends TestCase
                 ->firstOrFail();
 
             $this->assertSame(OpcrfSubmission::STATUS_PENDING, $fullSubmission->status);
+            $this->assertSame($validator->id, $fullSubmission->reviewer_id);
+            $this->assertSame($validator->id, $fullSubmission->assigned_to);
             $this->assertSame('Approved Part I objective', $fullSubmission->objectives);
             $this->assertSame(2, OpcrfSubmission::where('user_id', $user->id)->count());
 
@@ -195,9 +205,16 @@ class OpcrfUploadTest extends TestCase
                 ->assertSee('Full OPCRF (Parts I–IV)')
                 ->assertSee('OPCRF Commitment');
 
+            Livewire::actingAs($validator)
+                ->test(OpcrfReview::class)
+                ->assertSee('Full OPCRF submissions to validate')
+                ->assertSee('Full OPCRF (Parts I–IV)')
+                ->assertDontSee('Approve');
+
             Livewire::actingAs($this->reviewer)
                 ->test(OpcrfReview::class)
-                ->assertSee('Full OPCRF (Parts I–IV)');
+                ->assertDontSee('Full OPCRF submissions to validate')
+                ->assertDontSee($fullSubmission->employee_name);
         } finally {
             unlink($approvedPath);
             unlink($fullWorkbookPath);

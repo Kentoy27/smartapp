@@ -111,7 +111,8 @@ class OpcrfPageTest extends TestCase
             ->test(\App\Livewire\Sidebar::class, ['usersCount' => 0])
             ->html();
 
-        $this->assertStringContainsString('href="'.route('opcrf.index').'"', $html);
+        $this->assertStringContainsString('href="'.route('opcrf.review').'"', $html);
+        $this->assertStringNotContainsString('OPCRF Validation', $html);
     }
 
     public function test_viewers_can_review_school_head_submissions_with_school_and_district(): void
@@ -165,6 +166,12 @@ class OpcrfPageTest extends TestCase
             'role' => 'viewer',
             'is_superadmin' => false,
         ]);
+
+        $sidebar = Livewire::actingAs($viewer)
+            ->test(\App\Livewire\Sidebar::class)
+            ->html();
+        $this->assertStringContainsString('href="'.route('opcrf.review').'"', $sidebar);
+        $this->assertStringNotContainsString('OPCRF Validation', $sidebar);
 
         $this->actingAs($viewer)
             ->get(route('opcrf.index'))

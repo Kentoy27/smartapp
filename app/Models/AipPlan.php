@@ -351,6 +351,18 @@ class AipPlan extends Model
     }
 
     /**
+     * The School Head may edit their own draft or returned plan. An SDS
+     * Viewer may help revise any plan returned by a superadmin, but cannot
+     * change a plan while it is under review or already approved.
+     */
+    public function canEditContentsBy(?User $user): bool
+    {
+        return $this->isEditable()
+            && ($this->managedBy($user)
+                || ($user?->canReviewAllOpcrfSubmissions() && $this->isReturned()));
+    }
+
+    /**
      * Is this plan currently sitting in the given reviewer's queue — i.e.
      * may they act on it? An assigned plan is actionable only by its current
      * holder; an unassigned legacy plan remains recoverable by any reviewer.
@@ -611,6 +623,48 @@ class AipPlan extends Model
             'new_status' => self::STATUS_RESUBMITTED,
             'reviewed_at' => now(),
         ]);
+    }
+
+    /**
+     * Replace the uploaded contents of a returned plan and resubmit it.
+     * The previous form snapshot is archived before the replacement is saved.
+     *
+     * @param  array<int, array<string, string>>  $rows
+     */
+    public function replaceReturnedUpload(
+        User $owner,
+        array $rows,
+        string $sourceFilePath,
+        string $originalFileName,
+    ): bool {
+        if (! $this->managedBy($owner) || ! $this->isReturned()) {
+            return false;
+        }
+
+        $previousStatus = (string) $this->status;
+        $recipientId = $this->returningReviewer()?->id ?? ($this->assigned_to ?? $this->reviewer_id);
+        $submittedAt = now();
+
+        $this->archiveVersion(self::STATUS_RESUBMITTED, $owner);
+        $this->form_data = ['rows' => $rows];
+        $this->source_file_path = $sourceFilePath;
+        $this->original_file_name = $originalFileName;
+        $this->updated_by = $owner->id;
+        $this->version = ((int) $this->version) + 1;
+        $this->status = self::STATUS_RESUBMITTED;
+        $this->submitted_at = $submittedAt;
+        $this->assigned_to = $recipientId;
+        $this->save();
+
+        $this->reviews()->create([
+            'reviewer_id' => $owner->id,
+            'action' => AipReview::ACTION_RESUBMIT,
+            'previous_status' => $previousStatus,
+            'new_status' => self::STATUS_RESUBMITTED,
+            'reviewed_at' => $submittedAt,
+        ]);
+
+        return true;
     }
 
     /**

@@ -186,14 +186,30 @@ class UserMov extends Model
     }
 
     /**
-     * Whether this account may read the file: its owner always, a
-     * superadmin always (they are the reviewer), nobody else. The single
-     * place both the view and download routes ask.
+     * Whether this account may read the file: its owner or a superadmin,
+     * plus the SDS Viewer/Validator while the owner's full OPCRF is assigned
+     * to them. The single place both the view and download routes ask.
      */
     public function canBeAccessedBy(?User $user): bool
     {
-        return $user !== null
-            && ($this->user_id === $user->id || $user->is_superadmin);
+        if ($user === null) {
+            return false;
+        }
+
+        if ($this->user_id === $user->id || $user->is_superadmin) {
+            return true;
+        }
+
+        return $user->canReviewAllOpcrfSubmissions()
+            && OpcrfSubmission::query()
+                ->where('user_id', $this->user_id)
+                ->where('opcrf_part', OpcrfSubmission::FULL_WORKBOOK)
+                ->where('assigned_to', $user->id)
+                ->whereIn('status', [
+                    OpcrfSubmission::STATUS_PENDING,
+                    OpcrfSubmission::STATUS_RESUBMITTED,
+                ])
+                ->exists();
     }
 
     /**

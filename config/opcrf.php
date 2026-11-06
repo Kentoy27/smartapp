@@ -62,8 +62,10 @@ return [
     | Automatic review routing
     |----------------------------------------------------------------------
     |
-    | Every staff submission is routed to this superadmin automatically —
-    | the staff member is never asked to pick a recipient. The value is
+    | Commitment submissions are routed to this superadmin automatically.
+    | Full Parts I–IV workbooks go through the SDS Viewer/Validator first,
+    | then to this same first superadmin. The staff member is never asked to
+    | pick a recipient. The value is
     | the account's **username** (resolved fresh on each submit, so the
     | id can differ per environment); when no account by that name exists
     | (or the env var is unset), the first superadmin by username receives
@@ -72,6 +74,13 @@ return [
     */
 
     'review_route' => env('OPCRF_REVIEW_ROUTE', 'Eve'),
+
+    /*
+    | The SDS Viewer/Validator assigned full Parts I–IV workbooks before
+    | they move to the first superadmin. When unset, the first viewer by
+    | username receives them.
+    */
+    'validator_route' => env('OPCRF_VALIDATOR_ROUTE', ''),
 
     /*
     |----------------------------------------------------------------------

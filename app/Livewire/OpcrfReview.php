@@ -9,9 +9,12 @@ use App\Models\OpcrfSubmissionVersion;
 use App\Models\User;
 use App\Models\UserMov;
 use App\Notifications\OpcrfDecided;
+use App\Notifications\OpcrfSubmitted;
 use App\Support\OpcrfSubmissionWorkbook;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
@@ -20,15 +23,16 @@ use Livewire\Component;
 use Livewire\WithPagination;
 
 /**
- * "Review Opcrf" — the superadmin's window into every staff submission.
+ * "Review OPCRF" — the superadmin review queue and the SDS Viewer/Validator
+ * queue for complete Parts I–IV workbooks.
  *
  * Lists all OPCRF submissions (newest first) with the submitting staff
  * member, and opens a review modal per row: the submitted OPCR details
  * (the complete workbook, read in-app), per-objective remarks, and the
  * attached MOVs as a view-only record.
  *
- * The modal's write actions are the review-and-routing workflow: the
- * superadmin adds remarks and either marks the submission
+ * The SDS Viewer/Validator records validation remarks and forwards full
+ * workbooks to the first superadmin. The superadmin adds remarks and either marks the submission
  * compliant/approved — which auto-routes it onward to the workflow's
  * next superadmin (SY by config), no manual forwarding step — or returns
  * it to the staff member for revision. The staff member's original
@@ -86,9 +90,36 @@ class OpcrfReview extends Component
 
     public function mount(): void
     {
-        // Superadmin-only component: the table lists every staff member's
-        // submissions, so regular users must never mount it.
-        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+        abort_unless($this->canAccessQueue(), 404);
+    }
+
+    private function canAccessQueue(): bool
+    {
+        $user = Auth::user();
+
+        return $user instanceof User && (
+            $user->hasAdminAccess()
+            || $user->canReviewAllOpcrfSubmissions()
+        );
+    }
+
+    /**
+     * The SDS Viewer/Validator gets only full workbooks currently waiting
+     * in their validation queue. Superadmins keep their existing routed view.
+     */
+    private function queueQuery(): Builder
+    {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $this->canAccessQueue(), 404);
+
+        if ($user->canReviewAllOpcrfSubmissions()) {
+            return OpcrfSubmission::query()
+                ->where('opcrf_part', OpcrfSubmission::FULL_WORKBOOK)
+                ->where('assigned_to', $user->id)
+                ->whereIn('status', [OpcrfSubmission::STATUS_PENDING, OpcrfSubmission::STATUS_RESUBMITTED]);
+        }
+
+        return OpcrfSubmission::query()->visibleTo($user);
     }
 
     /**
@@ -97,12 +128,12 @@ class OpcrfReview extends Component
     #[Computed]
     public function reviewSubmission(): ?OpcrfSubmission
     {
-        if (! Auth::user()?->hasAdminAccess() || $this->reviewId === null) {
+        if (! $this->canAccessQueue() || $this->reviewId === null) {
             return null;
         }
 
-        return OpcrfSubmission::with(['approvedBy', 'reviewer', 'assignedTo'])
-            ->visibleTo(Auth::user())
+        return $this->queueQuery()
+            ->with(['approvedBy', 'reviewer', 'assignedTo'])
             ->find($this->reviewId);
     }
 
@@ -192,16 +223,12 @@ class OpcrfReview extends Component
     }
 
     /**
-     * Every submission routed to the signed-in superadmin (plus unassigned
-     * ones), newest first (fresh on each render, so new submissions appear
-     * without a reload). A submission sent to another superadmin is simply
-     * not in the query.
+     * The appropriate routed queue for the current reviewer, newest first.
      */
     #[Computed]
     public function submissions()
     {
-        return OpcrfSubmission::query()
-            ->visibleTo(Auth::user())
+        return $this->queueQuery()
             ->with(['user', 'movs', 'approvedBy', 'reviewer', 'assignedTo', 'latestReview.reviewer'])
             ->withCount('movs')
             ->orderByDesc('submitted_at')
@@ -226,19 +253,14 @@ class OpcrfReview extends Component
      */
     public function openReview(int $submissionId): void
     {
-        abort_if(! Auth::user()?->hasAdminAccess(), 404);
+        abort_unless($this->canAccessQueue(), 404);
 
-        // Routing is the authorization boundary: a submission sent to another
-        // superadmin must not open, not even by a crafted call.
-        abort_unless(
-            OpcrfSubmission::visibleTo(Auth::user())->whereKey($submissionId)->exists(),
-            404
-        );
+        abort_unless($this->queueQuery()->whereKey($submissionId)->exists(), 404);
 
         $this->reviewId = $submissionId;
         $this->reviewMovNumber = null;
         $this->reviewRemarks = '';
-        $submission = OpcrfSubmission::visibleTo(Auth::user())->findOrFail($submissionId);
+        $submission = $this->queueQuery()->findOrFail($submissionId);
         $this->objectiveRemarks = $submission->reviewer_remarks ?? [];
         $this->resetValidation();
         $this->showReview = true;
@@ -276,15 +298,25 @@ class OpcrfReview extends Component
      */
     public function openMovEvidence(int $submissionId, int $movNumber): void
     {
-        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+        $user = Auth::user();
+        abort_unless(
+            $user instanceof User
+                && ($user->hasAdminAccess() || $user->canReviewAllOpcrfSubmissions()),
+            404
+        );
         abort_unless($movNumber > 0, 404);
 
-        $submission = OpcrfSubmission::visibleTo(Auth::user())
+        $submission = $this->queueQuery()
             ->whereKey($submissionId)
             ->firstOrFail();
 
         abort_unless($this->showReview && $this->reviewId === $submission->id, 404);
-        abort_unless($submission->isAssignedTo(Auth::user()), 403);
+        abort_unless(
+            $submission->isAssignedTo($user)
+                || ($user->canReviewAllOpcrfSubmissions()
+                    && (int) $submission->assigned_to === (int) $user->id),
+            403
+        );
         abort_unless($submission->opcrf_part === OpcrfSubmission::FULL_WORKBOOK, 404);
 
         $this->reviewMovNumber = $movNumber;
@@ -545,6 +577,26 @@ class OpcrfReview extends Component
             ->first();
     }
 
+    private function resolveInitialReviewer(): ?User
+    {
+        $configured = trim((string) config('opcrf.review_route', ''));
+
+        $query = User::query()
+            ->where(function ($reviewer): void {
+                $reviewer->where('is_superadmin', true)
+                    ->orWhere('role', 'administrator');
+            });
+
+        if ($configured !== '') {
+            $reviewer = (clone $query)->where('username', $configured)->first();
+            if ($reviewer !== null) {
+                return $reviewer;
+            }
+        }
+
+        return $query->orderBy('username')->first();
+    }
+
     /**
      * Validate comments against the objective rows in the archived workbook.
      *
@@ -583,6 +635,61 @@ class OpcrfReview extends Component
     public function clearSuccess(): void
     {
         $this->successMessage = null;
+    }
+
+    /**
+     * The SDS Viewer/Validator checks a full workbook, records its remarks,
+     * and forwards it to the configured first superadmin (Eve).
+     */
+    public function validateAndForward(): void
+    {
+        $validator = Auth::user();
+        abort_unless($validator instanceof User && $validator->canReviewAllOpcrfSubmissions(), 404);
+
+        $submission = $this->reviewSubmission();
+        abort_unless(
+            $submission !== null
+                && $submission->opcrf_part === OpcrfSubmission::FULL_WORKBOOK
+                && (int) $submission->assigned_to === (int) $validator->id,
+            403
+        );
+        abort_unless($submission->hasFile() && $this->reviewWorkbook !== null, 422);
+
+        $this->validate([
+            'reviewRemarks' => ['nullable', 'string', 'max:2000'],
+        ]);
+        $objectiveRemarks = $this->validatedObjectiveRemarks();
+        $recipient = $this->resolveInitialReviewer();
+
+        if ($recipient === null) {
+            $this->addError('reviewRemarks', 'No Superadmin reviewer is available to receive this validated OPCRF.');
+
+            return;
+        }
+
+        DB::transaction(function () use ($submission, $validator, $recipient, $objectiveRemarks): void {
+            $submission->forceFill(['reviewer_remarks' => $objectiveRemarks])->save();
+            abort_unless(
+                $submission->validateAndForwardToSuperadmin(
+                    $validator,
+                    $recipient,
+                    trim($this->reviewRemarks) !== '' ? trim($this->reviewRemarks) : null,
+                    $objectiveRemarks,
+                ),
+                409
+            );
+        });
+
+        $recipient->notify(new OpcrfSubmitted($submission->fresh()));
+        $this->showReview = false;
+        $this->reviewId = null;
+        $this->reviewRemarks = '';
+        $this->objectiveRemarks = [];
+        $this->resetValidation();
+        unset($this->submissions, $this->reviewSubmission, $this->reviewSheet, $this->reviewWorkbook, $this->reviewHistory);
+
+        $this->successMessage = 'Full OPCRF validated and forwarded to Superadmin '.$recipient->username.'.';
+        $this->dispatch('opcrf-submission-forwarded');
     }
 
     /**

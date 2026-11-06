@@ -77,7 +77,7 @@ class AipEditor extends Component
 
     public function mount(?AipPlan $plan = null): void
     {
-        abort_unless($plan !== null && $plan->managedBy(Auth::user()), 404);
+        abort_unless($plan !== null && $plan->canEditContentsBy(Auth::user()), 404);
 
         $this->planId = $plan->id;
         $this->loadedVersion = (int) $plan->version;
@@ -92,7 +92,7 @@ class AipEditor extends Component
     private function guard(): AipPlan
     {
         $plan = AipPlan::findOrFail($this->planId);
-        abort_unless($plan->managedBy(Auth::user()), 404);
+        abort_unless($plan->canEditContentsBy(Auth::user()), 404);
 
         return $plan;
     }
@@ -963,7 +963,7 @@ class AipEditor extends Component
 
     private function assertEditable(AipPlan $plan): void
     {
-        if (! $plan->isEditable()) {
+        if (! $plan->canEditContentsBy(Auth::user())) {
             abort(403, 'This plan can no longer be edited.');
         }
     }
@@ -989,7 +989,7 @@ class AipEditor extends Component
     #[Computed]
     public function canEdit(): bool
     {
-        return $this->plan->isEditable();
+        return $this->plan->canEditContentsBy(Auth::user());
     }
 
     /** @return array<int, string> */
