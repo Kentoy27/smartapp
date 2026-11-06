@@ -108,8 +108,8 @@
 
         <p class="allotment-summary__note">
             Certification states that the amount is available for the school.
-            Changing an amount clears its certification; the Budget office
-            certifies the new figure on its own.
+            A certified allotment is locked: it becomes read-only, its Save and
+            Certify actions are removed, and bulk changes to it are refused.
         </p>
     </section>
 
@@ -247,26 +247,38 @@
                             {{-- An amount typed but not yet saved marks itself
                                  (.is-dirty), so a sweep of the page shows
                                  exactly which rows Save all changes would
-                                 write. --}}
+                                 write. A certified amount has no input at all
+                                 — the certificate covers the figure, so the
+                                 row is read-only. --}}
                             <td>
-                                <input
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    inputmode="decimal"
-                                    class="allotment-input"
-                                    placeholder="Not set"
-                                    wire:model="amounts.{{ $school->id }}"
-                                    wire:key="allotment-amount-{{ $school->id }}"
-                                    data-saved="{{ $this->amounts[$school->id] ?? '' }}"
-                                    x-data
-                                    x-init="$el.classList.toggle('is-dirty', $el.value.trim() !== ($el.dataset.saved ?? ''))"
-                                    @input="$el.classList.toggle('is-dirty', $el.value.trim() !== ($el.dataset.saved ?? ''))"
-                                    aria-label="Allotment for {{ $school->name }} in {{ $this->year }}"
-                                >
-                                @error('amounts.'.$school->id)
-                                    <span class="error-text">{{ $message }}</span>
-                                @enderror
+                                @if ($isCertified)
+                                    <span
+                                        class="allotment-readonly"
+                                        title="Certified by the Budget Office. This allotment is read-only."
+                                    >
+                                        <x-icon name="lock" :size="13" />
+                                        <span class="allotment-readonly__value">{{ number_format($allotted, 2) }}</span>
+                                    </span>
+                                @else
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        inputmode="decimal"
+                                        class="allotment-input"
+                                        placeholder="Not set"
+                                        wire:model="amounts.{{ $school->id }}"
+                                        wire:key="allotment-amount-{{ $school->id }}"
+                                        data-saved="{{ $this->amounts[$school->id] ?? '' }}"
+                                        x-data
+                                        x-init="$el.classList.toggle('is-dirty', $el.value.trim() !== ($el.dataset.saved ?? ''))"
+                                        @input="$el.classList.toggle('is-dirty', $el.value.trim() !== ($el.dataset.saved ?? ''))"
+                                        aria-label="Allotment for {{ $school->name }} in {{ $this->year }}"
+                                    >
+                                    @error('amounts.'.$school->id)
+                                        <span class="error-text">{{ $message }}</span>
+                                    @enderror
+                                @endif
 
                                 @if ($record !== null)
                                     <span class="cell-sub">
@@ -298,20 +310,18 @@
                                     <span class="allotment-muted">—</span>
                                     <span class="cell-sub">Set an amount first</span>
                                 @elseif ($isCertified)
-                                    <span class="badge allotment-badge--certified">Certified</span>
+                                    <span
+                                        class="badge allotment-badge--certified"
+                                        title="Certified by the Budget Office. This allotment is read-only."
+                                    >Certified</span>
                                     <span class="cell-sub">
                                         {{ $record->certifier?->name ?: $record->certifier?->username }}
                                         · {{ $record->certified_at->format('M j, Y') }}
                                     </span>
-
-                                    @if ($canCertify)
-                                        <button
-                                            type="button"
-                                            class="allotment-certify"
-                                            wire:click="openCertifyModal({{ $school->id }})"
-                                            title="Certify the {{ $this->year }} allotment for {{ $school->name }} again"
-                                        >Re-certify</button>
-                                    @endif
+                                    <span class="cell-sub allotment-readonly-note">
+                                        <x-icon name="lock" :size="12" />
+                                        Certified by the Budget Office — read-only
+                                    </span>
                                 @else
                                     <span class="badge badge-muted">Not certified</span>
 
@@ -329,19 +339,32 @@
                             </td>
 
                             <td class="users-actions-col">
-                                <button
-                                    type="button"
-                                    class="users-action"
-                                    wire:click="save({{ $school->id }})"
-                                    wire:loading.attr="disabled"
-                                    wire:target="save"
-                                    title="Save the {{ $this->year }} allotment for {{ $school->name }}"
-                                >
-                                    <span class="users-action-inner">
-                                        <x-icon name="check" :size="14" />
-                                        <span>Save</span>
+                                @if ($isCertified)
+                                    {{-- No Save button once certified: the row
+                                         is read-only, and the lock icon says
+                                         so without pretending to be a control. --}}
+                                    <span
+                                        class="allotment-locked"
+                                        title="Certified by the Budget Office. This allotment is read-only."
+                                        aria-label="Read-only — certified by the Budget Office"
+                                    >
+                                        <x-icon name="lock" :size="15" />
                                     </span>
-                                </button>
+                                @else
+                                    <button
+                                        type="button"
+                                        class="users-action"
+                                        wire:click="save({{ $school->id }})"
+                                        wire:loading.attr="disabled"
+                                        wire:target="save"
+                                        title="Save the {{ $this->year }} allotment for {{ $school->name }}"
+                                    >
+                                        <span class="users-action-inner">
+                                            <x-icon name="check" :size="14" />
+                                            <span>Save</span>
+                                        </span>
+                                    </button>
+                                @endif
                             </td>
                         </tr>
                     @empty
@@ -385,6 +408,9 @@
             the certifying officer on the School Head’s Per Line Item
             Expenditure report. Amounts typed but not yet saved are highlighted —
             “Save all changes” writes them in one sweep, or Save writes one row.
+            A certified allotment is read-only: its actions are removed here,
+            and a bulk row that would change or clear it is refused and
+            reported instead.
         </p>
     </div>
 
@@ -432,9 +458,6 @@
                         @endif
                         @if ($bulkResult['unchanged'] > 0)
                             <span class="ac-import-pill">{{ $bulkResult['unchanged'] }} unchanged</span>
-                        @endif
-                        @if ($bulkResult['cleared_certification'] > 0)
-                            <span class="ac-import-pill ac-import-pill--warn">{{ $bulkResult['cleared_certification'] }} certification(s) cleared</span>
                         @endif
                         @if (count($bulkResult['errors']) > 0)
                             <span class="ac-import-pill ac-import-pill--bad">{{ count($bulkResult['errors']) }} not applied</span>
@@ -500,10 +523,10 @@
                         allotments of
                         <strong>{{ number_format($bulkApplyCount) }}</strong> school(s)
                         in CY {{ $this->year }}.
-                        @if ($bulkApplyClearCertificationCount > 0)
-                            <strong>{{ number_format($bulkApplyClearCertificationCount) }}</strong>
-                            of them will lose the current certification and must
-                            be re-certified.
+                        @if ($bulkApplyLockedCount > 0)
+                            <strong>{{ number_format($bulkApplyLockedCount) }}</strong>
+                            certified row(s) will be skipped — read-only, so the
+                            certificate stands.
                         @endif
                         Continue?
                     </p>
@@ -511,7 +534,7 @@
                     <p class="allotment-footnote">
                         The whole apply is one transaction — if anything fails,
                         nothing is written. Rows that are unchanged, unchecked,
-                        superseded or invalid are left untouched.
+                        superseded, certified or invalid are left untouched.
                     </p>
 
                     <div class="modal-actions">
@@ -628,8 +651,8 @@
                     @if ($bulkRows !== [])
                         <div class="ac-import-summary">
                             <span class="ac-import-pill ac-import-pill--ok">{{ $bulkReadyCount }} ready</span>
-                            @if ($bulkClearCertificationCount > 0)
-                                <span class="ac-import-pill ac-import-pill--warn">{{ $bulkClearCertificationCount }} will lose certification</span>
+                            @if ($bulkLockedCount > 0)
+                                <span class="ac-import-pill ac-import-pill--warn">{{ $bulkLockedCount }} certified — read-only, will be skipped</span>
                             @endif
                             @if ($bulkInvalidCount > 0)
                                 <span class="ac-import-pill ac-import-pill--bad">{{ $bulkInvalidCount }} with errors</span>
@@ -656,7 +679,7 @@
                                     @foreach ($bulkRows as $row)
                                         <tr
                                             wire:key="allotment-bulk-row-{{ $row['line'] }}"
-                                            @class(['ac-import-row--bad' => ! $row['valid'] && ! $row['superseded']])
+                                            @class(['ac-import-row--bad' => ! $row['valid'] && ! $row['superseded'] && ! $row['locked']])
                                         >
                                             <td>
                                                 <input
@@ -692,20 +715,17 @@
                                                     <span class="badge badge-muted">
                                                         Superseded by row {{ $row['superseded_line'] }}
                                                     </span>
+                                                @elseif ($row['locked'])
+                                                    <span class="badge allotment-badge--certified">Certified — read-only</span>
+                                                    <span class="cell-sub">Skipped — the Budget Office’s certificate covers this amount</span>
                                                 @elseif (! $row['valid'])
                                                     <span class="badge badge-muted">{{ implode(' ', $row['errors']) }}</span>
                                                 @elseif ($row['action'] === 'create')
                                                     <span class="badge">New allotment</span>
                                                 @elseif ($row['action'] === 'update')
                                                     <span class="badge">Will update</span>
-                                                    @if ($row['clears_certification'])
-                                                        <span class="cell-sub">Clears its certification</span>
-                                                    @endif
                                                 @elseif ($row['action'] === 'clear')
                                                     <span class="badge">Will clear</span>
-                                                    @if ($row['clears_certification'])
-                                                        <span class="cell-sub">Clears its certification</span>
-                                                    @endif
                                                 @else
                                                     <span class="badge badge-muted">No change</span>
                                                 @endif

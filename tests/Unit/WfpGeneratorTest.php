@@ -234,7 +234,7 @@ class WfpGeneratorTest extends TestCase
         $this->assertSame($matrix->id, $plan->fresh()->staleSources()[0]['matrix']->id);
     }
 
-    public function test_export_rows_group_by_key_for_an_annual_template(): void
+    public function test_export_rows_group_by_key_for_both_template_shapes(): void
     {
         $this->school();
         $january = $this->matrix(month: 1);
@@ -255,12 +255,14 @@ class WfpGeneratorTest extends TestCase
         $this->assertEquals(1500.0, (float) $rows[1]['financial_target']);
         $this->assertEquals(15.0, (float) $rows[1]['physical_target']);
 
-        // Month-shaped keeps one row per line, each with its month — plus the
-        // shared account-title section row ahead of them.
+        // Month-shaped also keeps one row per group — plus the shared
+        // account-title section row ahead of it — and carries each month's
+        // target so the recurring activity reads as a single line.
         $monthlyRows = WfpGenerator::buildExportRows($plan, monthly: true);
-        $this->assertCount(3, $monthlyRows);
+        $this->assertCount(2, $monthlyRows);
         $this->assertSame(true, $monthlyRows[0]['__account_title__'] ?? false);
-        $this->assertSame(1, $monthlyRows[1]['month']);
-        $this->assertSame(2, $monthlyRows[2]['month']);
+        $this->assertArrayNotHasKey('month', $monthlyRows[1]);
+        $this->assertSame([1 => 10.0, 2 => 5.0], $monthlyRows[1]['physical_targets_by_month']);
+        $this->assertSame([1 => 1000.0, 2 => 500.0], $monthlyRows[1]['financial_targets_by_month']);
     }
 }

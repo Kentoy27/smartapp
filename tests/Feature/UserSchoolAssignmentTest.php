@@ -51,6 +51,7 @@ class UserSchoolAssignmentTest extends TestCase
             ->set('school_division', (string) $district->id)
             ->assertSee('ABC Elementary School', false)
             ->set('school_id_choice', (string) $school->id)
+            ->set('division_access', ['ELEMENTARY'])
             // The School ID fills itself from the school record.
             ->assertSet('selectedSchoolId', '123456')
             ->set('name', 'Test Person')
@@ -214,6 +215,7 @@ class UserSchoolAssignmentTest extends TestCase
         $component
             ->set('school_division', (string) $district->id)
             ->set('school_id_choice', (string) $school->id)
+            ->set('division_access', ['ELEMENTARY'])
             ->assertSet('username', '123456')
             ->set('name', 'Test Person')
             ->set('email', 'head@example.com')
@@ -243,6 +245,7 @@ class UserSchoolAssignmentTest extends TestCase
         $component
             ->set('school_division', (string) $district->id)
             ->set('school_id_choice', (string) $school->id)
+            ->set('division_access', ['ELEMENTARY'])
             ->set('name', 'Test Person')
             ->set('username', 'head_two')
             ->set('email', 'head2@example.com')

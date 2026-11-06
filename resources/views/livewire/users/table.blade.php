@@ -441,64 +441,57 @@
                         >
                     </div>
 
-                    {{-- FINANCIAL CLASSIFICATION: Elementary keeps the single
-                         division; a High School names its sublevel (the
-                         account's default division) and may be granted access
-                         to both high-school divisions. Plain Elementary
-                         accounts see none of these fields. --}}
-                    <div class="field">
-                        <label for="formSchoolLevel">School Level</label>
-                        <select
-                            id="formSchoolLevel"
-                            wire:model.live="school_level"
-                            @class(['error' => $errors->has('school_level')])
-                        >
-                            @foreach ($this->schoolLevelOptions() as $option)
-                                <option value="{{ $option['value'] }}">{{ $option['label'] }}</option>
-                            @endforeach
-                        </select>
-                        @error('school_level') <div class="error-text">{{ $message }}</div> @enderror
-                    </div>
-
-                    @if ($this->isHighSchool())
-                        <div class="field">
-                            <label for="formSchoolSublevel">School Sublevel</label>
-                            <select
-                                id="formSchoolSublevel"
-                                wire:model.live="school_sublevel"
-                                @class(['error' => $errors->has('school_sublevel')])
-                            >
-                                @foreach ($this->schoolSublevelOptions() as $option)
-                                    <option value="{{ $option['value'] }}">{{ $option['label'] }}</option>
-                                @endforeach
-                            </select>
-                            @error('school_sublevel') <div class="error-text">{{ $message }}</div> @enderror
-                        </div>
-
-                        <fieldset class="field">
-                            <legend>Division Access</legend>
-                            <div class="field-hint">
-                                The divisions this account may work in. The School Sublevel is always one of them;
-                                check both for an account that manages both Junior and Senior High.
-                            </div>
-                            <div class="role-options">
-                                @foreach ($this->divisionAccessOptions() as $option)
-                                    <label class="role-option">
-                                        <input
-                                            type="checkbox"
-                                            value="{{ $option['value'] }}"
-                                            wire:model.live="division_access"
-                                        >
-                                        <span class="role-option-body">
-                                            <strong>{{ $option['label'] }}</strong>
-                                        </span>
-                                    </label>
-                                @endforeach
-                            </div>
-                            @error('division_access') <div class="error-text">{{ $message }}</div> @enderror
-                            @error('division_access.*') <div class="error-text">{{ $message }}</div> @enderror
-                        </fieldset>
+                    {{-- ASSIGNED SCHOOLS: a Bookkeeper's readable roster —
+                         the schools whose checking pages the account may
+                         open. The base school above is added to it as soon
+                         as it is picked; the administrator can take it off
+                         like any other school, and a list left empty for a
+                         new account falls back to the base school. --}}
+                    @if ($this->role === 'bookkeeper')
+                        @include('livewire.partials.assigned-schools-field', [
+                            'label' => 'Assigned Schools',
+                            'hint' => 'The schools whose WFP and expenditure records this Bookkeeper checks. The base school above joins the list when picked; remove a school to revoke access to its records.',
+                            'inputId' => 'userAssignedSchools',
+                        ])
                     @endif
+
+                    {{-- DIVISION ACCESS: the divisions the selected school
+                         operates. An integrated school lists all three; a
+                         single-division school lists one. The account may
+                         work in any checked combination. --}}
+                    <fieldset class="field">
+                        <legend>Division Access</legend>
+                        @if ($this->selectedSchool)
+                            @if ($this->divisionAccessOptions() === [])
+                                <div class="field-hint">
+                                    This school has no divisions configured. Set them in Manage Districts &amp; Schools first.
+                                </div>
+                            @else
+                                <div class="field-hint">
+                                    The divisions this account may work in. Only the divisions the selected school operates are listed;
+                                    check every one the account needs.
+                                </div>
+                                <div class="role-options">
+                                    @foreach ($this->divisionAccessOptions() as $option)
+                                        <label class="role-option">
+                                            <input
+                                                type="checkbox"
+                                                value="{{ $option['value'] }}"
+                                                wire:model.live="division_access"
+                                            >
+                                            <span class="role-option-body">
+                                                <strong>{{ $option['label'] }}</strong>
+                                            </span>
+                                        </label>
+                                    @endforeach
+                                </div>
+                            @endif
+                        @else
+                            <div class="field-hint">Select a school to see the divisions it operates.</div>
+                        @endif
+                        @error('division_access') <div class="error-text">{{ $message }}</div> @enderror
+                        @error('division_access.*') <div class="error-text">{{ $message }}</div> @enderror
+                    </fieldset>
                 @endif
 
                 <div class="field">

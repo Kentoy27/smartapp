@@ -335,6 +335,115 @@ class BudgetLineItemAllotmentTest extends TestCase
         $this->assertSame(900.0, $component->instance()->grandTotal);
     }
 
+    // ---------------------------------------------------------------- picker
+
+    public function test_the_picker_box_reads_as_the_school_on_screen(): void
+    {
+        // Created Beta first so "first by name" is the decisive rule.
+        $beta = $this->schoolHead('Beta Elementary School');
+        $alpha = $this->schoolHead('Alpha Elementary School');
+
+        $component = Livewire::actingAs($this->budgetOfficer())
+            ->test(BudgetLineItemAllotment::class);
+
+        // The first school opens, the picker renders as a combobox, and the
+        // box reads as the school on screen.
+        $this->assertSame((string) $alpha->school_id, $component->instance()->schoolId);
+        $component
+            ->assertSet('schoolSearch', 'Alpha Elementary School')
+            ->assertSee('role="combobox"', false)
+            ->assertSee('Search school…');
+
+        // Picking from the menu moves the report and the box together.
+        $component
+            ->call('chooseSchool', $beta->school_id)
+            ->assertSet('schoolId', (string) $beta->school_id)
+            ->assertSet('schoolSearch', 'Beta Elementary School');
+    }
+
+    public function test_the_picker_menu_filters_by_name_school_id_and_district(): void
+    {
+        $this->schoolHead('Alpha Elementary School');
+        $this->schoolHead('Beta Elementary School');
+
+        $district = District::create(['name' => 'Sunrise District']);
+        School::create([
+            'district_id' => $district->id,
+            'name' => 'Mabini ES',
+            'school_id' => '123456',
+        ]);
+
+        $component = Livewire::actingAs($this->budgetOfficer())
+            ->test(BudgetLineItemAllotment::class);
+
+        $names = fn (): array => $component->instance()->schoolOptions->pluck('name')->all();
+
+        // The box reading as the school on screen is a display, not a
+        // search: the whole roster is offered.
+        $this->assertSame(
+            ['Alpha Elementary School', 'Beta Elementary School', 'Mabini ES'],
+            $names(),
+        );
+
+        // By a name fragment.
+        $component->set('schoolSearch', 'beta');
+        $this->assertSame(['Beta Elementary School'], $names());
+
+        // By the DepEd school ID.
+        $component->set('schoolSearch', '123456');
+        $this->assertSame(['Mabini ES'], $names());
+
+        // By district — Mabini ES's own name does not contain the term.
+        $component->set('schoolSearch', 'sunrise');
+        $this->assertSame(['Mabini ES'], $names());
+
+        // A term that matches nothing leaves an empty menu with a message,
+        // not a broken picker.
+        $component->set('schoolSearch', 'zzz');
+        $this->assertSame([], $names());
+        $component->assertSee('No schools match');
+    }
+
+    public function test_a_typed_search_never_moves_the_report(): void
+    {
+        $alpha = $this->schoolHead('Alpha Elementary School');
+        $beta = $this->schoolHead('Beta Elementary School');
+
+        $this->line($alpha, 1, [
+            'quantity' => 1,
+            'unit_cost' => 100,
+            'account_title' => 'Alpha Supplies',
+            'account_code' => '5020301000',
+        ]);
+        $this->line($beta, 1, [
+            'quantity' => 1,
+            'unit_cost' => 900,
+            'account_title' => 'Beta Supplies',
+            'account_code' => '5029999999',
+        ]);
+
+        $component = Livewire::actingAs($this->budgetOfficer())
+            ->test(BudgetLineItemAllotment::class);
+
+        // Typing narrows the menu; the report stays on its school.
+        $component
+            ->set('schoolSearch', 'beta')
+            ->assertSet('schoolId', (string) $alpha->school_id)
+            ->assertSee('Alpha Supplies')
+            ->assertDontSee('Beta Supplies');
+
+        // A school that does not exist is refused outright.
+        $component
+            ->call('chooseSchool', 999999)
+            ->assertSet('schoolId', (string) $alpha->school_id);
+
+        // Closing the menu without a pick puts the box back to reading as
+        // the school on screen.
+        $component
+            ->call('resetSchoolSearch')
+            ->assertSet('schoolSearch', 'Alpha Elementary School');
+    }
+
     // ---------------------------------------------------------------- export
 
     public function test_the_report_exports_as_the_printed_form_for_the_asked_school(): void

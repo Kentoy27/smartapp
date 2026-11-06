@@ -44,10 +44,24 @@ final class WfpPlanExporter
 
         // The form identifies itself: the plan's school and planning year go
         // into the template's own title block.
-        return WfpTemplateFiller::writeCells(
+        $bytes = WfpTemplateFiller::writeCells(
             $bytes,
             WfpTemplateFiller::titleCells((string) ($plan->school?->name ?? ''), (int) $plan->year),
         );
+
+        // The printed sign-off comes from the recorded final approval only.
+        // A pending, returned or legacy-finalized plan has no approval row,
+        // so `finalApproverName()` is null and the signature stays blank.
+        $approver = $plan->isApproved() ? $plan->finalApproverName() : null;
+
+        if ($approver !== null) {
+            $bytes = WfpTemplateFiller::writeCells(
+                $bytes,
+                WfpTemplateFiller::approvalCells($bytes, $approver),
+            );
+        }
+
+        return $bytes;
     }
 
     /**
@@ -59,9 +73,10 @@ final class WfpPlanExporter
      * Generation happens HERE rather than leaving a stale workbook to be
      * downloaded: the button says "Generate and Download", and a plan whose
      * matrices have moved on since it was generated would hand the SH numbers
-     * the MEM no longer has. A FINALIZED plan is never regenerated behind the
-     * approver's back — regeneration voids an approval (see WfpGenerator) — so
-     * it is exported exactly as it was approved.
+     * the MEM no longer has. A plan that is pending final approval or already
+     * approved is never regenerated behind the approver's back — regeneration
+     * would change the content being reviewed — so it is exported exactly as
+     * it stands.
      *
      * The year is a PREFERENCE, not an instruction: a year the school has no
      * plan or matrix lines for resolves to one it does have (see dataYearFor),
@@ -89,7 +104,7 @@ final class WfpPlanExporter
             ['status' => WfpPlan::STATUS_DRAFT],
         );
 
-        if (! $plan->isFinalized() && (! $plan->items()->exists() || $plan->isOutOfDate())) {
+        if ($plan->isEditable() && (! $plan->items()->exists() || $plan->isOutOfDate())) {
             $plan->generated_by = $user->id;
             WfpGenerator::generate($plan); // reconciles in place, and saves the plan
         }

@@ -27,7 +27,7 @@ class AipPageTest extends TestCase
 
     private function addSignatureTo(User $user): void
     {
-        $path = 'signatures/'.$user->id.'/aip.png';
+        $path = 'signatures/' . $user->id . '/aip.png';
         Storage::disk('local')->put($path, (string) base64_decode(self::PNG, true));
         $user->forceFill([
             'signature_path' => $path,
@@ -72,7 +72,7 @@ class AipPageTest extends TestCase
             ->assertSee('Upload AIP');
 
         $this->assertMatchesRegularExpression(
-            '/href="'.preg_quote(route('aip.index'), '/').'"\s+class="nav-item active"/',
+            '/href="' . preg_quote(route('aip.index'), '/') . '"\s+class="nav-item active"/',
             $response->getContent()
         );
     }
@@ -202,9 +202,16 @@ class AipPageTest extends TestCase
             array_values(array_intersect($viewerLabels, ['AIP Review', 'OPCRF', 'WFP Review', 'SIP']))
         );
 
+        // The Budget office reviews AIPs too, but the queue is not one of its
+        // sidebar destinations — its dashboard card is the way in.
         $budget = User::factory()->create(['role' => 'budget', 'is_superadmin' => false]);
         $budgetItems = collect(Livewire::actingAs($budget)->test(Sidebar::class)->instance()->items());
         $this->assertNull($budgetItems->firstWhere('label', 'AIP Review'));
+        $budgetSidebar = Livewire::actingAs($budget)->test(Sidebar::class);
+        $budgetItems = collect($budgetSidebar->instance()->items());
+        $this->assertNull($budgetItems->firstWhere('label', 'Review AIP'));
+        // Nor does the rendered navigation carry a link to the queue.
+        $budgetSidebar->assertDontSee(route('aip.review'), false);
 
         // The Budget office's WFP pages are one group, opened by default.
         $wfp = $budgetItems->firstWhere('label', 'WFP');
@@ -282,7 +289,7 @@ class AipPageTest extends TestCase
         $download = $this->get(route('aip.plans.export', ['plan' => $plan->id]))
             ->assertOk()
             ->assertDownload('AIP 2027 - Alpha Elementary School.xlsx');
-        $xlsxPath = tempnam(sys_get_temp_dir(), 'aip-download-').'.xlsx';
+        $xlsxPath = tempnam(sys_get_temp_dir(), 'aip-download-') . '.xlsx';
         file_put_contents($xlsxPath, $download->getContent());
         $parts = (new \App\Support\PurePhpZipReader($xlsxPath))->readAll();
         $this->assertArrayHasKey('xl/media/image1.png', $parts);
@@ -481,16 +488,18 @@ class AipPageTest extends TestCase
             'created_by' => $user->id,
             'original_file_name' => 'school-aip.docx',
             'form_data' => [
-                'rows' => [[
-                    'pillar' => 'Pillar 1: ACCESS',
-                    'strategic_objective' => 'SO 1.1',
-                    'strategy' => 'Improve early literacy',
-                    'ppa' => 'Reading intervention',
-                    'resources' => 'Learning materials',
-                    'budget' => 'c/o approved WFP',
-                    'persons_responsible' => 'School Head',
-                    'timeline' => 'June to March',
-                ]],
+                'rows' => [
+                    [
+                        'pillar' => 'Pillar 1: ACCESS',
+                        'strategic_objective' => 'SO 1.1',
+                        'strategy' => 'Improve early literacy',
+                        'ppa' => 'Reading intervention',
+                        'resources' => 'Learning materials',
+                        'budget' => 'c/o approved WFP',
+                        'persons_responsible' => 'School Head',
+                        'timeline' => 'June to March',
+                    ]
+                ],
             ],
         ]);
 
@@ -498,13 +507,13 @@ class AipPageTest extends TestCase
             ->get(route('aip.index'))
             ->assertOk()
             ->assertSee('aria-haspopup="dialog"', false)
-            ->assertSee('aip-record-preview-title-'.$plan->id, false)
+            ->assertSee('aip-record-preview-title-' . $plan->id, false)
             ->assertSee('Reading intervention')
             ->assertSee('Improve early literacy')
             ->assertSee('school-aip.docx')
             ->assertDontSee('aip-record-preview-dialog__actions', false)
             ->assertDontSee('Download original DOCX')
-            ->assertDontSee('href="'.route('aip.plans.preview', ['plan' => $plan->id]).'"', false);
+            ->assertDontSee('href="' . route('aip.plans.preview', ['plan' => $plan->id]) . '"', false);
     }
 
     public function test_submitted_aip_previews_show_the_submitter_and_approved_reviewer_signatures(): void
@@ -895,16 +904,18 @@ class AipPageTest extends TestCase
             'year' => 2027,
             'created_by' => $owner->id,
             'form_data' => [
-                'rows' => [[
-                    'pillar' => 'Pillar 1: ACCESS',
-                    'strategic_objective' => 'Partial objective',
-                    'strategy' => '',
-                    'ppa' => 'Partial activity',
-                    'resources' => '',
-                    'budget' => '',
-                    'persons_responsible' => '',
-                    'timeline' => '',
-                ]],
+                'rows' => [
+                    [
+                        'pillar' => 'Pillar 1: ACCESS',
+                        'strategic_objective' => 'Partial objective',
+                        'strategy' => '',
+                        'ppa' => 'Partial activity',
+                        'resources' => '',
+                        'budget' => '',
+                        'persons_responsible' => '',
+                        'timeline' => '',
+                    ]
+                ],
             ],
         ]);
         $plan->submit($owner);
@@ -943,16 +954,18 @@ class AipPageTest extends TestCase
             'year' => 2027,
             'created_by' => $owner->id,
             'form_data' => [
-                'rows' => [[
-                    'pillar' => 'Pillar 1: ACCESS',
-                    'strategic_objective' => 'Not finished objective',
-                    'strategy' => '',
-                    'ppa' => '',
-                    'resources' => '',
-                    'budget' => '',
-                    'persons_responsible' => '',
-                    'timeline' => '',
-                ]],
+                'rows' => [
+                    [
+                        'pillar' => 'Pillar 1: ACCESS',
+                        'strategic_objective' => 'Not finished objective',
+                        'strategy' => '',
+                        'ppa' => '',
+                        'resources' => '',
+                        'budget' => '',
+                        'persons_responsible' => '',
+                        'timeline' => '',
+                    ]
+                ],
             ],
         ]);
 
@@ -996,6 +1009,9 @@ class AipPageTest extends TestCase
             ->assertSee('BUDGET REVIEW WORKSPACE')
             ->assertDontSee('Review AIP')
             ->assertDontSee('Review submitted AIP plans')
+            // The AIP queue has no sidebar entry for this role: this card is
+            // the Budget office's way into it.
+            ->assertSee('Review submitted AIP plans')
             ->assertSee('WFP Uploads')
             ->assertDontSee('Upload AIP')
             ->assertDontSee('Performance plan')

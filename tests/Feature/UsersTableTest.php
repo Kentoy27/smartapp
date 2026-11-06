@@ -271,6 +271,7 @@ class UsersTableTest extends TestCase
             ->call('openCreateModal')
             ->set('school_division', (string) $division->id)
             ->set('school_id_choice', (string) $school->id)
+            ->set('division_access', ['ELEMENTARY'])
             ->set('name', 'Jane Doe')
             ->set('username', 'jane')
             ->set('email', 'jane@example.com')
@@ -326,6 +327,7 @@ class UsersTableTest extends TestCase
             ->call('openCreateModal')
             ->set('school_division', (string) $division->id)
             ->set('school_id_choice', (string) $school->id)
+            ->set('division_access', ['ELEMENTARY'])
             ->set('name', 'Successive User')
             ->set('username', 'successive')
             ->set('email', 'successive@example.com')
@@ -365,6 +367,7 @@ class UsersTableTest extends TestCase
             ->assertSet('password', '') // blank = keep current
             ->set('school_division', (string) $division->id)
             ->set('school_id_choice', (string) $school->id)
+            ->set('division_access', ['ELEMENTARY'])
             ->set('email', 'new@example.com')
             ->call('saveUser')
             ->assertSet('showCreateModal', false)
@@ -395,6 +398,7 @@ class UsersTableTest extends TestCase
             ->set('email', 'selfedit@example.com')
             ->set('school_division', (string) $division->id)
             ->set('school_id_choice', (string) $school->id)
+            ->set('division_access', ['ELEMENTARY'])
             // ...and a blank password keeps the old one.
             ->call('saveUser')
             ->assertHasNoErrors();
@@ -467,6 +471,7 @@ class UsersTableTest extends TestCase
             ->call('openCreateModal')
             ->set('school_division', (string) $division->id)
             ->set('school_id_choice', (string) $school->id)
+            ->set('division_access', ['ELEMENTARY'])
             ->set('name', 'Fresh Admin')
             ->set('username', 'freshadmin')
             ->set('email', 'freshadmin@example.com')

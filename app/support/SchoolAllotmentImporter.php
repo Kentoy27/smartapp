@@ -32,13 +32,18 @@ use RuntimeException;
  * appear once per division (two rows are duplicates only when both the school
  * and the division repeat).
  *
- * Changing an amount always clears the row's certification — the same rule
- * the single-row Save follows — and re-stating the same figure keeps it.
+ * A CERTIFIED allotment is locked: a bulk row that would change or clear it
+ * is refused, with its reason, exactly as the single-row Save refuses it.
+ * Re-stating the same figure changes nothing and is still accepted, so an
+ * export re-uploaded unchanged never trips the lock.
  */
 final class SchoolAllotmentImporter
 {
     /** Upload size ceiling (KB) for a bulk file. */
     public const MAX_SIZE_KB = 2048;
+
+    /** Why a bulk row targeting a certified allotment is refused. */
+    public const LOCKED_MESSAGE = 'Certified by the Budget Office — this allotment is read-only and cannot be changed.';
 
     /** The most rows one bulk input may carry. */
     public const MAX_ROWS = 5000;
@@ -69,7 +74,7 @@ final class SchoolAllotmentImporter
      * restriction, which only a caller with no user to check against passes.
      *
      * @param  array<int, string>|null  $allowedDivisions
-     * @return array{rows: array<int, array<string, mixed>>, readyCount: int, invalidCount: int, supersededCount: int, clearsCertificationCount: int}
+     * @return array{rows: array<int, array<string, mixed>>, readyCount: int, invalidCount: int, supersededCount: int, lockedCount: int}
      */
     public static function analyzeText(
         string $text,
@@ -95,7 +100,7 @@ final class SchoolAllotmentImporter
      * Read and validate a CSV file. Nothing is written here.
      *
      * @param  array<int, string>|null  $allowedDivisions
-     * @return array{rows: array<int, array<string, mixed>>, readyCount: int, invalidCount: int, supersededCount: int, clearsCertificationCount: int}
+     * @return array{rows: array<int, array<string, mixed>>, readyCount: int, invalidCount: int, supersededCount: int, lockedCount: int}
      */
     public static function analyzeCsv(
         string $path,
@@ -143,7 +148,7 @@ final class SchoolAllotmentImporter
      *
      * @param  array<int, array{line: int, school_id: string, amount: string, division?: ?string}>  $rows
      * @param  array<int, string>|null  $allowedDivisions
-     * @return array{rows: array<int, array<string, mixed>>, readyCount: int, invalidCount: int, supersededCount: int, clearsCertificationCount: int}
+     * @return array{rows: array<int, array<string, mixed>>, readyCount: int, invalidCount: int, supersededCount: int, lockedCount: int}
      */
     public static function analyzeRows(
         array $rows,
@@ -254,10 +259,16 @@ final class SchoolAllotmentImporter
                 $action = null;
             }
 
-            // Certification follows the amount: a clear always ends it, and a
-            // changed figure makes the old certificate untrue. The same figure
-            // re-stated keeps it, exactly as the single-row Save does.
-            $clearsCertification = $certified && ($clears || ($action === 'update'));
+            // A certified allotment is locked: the Budget office's certificate
+            // covers the amount on the row, so a bulk row may neither change
+            // nor clear it. Re-stating the same figure changes nothing and is
+            // still accepted, so a re-uploaded export never trips the lock.
+            $locked = $certified && in_array($action, ['update', 'clear'], true);
+
+            if ($locked) {
+                $errors[] = self::LOCKED_MESSAGE;
+                $action = null;
+            }
 
             $analyzed[] = [
                 'line' => (int) $row['line'],
@@ -270,8 +281,8 @@ final class SchoolAllotmentImporter
                 'amount_raw' => $amountRaw,
                 'previous_amount' => $previousAmount,
                 'certified' => $certified,
+                'locked' => $locked,
                 'action' => $action,
-                'clears_certification' => $clearsCertification,
                 'errors' => $errors,
                 'warnings' => $warnings,
                 'superseded' => false,
@@ -303,7 +314,7 @@ final class SchoolAllotmentImporter
         $readyCount = 0;
         $invalidCount = 0;
         $supersededCount = 0;
-        $clearsCertificationCount = 0;
+        $lockedCount = 0;
 
         foreach ($analyzed as $index => $row) {
             $valid = $row['errors'] === [] && ! $row['superseded'];
@@ -311,14 +322,14 @@ final class SchoolAllotmentImporter
 
             if ($row['superseded']) {
                 $supersededCount++;
+            } elseif ($row['locked']) {
+                // Counted on its own, not as an "error": the row is sound,
+                // its target is simply read-only.
+                $lockedCount++;
             } elseif (! $valid) {
                 $invalidCount++;
             } else {
                 $readyCount++;
-
-                if ($row['clears_certification']) {
-                    $clearsCertificationCount++;
-                }
             }
         }
 
@@ -327,7 +338,7 @@ final class SchoolAllotmentImporter
             'readyCount' => $readyCount,
             'invalidCount' => $invalidCount,
             'supersededCount' => $supersededCount,
-            'clearsCertificationCount' => $clearsCertificationCount,
+            'lockedCount' => $lockedCount,
         ];
     }
 
@@ -344,7 +355,7 @@ final class SchoolAllotmentImporter
      * @param  array<int, array<string, mixed>>  $rows  the analyzed rows
      * @param  array<int, int>  $excludedLines  lines the officer unchecked
      * @param  array<int, string>|null  $allowedDivisions  null = no restriction
-     * @return array{processed: int, created: int, updated: int, cleared: int, unchanged: int, cleared_certification: int, skipped: int, errors: array<int, array{line: int, school_id: string, school_division: string, error: string}>}
+     * @return array{processed: int, created: int, updated: int, cleared: int, unchanged: int, skipped: int, errors: array<int, array{line: int, school_id: string, school_division: string, error: string}>}
      */
     public static function commit(
         array $rows,
@@ -363,7 +374,6 @@ final class SchoolAllotmentImporter
             $updated = 0;
             $cleared = 0;
             $unchanged = 0;
-            $clearedCertification = 0;
             $skipped = 0;
             $errors = [];
 
@@ -432,7 +442,18 @@ final class SchoolAllotmentImporter
                         continue;
                     }
 
-                    $wasCertified = $record->isCertified();
+                    // A certified allotment is locked: it is never cleared.
+                    if ($record->isCertified()) {
+                        $errors[] = [
+                            'line' => (int) $row['line'],
+                            'school_id' => (string) $row['school_id'],
+                            'school_division' => $rowDivision,
+                            'error' => self::LOCKED_MESSAGE,
+                        ];
+                        $skipped++;
+
+                        continue;
+                    }
 
                     $record->delete();
 
@@ -449,22 +470,46 @@ final class SchoolAllotmentImporter
 
                     $cleared++;
 
-                    if ($wasCertified) {
-                        $clearedCertification++;
-                    }
-
                     continue;
                 }
 
                 $amount = (float) $row['amount'];
                 $amountChanged = $previousAmount === null || $previousAmount !== $amount;
-                $wasCertified = $record?->isCertified() ?? false;
+                $certified = $record?->isCertified() ?? false;
 
-                $attributes = ['amount' => $amount, 'set_by' => $user?->id];
+                // A certified allotment is locked: the certificate covers the
+                // figure on the row, so a changed amount is refused here too.
+                // The analysis already refuses such rows; this second check
+                // holds even when commit() is handed rows from elsewhere.
+                if ($certified && $amountChanged) {
+                    $errors[] = [
+                        'line' => (int) $row['line'],
+                        'school_id' => (string) $row['school_id'],
+                        'school_division' => $rowDivision,
+                        'error' => self::LOCKED_MESSAGE,
+                    ];
+                    $skipped++;
 
-                if ($amountChanged) {
-                    $attributes['certified_by'] = null;
-                    $attributes['certified_at'] = null;
+                    continue;
+                }
+
+                if (! $amountChanged) {
+                    // Re-stating the same figure writes nothing — and on a
+                    // certified row not even a re-stamped "set by".
+                    if (! $certified) {
+                        SchoolAllotment::query()->updateOrCreate(
+                            [
+                                'school_id' => $school->id,
+                                'school_division' => $rowDivision,
+                                'year' => $year,
+                            ],
+                            ['amount' => $amount, 'set_by' => $user?->id],
+                        );
+                    }
+
+                    $unchanged++;
+
+                    continue;
                 }
 
                 SchoolAllotment::query()->updateOrCreate(
@@ -473,14 +518,16 @@ final class SchoolAllotmentImporter
                         'school_division' => $rowDivision,
                         'year' => $year,
                     ],
-                    $attributes,
+                    [
+                        'amount' => $amount,
+                        'set_by' => $user?->id,
+                        // A certified row never reaches a write; clearing both
+                        // fields keeps an uncertified row whose certifier
+                        // account was deleted from carrying a dangling date.
+                        'certified_by' => null,
+                        'certified_at' => null,
+                    ],
                 );
-
-                if (! $amountChanged) {
-                    $unchanged++;
-
-                    continue;
-                }
 
                 SchoolAllotmentAudit::record(
                     (int) $school->id,
@@ -498,10 +545,6 @@ final class SchoolAllotmentImporter
                 } else {
                     $updated++;
                 }
-
-                if ($wasCertified) {
-                    $clearedCertification++;
-                }
             }
 
             return [
@@ -510,7 +553,6 @@ final class SchoolAllotmentImporter
                 'updated' => $updated,
                 'cleared' => $cleared,
                 'unchanged' => $unchanged,
-                'cleared_certification' => $clearedCertification,
                 'skipped' => $skipped,
                 'errors' => $errors,
             ];
@@ -528,14 +570,14 @@ final class SchoolAllotmentImporter
      *
      * @param  array<int, array<string, mixed>>  $rows
      * @param  array<int, int>  $excludedLines
-     * @return array{selected: int, clears_certification: int, superseded: int, invalid: int, divisions: array<int, string>}
+     * @return array{selected: int, locked: int, superseded: int, invalid: int, divisions: array<int, string>}
      */
     public static function selectionCounts(array $rows, array $excludedLines): array
     {
         $excluded = array_map('intval', $excludedLines);
 
         $selected = 0;
-        $clearsCertification = 0;
+        $locked = 0;
         $superseded = 0;
         $invalid = 0;
         $divisions = [];
@@ -543,6 +585,12 @@ final class SchoolAllotmentImporter
         foreach ($rows as $row) {
             if ($row['superseded']) {
                 $superseded++;
+
+                continue;
+            }
+
+            if ($row['locked']) {
+                $locked++;
 
                 continue;
             }
@@ -559,15 +607,11 @@ final class SchoolAllotmentImporter
 
             $selected++;
             $divisions[(string) ($row['school_division'] ?? SchoolDivision::ELEMENTARY)] = true;
-
-            if ($row['clears_certification']) {
-                $clearsCertification++;
-            }
         }
 
         return [
             'selected' => $selected,
-            'clears_certification' => $clearsCertification,
+            'locked' => $locked,
             'superseded' => $superseded,
             'invalid' => $invalid,
             'divisions' => array_values(array_intersect(SchoolDivision::all(), array_keys($divisions))),

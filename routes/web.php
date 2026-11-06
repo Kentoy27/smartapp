@@ -17,6 +17,8 @@ use App\Models\UserMov;
 use App\Models\WfpImportLog;
 use App\Models\WfpPlan;
 use App\Models\WfpSubmission;
+use App\Support\AipXlsxExporter;
+use App\Support\MemDuplicateChecker;
 use App\Support\MemXlsxExporter;
 use App\Support\MovEvidencePreview;
 use App\Support\OpcrfAccess;
@@ -30,6 +32,7 @@ use App\Support\WfpPlanExporter;
 use App\Support\WfpSetupExporter;
 use App\Support\WfpTemplate;
 use Illuminate\Filesystem\FilesystemAdapter;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
@@ -98,7 +101,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
 
     Route::get('/profile/signature', function () {
         $user = Auth::user();
-        if (! ($user instanceof User)) {
+        if (!($user instanceof User)) {
             abort(404);
         }
 
@@ -170,14 +173,14 @@ Route::middleware(['auth', 'password.change'])->group(function () {
     Route::get('/aip/{plan}/signature/{signer}', function (AipPlan $plan, User $signer) {
         $viewer = Auth::user();
 
-        if (! ($viewer instanceof User)) {
+        if (!($viewer instanceof User)) {
             abort(404);
         }
 
         abort_unless($plan->submitted_at !== null, 404);
         abort_unless(
             $plan->managedBy($viewer)
-                || AipPlan::query()->visibleTo($viewer)->whereKey($plan->id)->exists(),
+            || AipPlan::query()->visibleTo($viewer)->whereKey($plan->id)->exists(),
             404
         );
 
@@ -590,7 +593,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
         abort_unless($submission->canBeDownloadedBy($user), 404);
         abort_unless($submission->hasFile(), 404);
 
-        if ($submission->hasSignedFile() && ! $submission->signedFileHasValidXml()) {
+        if ($submission->hasSignedFile() && !$submission->signedFileHasValidXml()) {
             abort_unless(
                 $submission->repairSignedFile(),
                 500,
@@ -635,7 +638,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
     Route::get('/opcrf-submissions/{submission}/signature', function (OpcrfSubmission $submission) {
         $user = Auth::user();
 
-        if (! ($user instanceof User)) {
+        if (!($user instanceof User)) {
             abort(404);
         }
 
@@ -646,7 +649,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
         abort_unless($submission->hasSignedFile(), 404);
 
         $ratee = $submission->user;
-        if (! ($ratee instanceof User)) {
+        if (!($ratee instanceof User)) {
             abort(404);
         }
 
@@ -661,7 +664,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
     Route::get('/opcrf-submissions/{submission}/review-signature/{review}', function (OpcrfSubmission $submission, \App\Models\OpcrfReview $review) {
         $viewer = Auth::user();
 
-        if (! ($viewer instanceof User)) {
+        if (!($viewer instanceof User)) {
             abort(404);
         }
 
@@ -677,7 +680,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
         abort_unless($submission->hasSignedFile(), 404);
 
         $reviewer = $review->reviewer;
-        if (! ($reviewer instanceof User)) {
+        if (!($reviewer instanceof User)) {
             abort(404);
         }
 
@@ -708,10 +711,12 @@ Route::middleware(['auth', 'password.change'])->group(function () {
      *
      * The /wfp page's action is "Generate and Download WFP": the workbook is
      * produced server-side from the account-code master list (no upload), so
-     * there is no template/download route. Every WFP route re-checks
-     * Auth::user()->canAccessWfp(): the module is unreachable for the SDS
-     * Viewer and the Super Admin even by typing the URL directly (they get a
-     * 404). The Bookkeeper reaches the module's pages read-only; every write
+     * there is no template/download route. Every School Head workspace route
+     * re-checks Auth::user()->canAccessWfp(): the authoring module is
+     * unreachable for the SDS Viewer and the Super Admin even by typing the
+     * URL directly (they get a 404). The Superadmin's final-approval queue and
+     * the read-only plan preview/export are separate, Superadmin-gated routes
+     * below. The Bookkeeper reaches the module's pages read-only; every write
      * re-checks canManageWfp() (or the model's own managedBy()), so a
      * Bookkeeper can never edit a school's plan. The Livewire components
      * re-check the same gates on every action.
@@ -742,6 +747,24 @@ Route::middleware(['auth', 'password.change'])->group(function () {
     })->name('wfp.submissions.index');
 
     /* ------------------------------------------------------------------
+     * WFP Final Approvals — the Superadmin's queue of Budget-certified WFPs
+     * submitted by the School Heads.
+     *
+     * This is a separate gate from the School Head's workspace: only the
+     * Superadmin (not an administrator or a Budget reviewer) may decide a
+     * plan. The Livewire component re-checks canApproveWfp() on mount and on
+     * every action, and the model re-checks it again when a decision is
+     * recorded.
+     * ----------------------------------------------------------------- */
+
+    Route::get('/wfp/approvals', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canApproveWfp(), 404);
+
+        return view('wfp.approvals');
+    })->name('wfp.approvals.index');
+
+    /* ------------------------------------------------------------------
      * School Allotments — the Budget office sets the annual allotment
      * budget each School Head may consume through the school's Monthly
      * Expenditure Matrices. The ceiling is stored per school and year; the
@@ -768,7 +791,8 @@ Route::middleware(['auth', 'password.change'])->group(function () {
      * the plan and the allotment, and never edit a school's plan. Scope is
      * the Budget role and the Bookkeeper (canCheckLineItems()) — an SH,
      * administrator or superadmin gets the same 404. The component re-checks
-     * the gate on mount.
+     * the gate on mount, and narrows the roster, the years and every query to
+     * the Bookkeeper's own assigned schools (User::canAccessSchool()).
      * ----------------------------------------------------------------- */
     Route::get('/budget/line-items', function () {
         $user = Auth::user();
@@ -782,14 +806,16 @@ Route::middleware(['auth', 'password.change'])->group(function () {
      * annual MOOE allotment report.
      *
      * It is the same printed form the School Head reads on /wfp/line-items,
-     * with a school picker because the Budget office and the school
-     * Bookkeeper oversee every school. The page is READ-ONLY and derived on
-     * every load from the school's Monthly Expenditure Matrices
-     * (WfpAllotment); nothing here edits a school's plan. The Bookkeeper's
-     * copy also carries the "Checked as to the Correctness of Account Titles
-     * and Codes" sign-off (a component action). Scope is the Budget role and
-     * the Bookkeeper — the route guard and the component both enforce
-     * canCheckLineItems().
+     * with a school picker because the Budget office reads every school and
+     * the school Bookkeeper reads the schools assigned to it. The page is
+     * READ-ONLY and derived on every load from the school's Monthly
+     * Expenditure Matrices (WfpAllotment); nothing here edits a school's
+     * plan. The Bookkeeper's copy also carries the "Checked as to the
+     * Correctness of Account Titles and Codes" sign-off (a component action).
+     * Scope is the Budget role and the Bookkeeper — the route guard and the
+     * component both enforce canCheckLineItems(), and the component narrows
+     * the picker, the figures and the sign-off to the Bookkeeper's own
+     * assigned schools (User::canAccessSchool()).
      * ----------------------------------------------------------------- */
 
     Route::get('/budget/per-line-item', function () {
@@ -802,7 +828,10 @@ Route::middleware(['auth', 'password.change'])->group(function () {
     // The same report as an .xlsx for the school in ?school=. The year is
     // resolved against that school's own matrices, so a crafted ?year= can
     // never report on a year the school has nothing in. No school, or one
-    // that no longer exists, has no report to export: it is a 404.
+    // that no longer exists, has no report to export: it is a 404. A school
+    // that exists but is outside the account's roster — the Bookkeeper's
+    // assignment list — is refused the same way, because the export is the
+    // report's figures leaving the server.
     Route::get('/budget/per-line-item/export', function () {
         $user = Auth::user();
         abort_unless($user instanceof User && $user->canCheckLineItems(), 404);
@@ -810,6 +839,8 @@ Route::middleware(['auth', 'password.change'])->group(function () {
         $schoolId = (int) request()->query('school');
         $school = $schoolId > 0 ? School::query()->find($schoolId) : null;
         abort_if($school === null, 404);
+
+        abort_unless($user->canAccessSchool($school->id), 404);
 
         $division = $user->activeDivision();
         $year = WfpAllotment::resolveYear($school->id, (int) request()->query('year'), $division);
@@ -823,7 +854,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
             ->orderBy('name')
             ->orderBy('username')
             ->get()
-            ->first(fn (User $candidate): bool => $candidate->canAccessDivision($division));
+            ->first(fn(User $candidate): bool => $candidate->canAccessDivision($division));
 
         $bytes = WfpAllotmentXlsxExporter::bytes($school->id, $year, $preparedBy, $division);
 
@@ -912,6 +943,28 @@ Route::middleware(['auth', 'password.change'])->group(function () {
             ->header('Content-Length', (string) strlen($bytes))
             ->header('Content-Disposition', 'attachment; filename="' . MemXlsxExporter::downloadName($matrix) . '"');
     })->name('wfp.matrices.export')->where('matrix', '[0-9]+');
+
+    // The Add-a-line duplicate checker's search, called by the modal's
+    // suggestion panel as the description is typed. The matrix is the WHOLE
+    // boundary — a line in another month or another school is never a match.
+    // Read-shaped (canBeViewedBy), like /export: the panel is advisory, and
+    // saveLineFromModal() re-checks server-side before anything is written.
+    // The query is capped at the field's own limit; short input answers with
+    // an empty list rather than an error.
+    Route::get('/wfp/matrices/{matrix}/duplicate-check', function (MonthlyExpenditureMatrix $matrix, Request $request) {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $matrix->canBeViewedBy($user), 404);
+
+        $query = $request->query('q');
+        $query = is_string($query) ? mb_substr($query, 0, MemDuplicateChecker::MAX_QUERY_LENGTH) : '';
+
+        $exclude = $request->query('exclude');
+        $exclude = is_string($exclude) && ctype_digit($exclude) ? (int) $exclude : null;
+
+        return response()->json([
+            'matches' => MemDuplicateChecker::find($matrix, $query, $exclude),
+        ]);
+    })->name('wfp.matrices.duplicate-check')->where('matrix', '[0-9]+');
 
     // The editor page: the School Head's write surface, opened read-only by
     // the school's Bookkeeper. The write gate lives inside the component —

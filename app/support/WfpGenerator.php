@@ -8,6 +8,7 @@ use App\Models\MonthlyExpenditureMatrix;
 use App\Models\WfpItem;
 use App\Models\WfpPlan;
 use Illuminate\Support\Facades\DB;
+use RuntimeException;
 
 /**
  * Maps a school's Monthly Expenditure Matrices onto its WFP plan.
@@ -44,6 +45,12 @@ class WfpGenerator
      */
     public static function generate(WfpPlan $plan, ?MonthlyExpenditureMatrix $matrix = null): array
     {
+        // Generation rewrites the plan's lines, so it must never run on a
+        // submission that is waiting for — or has received — final approval.
+        if (! $plan->isEditable()) {
+            throw new RuntimeException('This WFP is no longer editable and cannot be regenerated.');
+        }
+
         $matrices = $matrix !== null
             ? [$matrix]
             : MonthlyExpenditureMatrix::query()
@@ -151,8 +158,10 @@ class WfpGenerator
      *
      * Annual-shaped (the default): group by `group_key` and emit one row per
      * group, with the target being the group's sum. Month-shaped (the template
-     * carries a column per month): emit one row per WFP line, keeping its month
-     * so the filler writes the target into the right column.
+     * carries a column per month): also emit one row per group, but carry the
+     * group's targets as one value per month so the filler writes each into
+     * that month's own column. A recurring activity therefore reads as one
+     * line with its months filled in, not one line per month.
      *
      * Account-title section rows are interleaved ahead of each account group
      * so the WFP reads as titled sections rather than a flat list. Every
@@ -165,9 +174,49 @@ class WfpGenerator
         $items = $plan->items()->get();
 
         if ($monthly) {
-            $rows = $items->map(fn (WfpItem $item): array => array_merge(self::exportRow($item), ['month' => $item->month]))->all();
+            return self::withAccountTitleRows(
+                $items
+                    ->groupBy('group_key')
+                    ->map(static function ($group): array {
+                        /** @var WfpItem $first */
+                        $first = $group->first();
 
-            return self::withAccountTitleRows($rows);
+                        $physical = [];
+                        $financial = [];
+
+                        foreach ($group as $item) {
+                            $month = (int) $item->month;
+
+                            // A missing target stays missing: summing it as
+                            // zero would print 0.00 where the line has none.
+                            if ($item->physical_target !== null) {
+                                $physical[$month] = ($physical[$month] ?? 0) + (float) $item->physical_target;
+                            }
+
+                            if ($item->financial_target !== null) {
+                                $financial[$month] = ($financial[$month] ?? 0) + (float) $item->financial_target;
+                            }
+                        }
+
+                        ksort($physical);
+                        ksort($financial);
+
+                        $row = self::exportRow($first);
+
+                        // The monthly template carries a target column per
+                        // month, so the group's months travel as maps; the
+                        // single-target fields would otherwise land in the
+                        // first month's column.
+                        unset($row['physical_target'], $row['financial_target']);
+
+                        return array_merge($row, [
+                            'physical_targets_by_month' => $physical,
+                            'financial_targets_by_month' => $financial,
+                        ]);
+                    })
+                    ->values()
+                    ->all(),
+            );
         }
 
         return self::withAccountTitleRows(

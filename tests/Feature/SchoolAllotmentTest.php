@@ -646,7 +646,7 @@ class SchoolAllotmentTest extends TestCase
         $component = Livewire::actingAs($head)
             ->test(MemEditor::class, ['matrix' => $january->matrix])
             ->call('openLineModal')
-            ->set('lineForm.activity_description', 'Procure supplies')
+            ->set('lineForm.activity_description', 'Purchase bond paper')
             ->set('lineForm.quantity', '3')
             ->set('lineForm.unit_cost', '500')
             ->call('saveLineFromModal')
@@ -654,7 +654,8 @@ class SchoolAllotmentTest extends TestCase
 
         $allocation = $component->instance()->allocation;
 
-        // 2,500 saved + 1,500 not yet saved in January, plus February's 1,000.
+        // 2,500 + the 1,500 the modal just wrote in January, plus February's
+        // 1,000 — the balance moves with the grid, no second save needed.
         $this->assertSame(5000.0, $allocation['consumed']);
         $this->assertSame(5000.0, $allocation['remaining']);
 
@@ -811,7 +812,7 @@ class SchoolAllotmentTest extends TestCase
         );
     }
 
-    public function test_changing_the_amount_clears_the_certification(): void
+    public function test_a_certified_allotment_refuses_a_single_row_save(): void
     {
         $head = $this->schoolHead();
         $budget = $this->budgetOfficer();
@@ -824,22 +825,24 @@ class SchoolAllotmentTest extends TestCase
             'certified_at' => now(),
         ]);
 
-        Livewire::actingAs($budget)
+        $component = Livewire::actingAs($budget)
             ->test(SchoolAllotmentManager::class)
             ->set('year', '2026')
             ->set('amounts.'.$head->school_id, '2000')
-            ->call('save', $head->school_id)
-            ->assertHasNoErrors();
+            ->call('save', $head->school_id);
 
         $allotment = SchoolAllotment::query()->firstOrFail();
 
-        $this->assertSame(2000.0, (float) $allotment->amount);
-        $this->assertFalse($allotment->isCertified());
-        $this->assertNull($allotment->certified_by);
-        $this->assertNull($allotment->certified_at);
+        $this->assertSame(1000.0, (float) $allotment->amount);
+        $this->assertTrue($allotment->isCertified());
+        $this->assertStringContainsString('read-only', (string) $component->get('errorMessage'));
+
+        // The stored figure is echoed back over the typed one, so the field
+        // never shows a value the certificate does not cover.
+        $component->assertSet('amounts.'.$head->school_id, '1000.00');
     }
 
-    public function test_resaving_the_same_amount_keeps_the_certification(): void
+    public function test_a_certified_allotment_refuses_even_a_same_amount_save(): void
     {
         $head = $this->schoolHead();
         $budget = $this->budgetOfficer();
@@ -852,14 +855,189 @@ class SchoolAllotmentTest extends TestCase
             'certified_at' => now(),
         ]);
 
-        Livewire::actingAs($budget)
+        // The row has no Save action at all once certified; a crafted call is
+        // refused the same way rather than re-stamping "set by".
+        $component = Livewire::actingAs($budget)
             ->test(SchoolAllotmentManager::class)
             ->set('year', '2026')
             ->set('amounts.'.$head->school_id, '1000.00')
-            ->call('save', $head->school_id)
-            ->assertHasNoErrors();
+            ->call('save', $head->school_id);
 
         $this->assertTrue(SchoolAllotment::query()->firstOrFail()->isCertified());
+        $this->assertStringContainsString('read-only', (string) $component->get('errorMessage'));
+    }
+
+    public function test_a_certified_row_hides_its_save_and_certify_actions(): void
+    {
+        $certified = $this->schoolHead('Alpha Allotment School');
+        $open = $this->schoolHead('Beta Allotment School');
+        $budget = $this->budgetOfficer();
+
+        SchoolAllotment::create([
+            'school_id' => $certified->school_id,
+            'year' => 2026,
+            'amount' => 1000,
+            'certified_by' => $budget->id,
+            'certified_at' => now(),
+        ]);
+
+        SchoolAllotment::create([
+            'school_id' => $open->school_id,
+            'year' => 2026,
+            'amount' => 2000,
+        ]);
+
+        $component = Livewire::actingAs($budget)
+            ->test(SchoolAllotmentManager::class)
+            ->set('year', '2026');
+
+        // The certified row: no Save, no Certify/Re-certify, a CERTIFIED
+        // badge with the read-only explanation, and the amount still visible
+        // — as text, not an input.
+        $component
+            ->assertDontSee('wire:click="save('.$certified->school_id.')"', false)
+            ->assertDontSee('wire:click="openCertifyModal('.$certified->school_id.')"', false)
+            ->assertDontSee('Re-certify')
+            ->assertSee('Certified by the Budget Office. This allotment is read-only.')
+            ->assertSeeHtml('allotment-readonly')
+            ->assertSeeHtml('allotment-locked')
+            ->assertSee('1,000.00');
+
+        // The uncertified row keeps both actions.
+        $component
+            ->assertSee('wire:click="save('.$open->school_id.')"', false)
+            ->assertSee('wire:click="openCertifyModal('.$open->school_id.')"', false);
+    }
+
+    public function test_save_all_skips_a_certified_allotment_and_names_it(): void
+    {
+        $certified = $this->schoolHead('Alpha Allotment School');
+        $open = $this->schoolHead('Beta Allotment School');
+        $budget = $this->budgetOfficer();
+
+        SchoolAllotment::create([
+            'school_id' => $certified->school_id,
+            'year' => 2026,
+            'amount' => 1000,
+            'certified_by' => $budget->id,
+            'certified_at' => now(),
+        ]);
+
+        $component = Livewire::actingAs($budget)
+            ->test(SchoolAllotmentManager::class)
+            ->set('year', '2026')
+            ->set('amounts.'.$certified->school_id, '2000')
+            ->set('amounts.'.$open->school_id, '500')
+            ->call('saveAll');
+
+        // The certified row is untouched; the open row is written.
+        $certifiedRow = SchoolAllotment::query()->where('school_id', $certified->school_id)->firstOrFail();
+
+        $this->assertSame(1000.0, (float) $certifiedRow->amount);
+        $this->assertTrue($certifiedRow->isCertified());
+
+        $this->assertSame(
+            500.0,
+            (float) SchoolAllotment::query()->where('school_id', $open->school_id)->value('amount')
+        );
+
+        // The typed figure is thrown away, the stored one echoed back, and
+        // the skip is named in the summary — never silent.
+        $component->assertSet('amounts.'.$certified->school_id, '1000.00');
+
+        $summary = (string) $component->get('successMessage');
+
+        $this->assertStringContainsString('Skipped 1 certified allotment', $summary);
+        $this->assertStringContainsString('Alpha Allotment School', $summary);
+    }
+
+    public function test_re_certifying_a_certified_allotment_is_refused(): void
+    {
+        $head = $this->schoolHead();
+        $budget = $this->budgetOfficer();
+
+        $allotment = SchoolAllotment::create([
+            'school_id' => $head->school_id,
+            'year' => 2026,
+            'amount' => 1000,
+            'certified_by' => $budget->id,
+            'certified_at' => now()->subDay(),
+        ]);
+
+        $certifiedAt = $allotment->certified_at;
+
+        // The modal refuses before the confirmation can open…
+        $component = Livewire::actingAs($budget)
+            ->test(SchoolAllotmentManager::class)
+            ->set('year', '2026')
+            ->call('openCertifyModal', $head->school_id)
+            ->assertSet('certifyingSchoolId', null);
+
+        $this->assertStringContainsString('already certified', (string) $component->get('errorMessage'));
+
+        // …and a crafted certify call is refused the same way, leaving the
+        // signature already on record exactly as it was.
+        $component->call('certify', $head->school_id);
+
+        $this->assertStringContainsString('already certified', (string) $component->get('errorMessage'));
+
+        $allotment->refresh();
+
+        $this->assertSame($budget->id, $allotment->certified_by);
+        $this->assertTrue($certifiedAt->equalTo($allotment->certified_at));
+    }
+
+    public function test_the_certification_lock_is_scoped_to_the_school_and_year(): void
+    {
+        $certified = $this->schoolHead('Alpha Allotment School');
+        $open = $this->schoolHead('Beta Allotment School');
+        $budget = $this->budgetOfficer();
+
+        SchoolAllotment::create([
+            'school_id' => $certified->school_id,
+            'year' => 2026,
+            'amount' => 1000,
+            'certified_by' => $budget->id,
+            'certified_at' => now(),
+        ]);
+
+        // Another school's allotment is not locked by it…
+        Livewire::actingAs($budget)
+            ->test(SchoolAllotmentManager::class)
+            ->set('year', '2026')
+            ->set('amounts.'.$open->school_id, '500')
+            ->call('save', $open->school_id)
+            ->assertHasNoErrors();
+
+        $this->assertSame(
+            500.0,
+            (float) SchoolAllotment::query()->where('school_id', $open->school_id)->value('amount')
+        );
+
+        // …and neither is the same school's next year.
+        Livewire::actingAs($budget)
+            ->test(SchoolAllotmentManager::class)
+            ->set('year', '2027')
+            ->set('amounts.'.$certified->school_id, '7000')
+            ->call('save', $certified->school_id)
+            ->assertHasNoErrors();
+
+        $this->assertSame(
+            7000.0,
+            (float) SchoolAllotment::query()
+                ->where('school_id', $certified->school_id)
+                ->where('year', 2027)
+                ->value('amount')
+        );
+
+        // The certified 2026 row is untouched.
+        $this->assertSame(
+            1000.0,
+            (float) SchoolAllotment::query()
+                ->where('school_id', $certified->school_id)
+                ->where('year', 2026)
+                ->value('amount')
+        );
     }
 
     public function test_only_the_budget_role_may_certify_an_allotment(): void

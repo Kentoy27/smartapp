@@ -1757,6 +1757,10 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
 .mem-summary__value { font-size: 0.9375rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-strong); }
 .mem-summary__item--grand .mem-summary__label { color: var(--text-strong); text-transform: uppercase; letter-spacing: 0.04em; }
 .mem-summary__item--grand .mem-summary__value { font-size: 1.125rem; color: var(--primary); }
+/* The foot export sits below the monthly total, its right edge on the same
+   line as the total's: the button is one click away after a long read. */
+.mem-summary__foot { display: flex; justify-content: flex-end; margin-top: 14px; padding: 0 16px; }
+.mem-summary__export { padding: 10px 18px; border-radius: 10px; font-size: 0.875rem; gap: 8px; }
 
 /* THE EMPTY STATE: says what a line is and offers the two ways to make one. */
 .mem-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 40px 24px; text-align: center; color: var(--text-muted); }
@@ -1808,8 +1812,9 @@ control to a real radio size and keep it from growing as a flex item. */
     accent-color: var(--primary);
 }
 /* The month picker copies one encoded line into every checked month's matrix;
-   the current month starts checked. Twelve compact checkboxes share a row on
-   desktop and wrap to six/four where the dialog gets narrow. */
+   it appears once the line is marked a repeated item, and the current month
+   starts checked. Twelve compact checkboxes share a row on desktop and wrap
+   to six/four where the dialog gets narrow. */
 .mem-line-months { min-width: 0; }
 .mem-line-months__label {
     display: flex;
@@ -1869,6 +1874,9 @@ control to a real radio size and keep it from growing as a flex item. */
     box-shadow: none;
     accent-color: var(--primary);
 }
+/* "Apply to all" ticks every month that already has a matrix — months
+   without one stay disabled, so the write can never target a gap. */
+.mem-line-months__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
 @media (max-width: 720px) {
     .mem-line-months__grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 }
@@ -1890,6 +1898,77 @@ control to a real radio size and keep it from growing as a flex item. */
 }
 @media (max-width: 640px) {
     .mem-line-resource__fields { grid-template-columns: 1fr; }
+}
+/* Several Resource Needed rows under one activity, as the printed form draws
+   them: one header, then a row per resource. Each filled row is written as its
+   own line on save, sharing the activity, account and months encoded above. */
+.mem-resource-table { display: flex; flex-direction: column; gap: 8px; }
+.mem-resource-table__head,
+.mem-resource-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.65fr) minmax(0, 0.8fr) minmax(0, 0.85fr) minmax(120px, auto) 36px;
+    gap: 10px 12px;
+    align-items: start;
+}
+.mem-resource-table__head {
+    padding: 0 2px;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+.mem-resource-table__total { text-align: right; }
+.mem-resource-cell { min-width: 0; }
+.mem-resource-cell--total,
+.mem-resource-cell--action { display: flex; justify-content: flex-end; }
+.mem-resource-row + .mem-resource-row { padding-top: 10px; border-top: 1px dashed var(--border); }
+.mem-resource-total {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    min-width: 110px;
+    min-height: 38px;
+    padding: 2px 12px;
+    border-radius: 8px;
+    background: var(--bg-muted);
+}
+.mem-resource-total__value { font-size: 1rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-strong); }
+.mem-resource-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 38px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.mem-resource-remove:hover { border-color: #dc2626; color: #dc2626; }
+.mem-resource-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.mem-resource-actions .field-hint { margin: 0; }
+@media (max-width: 960px) {
+    .mem-resource-table__head { display: none; }
+    .mem-resource-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .mem-resource-cell[data-label]::before {
+        content: attr(data-label);
+        display: block;
+        margin-bottom: 4px;
+        font-size: 0.6875rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+    }
+    .mem-resource-cell--total,
+    .mem-resource-cell--action { grid-column: 1 / -1; }
+    .mem-resource-cell--placeholder { display: none; }
+}
+@media (max-width: 640px) {
+    .mem-resource-row { grid-template-columns: 1fr; }
 }
 /* The Add-a-line dialog is tall; a two-column grid keeps every field on screen
    without scrolling on a normal laptop. Fields that read as a single unit (the
@@ -3132,6 +3211,51 @@ a.mem-month-tab:hover .mem-month-tab__total { color: var(--text-muted); }
 .allotment-badge--over { background: var(--danger-soft); color: var(--danger); }
 .allotment-badge--certified { background: var(--ok-soft); color: var(--ok); }
 
+/* A certified amount renders as text, not an input: the certificate covers
+   the figure, so there is nothing to type into. It keeps the input's width
+   and right alignment so the column still reads as one column of figures. */
+.allotment-readonly {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    width: 150px;
+    padding: 7px 9px;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    background: var(--bg-elevated);
+    color: var(--text-muted);
+}
+
+.allotment-readonly svg { flex-shrink: 0; color: var(--ok); }
+
+.allotment-readonly__value {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
+
+/* The read-only note under a certified badge — visible, not just a tooltip,
+   so the state also reads on touch screens where hover never fires. */
+.allotment-readonly-note {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--ok);
+}
+
+/* The certified row's action cell: a lock where the Save button would be —
+   an indicator, not a control. */
+.allotment-locked {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    color: var(--text-faint);
+}
+
 /* The Budget office's monitoring strip reads four figures across, rather
    than the three the School Head's report summary carries. On the dashboard
    it sits in the narrower column, so it pairs the figures instead. */
@@ -3476,3 +3600,584 @@ a.mem-month-tab:hover .mem-month-tab__total { color: var(--text-muted); }
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+<<<<<<< HEAD
+=======
+
+/* ---------- SCHOOL PICKER (Per Line Item Expenditure toolbar) ----------
+   The Budget office's report opens on one school at a time; with a whole
+   division's roster in the list, the picker is a searchable dropdown (the
+   matrix editor's .mem-combo pattern) rather than a plain select. The base
+   combobox is styled for the matrix editor's dialog — its input padding is
+   scoped to .modal-form, and its menu spans the box — so the toolbar copy
+   takes the measurements of the Year select beside it, and the menu is
+   allowed to grow wider so a school's name and its district read on one
+   line. */
+.wfp-school-picker .mem-combo {
+    width: 260px;
+    margin-bottom: 0;
+}
+
+.wfp-school-picker .mem-combo input {
+    width: 100%;
+    padding: 6px 30px 6px 32px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-elevated);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.8125rem;
+}
+
+.wfp-school-picker .mem-combo input:focus {
+    outline: 2px solid var(--primary);
+    outline-offset: -1px;
+}
+
+/* The search glyph lights up with the box it belongs to. */
+.wfp-school-picker .mem-combo:focus-within .mem-combo__search {
+    color: var(--primary);
+}
+
+/* The table toolbars' clear affordance, to match the search boxes this
+   picker shares a toolbar row with. */
+.wfp-school-picker .mem-combo__clear {
+    right: 7px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--bg-muted);
+    color: var(--text-muted);
+}
+
+.wfp-school-picker .mem-combo__clear:hover {
+    background: var(--bg-hover);
+    color: var(--text-strong);
+}
+
+/* Wider than the box, so the district · school ID line reads whole; capped
+   to the viewport so the menu still fits a phone. */
+.wfp-school-picker .mem-combo__menu {
+    width: max-content;
+    min-width: 100%;
+    max-width: min(420px, calc(100vw - 48px));
+    max-height: 280px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--text-faint) transparent;
+}
+
+/* The school the report is on reads as the menu's chosen row, not just a
+   check mark at its edge. */
+.wfp-school-picker .mem-combo__option[aria-selected="true"] {
+    background: var(--bg-active);
+}
+
+.wfp-school-picker .mem-combo__option[aria-selected="true"] .mem-combo__option-meta {
+    color: var(--primary);
+}
+
+/* ---------- DUPLICATE CHECKER (Add a Line form) ----------
+   The suggestion panel under the Project/Activity/Expenditure input, plus
+   the save gate's warning banner and the reuse note. The panel is INLINE
+   (in normal flow, capped and scrollable) rather than absolutely positioned,
+   so the modal's own scrolling can never clip it on a small screen. Alpine
+   owns the panel (wire:ignore); visibility is the .open class, matching the
+   account combobox's rule — a Livewire morph must not resurrect it. */
+
+.mem-dup { position: relative; }
+
+/* The quiet one-line states (checking / nothing found / failed) below the
+   input — shown only while the panel itself is closed. */
+.mem-dup__status {
+    margin-top: 5px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.mem-dup__status-text {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    overflow-wrap: anywhere;
+}
+
+.mem-dup__status-text.is-error { color: var(--danger); }
+
+.mem-dup__retry {
+    padding: 0 2px;
+    border: none;
+    background: none;
+    color: var(--primary);
+    font: inherit;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+.mem-dup__retry:hover { color: var(--primary-strong); }
+
+.mem-dup__spinner {
+    display: inline-block;
+    flex: 0 0 auto;
+    width: 11px;
+    height: 11px;
+    border: 2px solid var(--border);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: mem-dup-spin 0.7s linear infinite;
+}
+
+@keyframes mem-dup-spin {
+    to { transform: rotate(360deg); }
+}
+
+.mem-dup__panel {
+    display: none;
+    margin-top: 6px;
+    padding: 6px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow-dropdown);
+    max-height: 300px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--text-faint) transparent;
+}
+
+.mem-dup__panel.open { display: block; animation: dropdown-in 0.12s ease; }
+
+.mem-dup__hint {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px 7px;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.mem-dup__hint > span:first-child { flex: 1 1 auto; min-width: 0; }
+
+.mem-dup__item + .mem-dup__item { margin-top: 2px; }
+.mem-dup__item.is-active { background: var(--bg-active); }
+
+.mem-dup__head {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    width: 100%;
+    padding: 7px 8px;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    color: var(--text);
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+}
+
+.mem-dup__head:hover,
+.mem-dup__head:focus-visible { background: var(--bg-hover); outline: none; }
+
+.mem-dup__badge {
+    flex: 0 0 auto;
+    margin-top: 1px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.mem-dup__badge.is-exact { background: var(--danger-soft); color: var(--danger); }
+.mem-dup__badge.is-similar { background: var(--bg-muted); color: var(--text-muted); }
+
+.mem-dup__main {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.mem-dup__title {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-strong);
+    overflow-wrap: anywhere;
+}
+
+.mem-dup__meta {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+}
+
+.mem-dup__chevron {
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
+    margin-top: 6px;
+    border-right: 1.5px solid var(--text-faint);
+    border-bottom: 1.5px solid var(--text-faint);
+    transform: rotate(45deg);
+    transition: transform 0.12s ease;
+}
+
+.mem-dup__chevron.is-open { transform: rotate(-135deg); margin-top: 9px; }
+
+.mem-dup__detail { padding: 2px 10px 10px; }
+
+.mem-dup__facts {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 0 0 8px;
+}
+
+.mem-dup__facts > div {
+    display: grid;
+    grid-template-columns: 150px 1fr;
+    gap: 8px;
+}
+
+.mem-dup__facts dt {
+    padding-top: 1px;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+
+.mem-dup__facts dd {
+    margin: 0;
+    font-size: 0.8125rem;
+    color: var(--text);
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+    .mem-dup__facts > div { grid-template-columns: 1fr; gap: 1px; }
+}
+
+.mem-dup__actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* The save gate's warning: an exact description match stands in this month
+   and the line was refused until the user chooses. */
+.mem-dup-warning {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+    border: 1px solid var(--danger);
+    background: var(--danger-soft);
+    border-radius: 8px;
+}
+
+.mem-dup-warning__head {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 0.875rem;
+    color: var(--danger);
+}
+
+.mem-dup-warning__icon {
+    flex: 0 0 auto;
+    display: inline-flex;
+    margin-top: 1px;
+}
+
+.mem-dup-warning__entry {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-panel);
+}
+
+.mem-dup-warning__entry .mem-dup__badge { align-self: flex-start; }
+
+.mem-dup-warning__title {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-strong);
+    overflow-wrap: anywhere;
+}
+
+.mem-dup-warning__meta {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+}
+
+.mem-dup-warning__actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* "Use existing activity" filled the form from an entry already standing in
+   this matrix — a note, not a warning: nothing is wrong and nothing saved
+   was changed. */
+.mem-dup-reuse {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    margin-bottom: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-muted);
+    color: var(--text-muted);
+    font-size: 0.8125rem;
+}
+
+.mem-dup-reuse__label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.mem-dup-reuse__icon { display: inline-flex; color: var(--primary); }
+
+.mem-dup-reuse .wfp-template-applied__clear { color: var(--text-muted); }
+
+.mem-dup-reuse .wfp-template-applied__clear:hover {
+    background: var(--bg-hover);
+    color: var(--text-strong);
+}
+
+
+
+/* ---------- ASSIGNED SCHOOLS PICKER (a Bookkeeper's roster) ----------
+   The multi-school selector shared by the Bookkeeper's own profile modal and
+   the administrator's user modal: the chosen schools as removable chips, the
+   count, then the searchable roster (the matrix editor's .mem-combo pattern)
+   underneath. Nothing here is saved by the picker itself — the modal's own
+   Save button writes the list. */
+.assigned-schools-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 24px;
+    margin-bottom: 6px;
+}
+
+.assigned-school-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    max-width: 100%;
+    padding: 3px 4px 3px 10px;
+    border-radius: 999px;
+    background: var(--primary-soft);
+    color: var(--primary-strong);
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.assigned-school-chip__name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.assigned-school-chip__remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border: none;
+    border-radius: 999px;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+}
+
+.assigned-school-chip__remove:hover {
+    background: var(--bg-hover);
+}
+
+.assigned-schools-none {
+    color: var(--text-faint);
+    font-size: 0.75rem;
+}
+
+.assigned-schools-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.assigned-schools-count {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.assigned-schools-loading {
+    color: var(--text-faint);
+    font-size: 0.75rem;
+}
+
+/* The picker's own combobox sits in a field, not in a toolbar row. */
+.assigned-schools-search .mem-combo {
+    margin-bottom: 0;
+}
+
+/* In the administrator's user modal the picker shares the column with the
+   school cascade; a chip long enough to wrap must not push the layout. */
+.modal-form .assigned-school-chip__name {
+    max-width: 240px;
+}
+
+/* ------------------------------------------------------------------
+ * WFP final approval (Superadmin)
+ * ----------------------------------------------------------------- */
+.mem-status--pending_approval { background: #fef3c7; color: #92400e; }
+.mem-status--returned { background: #fee2e2; color: #991b1b; }
+
+.wfp-approval-panel {
+    margin-bottom: 18px;
+}
+
+.wfp-approval-checklist {
+    list-style: none;
+    margin: 12px 0 0;
+    padding: 0;
+    display: grid;
+    gap: 8px;
+}
+
+.wfp-approval-checklist li {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    font-size: 0.8125rem;
+}
+
+.wfp-approval-checklist strong {
+    color: var(--text-strong);
+}
+
+.wfp-approval-filters-card {
+    margin-bottom: 18px;
+}
+
+.wfp-approval-filters {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    align-items: end;
+}
+
+.wfp-approval-filter {
+    display: grid;
+    gap: 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.wfp-approval-filter input,
+.wfp-approval-filter select {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    color: var(--text-strong);
+    font: inherit;
+    font-size: 0.875rem;
+}
+
+.wfp-approval-filter input:focus,
+.wfp-approval-filter select:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.wfp-approval-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 10px;
+    margin: 14px 0 18px;
+}
+
+.wfp-approval-summary > div {
+    display: grid;
+    gap: 4px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    font-size: 0.8125rem;
+}
+
+.wfp-approval-summary__label {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.wfp-approval-modal {
+    width: min(1120px, calc(100vw - 48px));
+    max-width: 1120px;
+}
+
+.wfp-approval-body {
+    max-height: min(78vh, 820px);
+    overflow-y: auto;
+}
+
+.wfp-approval-group {
+    margin: 14px 0 18px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.wfp-approval-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 16px 0;
+}
+
+@media (max-width: 640px) {
+    .wfp-approval-modal {
+        width: calc(100vw - 20px);
+    }
+
+    .wfp-approval-checklist li {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 4px;
+    }
+}
+>>>>>>> jet

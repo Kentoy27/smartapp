@@ -5,10 +5,12 @@ namespace App\Models;
 use App\Support\SchoolDivision;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Carbon\CarbonInterface;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\ResponseHeaderBag;
@@ -51,11 +53,42 @@ class User extends Authenticatable
     /**
      * The school this account belongs to (District → School → User) —
      * null for superadmins and accounts created before a school was
-     * assigned.
+     * assigned. This is the account's ONE base school (the School Head's own
+     * school; the Bookkeeper's station); the schools it may READ are the
+     * assignedSchools() list.
      */
     public function school(): BelongsTo
     {
         return $this->belongsTo(School::class);
+    }
+
+    /**
+     * The schools this account is assigned to — the Bookkeeper's readable
+     * roster. `users.school_id` (the base school) is always seeded into it
+     * when a school-attached account is created, and the assignment list is
+     * what User::canAccessSchool() consults.
+     *
+     * @return BelongsToMany<School, $this>
+     */
+    public function assignedSchools(): BelongsToMany
+    {
+        return $this->belongsToMany(School::class, 'user_school_assignments')->withTimestamps();
+    }
+
+    /**
+     * An account created with a school is assigned to it from the start:
+     * `users.school_id` records where the account is based, and the
+     * assignment list records what it may read — a freshly created
+     * Bookkeeper must never begin with a school it cannot open. The
+     * migration backfills the same rule for accounts that predate the list.
+     */
+    protected static function booted(): void
+    {
+        static::created(function (User $user): void {
+            if ($user->school_id !== null) {
+                $user->assignedSchools()->syncWithoutDetaching([(int) $user->school_id]);
+            }
+        });
     }
 
     /**
@@ -75,11 +108,12 @@ class User extends Authenticatable
      * Whether this account is a Bookkeeper — the role that checks the
      * correctness of the schools' account titles and codes.
      *
-     * The Bookkeeper works the Budget office-style, division-wide checking
-     * pages (Monthly Expenditure and Per Line Item Expenditure — see
-     * {@see canCheckLineItems()}), never writes a school's plan, and signs
-     * the annual report's "Checked as to the Correctness of Account Titles
-     * and Codes" block.
+     * The Bookkeeper works the Budget office-style checking pages (Monthly
+     * Expenditure and Per Line Item Expenditure — see
+     * {@see canCheckLineItems()}), narrowed to the schools on its own
+     * assignment list ({@see assignedSchoolIds()}), never writes a school's
+     * plan, and signs the annual report's "Checked as to the Correctness of
+     * Account Titles and Codes" block.
      */
     public function isBookkeeperRole(): bool
     {
@@ -131,15 +165,47 @@ class User extends Authenticatable
             return SchoolDivision::all();
         }
 
-        $divisions = SchoolDivision::authorizedFor(
-            $this->schoolLevel(),
-            $this->schoolSublevel(),
-            $this->division_access,
-        );
+        $configured = $this->schoolAvailableDivisions();
+        $assigned = SchoolDivision::validAccessList($this->division_access);
 
-        // A malformed or empty access list must not silently widen access;
-        // it falls back to the one division the classification implies.
-        return $divisions !== [] ? $divisions : [$this->defaultDivision()];
+        // Rows written before the explicit access list existed carry only a
+        // classification; read it the same way the old model did.
+        if ($assigned === []) {
+            $assigned = SchoolDivision::authorizedFor(
+                $this->schoolLevel(),
+                $this->schoolSublevel(),
+                null,
+            );
+        }
+
+        $allowed = array_values(array_intersect($configured, $assigned));
+
+        if ($allowed !== []) {
+            return $allowed;
+        }
+
+        // A malformed list — or a division the school has since stopped
+        // offering — must never widen access. The school's first division is
+        // the narrowest useful fallback.
+        return $configured !== [] ? [$configured[0]] : [SchoolDivision::ELEMENTARY];
+    }
+
+    /**
+     * The divisions the account's school offers.
+     *
+     * @return array<int, string>
+     */
+    private function schoolAvailableDivisions(): array
+    {
+        if ($this->school_id === null) {
+            return SchoolDivision::all();
+        }
+
+        $school = $this->relationLoaded('school')
+            ? $this->school
+            : $this->school()->with('divisionSettings')->first();
+
+        return $school?->availableDivisions() ?? SchoolDivision::all();
     }
 
     /** The division this account acts in when it has not switched. */
@@ -149,11 +215,19 @@ class User extends Authenticatable
             return SchoolDivision::ELEMENTARY;
         }
 
-        return SchoolDivision::divisionFor(
-            $this->schoolLevel(),
-            $this->schoolSublevel(),
-            $this->division_access,
-        );
+        $authorized = $this->authorizedDivisions();
+        $sublevel = $this->schoolSublevel();
+
+        if (in_array($sublevel, $authorized, true)) {
+            return $sublevel;
+        }
+
+        $assigned = array_values(array_intersect(
+            SchoolDivision::validAccessList($this->division_access),
+            $authorized,
+        ));
+
+        return $assigned[0] ?? ($authorized[0] ?? SchoolDivision::ELEMENTARY);
     }
 
     /** Whether this account may read records belonging to the division. */
@@ -263,9 +337,11 @@ class User extends Authenticatable
      *
      * Checking the lines — their account titles, codes and amounts — is the
      * Budget office's work, and the school Bookkeeper's: both work the same
-     * division-wide, read-only pages (Monthly Expenditure and Per Line Item
-     * Expenditure). The School Head owns the lines and never checks their
-     * own entry, so neither is the SH's.
+     * read-only pages (Monthly Expenditure and Per Line Item Expenditure).
+     * The Budget office's reach is the whole division; the Bookkeeper's is
+     * the schools on its assignment list ({@see canAccessSchool()}). The
+     * School Head owns the lines and never checks their own entry, so
+     * neither is the SH's.
      */
     public function canCheckLineItems(): bool
     {
@@ -301,8 +377,9 @@ class User extends Authenticatable
      * everyone else gets a 404 from the route guard.
      *
      * The Bookkeeper does NOT work these pages: its interface is the Budget
-     * office-style, division-wide pair (Monthly Expenditure and Per Line
-     * Item Expenditure — see {@see canCheckLineItems()}).
+     * office-style checking pair (Monthly Expenditure and Per Line Item
+     * Expenditure — see {@see canCheckLineItems()}), narrowed to its
+     * assigned schools.
      */
     public function canAccessWfp(): bool
     {
@@ -321,6 +398,17 @@ class User extends Authenticatable
     }
 
     /**
+     * Whether this account may give the WFP its final approval — or return it
+     * for revision. That is the Superadmin alone: the administrative role
+     * reads the school's work, but does not stand in for the Schools Division
+     * Superintendent's sign-off.
+     */
+    public function canApproveWfp(): bool
+    {
+        return (bool) $this->is_superadmin;
+    }
+
+    /**
      * Whether this account may sign the report's "Checked as to the
      * Correctness of Account Titles and Codes" block.
      *
@@ -333,6 +421,84 @@ class User extends Authenticatable
     public function canCheckWfpReport(): bool
     {
         return $this->isBookkeeperRole();
+    }
+
+    /**
+     * The ids of the schools this account is assigned to, in assignment
+     * order.
+     *
+     * @return array<int, int>
+     */
+    public function assignedSchoolIds(): array
+    {
+        return $this->assignedSchools()
+            ->orderBy('user_school_assignments.id')
+            ->pluck('schools.id')
+            ->map(fn ($id): int => (int) $id)
+            ->all();
+    }
+
+    /**
+     * The ids of the schools this account may read on the school-scoped
+     * financial pages, or null when the account is not school-restricted.
+     *
+     * The Bookkeeper is bound to its assigned schools; every other role's
+     * reach is governed elsewhere (the Budget office and the administrative
+     * side are division-wide, the School Head is fixed to their own school by
+     * the WFP gates), so null means "no extra narrowing here" rather than
+     * "every school".
+     *
+     * @return array<int, int>|null
+     */
+    public function visibleSchoolIds(): ?array
+    {
+        return $this->isBookkeeperRole() ? $this->assignedSchoolIds() : null;
+    }
+
+    /**
+     * Whether this account may read a school's records on the school-scoped
+     * pages — Monthly Expenditure, Per Line Item Expenditure, their exports
+     * and the report's correctness check.
+     *
+     * For the Bookkeeper the answer is membership in the assignment list,
+     * never a request payload: an unassigned school is refused even when its
+     * id is crafted into a URL or a Livewire call, and removing an assignment
+     * revokes the access on the next request. Every other role passes here —
+     * their scoping is enforced by their own gates — so callers must still
+     * apply the role gate (canCheckLineItems() etc.) first.
+     */
+    public function canAccessSchool(?int $schoolId): bool
+    {
+        if ($schoolId === null) {
+            return false;
+        }
+
+        if (! $this->isBookkeeperRole()) {
+            return true;
+        }
+
+        return in_array($schoolId, $this->assignedSchoolIds(), true);
+    }
+
+    /**
+     * Replace this account's assignment list in one transaction — the list is
+     * saved whole, so a failure never leaves it partially written. Only real
+     * schools are attached (a crafted payload must not reach the pivot), and
+     * duplicates collapse to one row.
+     *
+     * @param  array<int, mixed>  $schoolIds
+     */
+    public function syncAssignedSchools(array $schoolIds): void
+    {
+        $ids = array_values(array_unique(array_map(intval(...), $schoolIds)));
+
+        $valid = $ids === []
+            ? []
+            : School::query()->whereIn('id', $ids)->pluck('id')->map(fn ($id): int => (int) $id)->all();
+
+        DB::transaction(function () use ($valid): void {
+            $this->assignedSchools()->sync($valid);
+        });
     }
 
     /**

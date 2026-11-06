@@ -20,8 +20,15 @@
        $checking      ?array    the Bookkeeper's check, or null while unchecked
        $canCheck      bool      whether the viewer may give the check (Bookkeeper)
        $preparedBy    ?User     the school's School Head
-       $schoolOptions null|Collection  schools for the Budget office's picker
-       $exportUrl     ?string   the .xlsx download, or null when there is none --}}
+       $schoolOptions null|Collection  the Budget office's picker menu — the
+                                   roster narrowed by the component's
+                                   `schoolSearch` box; null on the School
+                                   Head's copy, where the picker is hidden
+       $exportUrl     ?string   the .xlsx download, or null when there is none
+
+     The picker (Budget office's copy only) reads `$schoolId` — the school on
+     screen, for the check mark — and drives the component's chooseSchool() /
+     resetSchoolSearch() actions. --}}
 
 {{-- THE ALLOTMENT BUDGET: what the Budget office set for this school head to
      consume this year, read against what the year's Monthly Expenditure
@@ -102,17 +109,90 @@
 <div class="card">
     <div class="card-head users-toolbar wfp-allotment-toolbar">
         @if ($schoolOptions !== null)
-            {{-- The Budget office oversees every school, so the report opens on
-                 one school at a time: the picker is the page's scope control,
-                 not a filter. --}}
-            <label class="users-per-page">
-                <span>School</span>
-                <select wire:model.live="schoolId" aria-label="Report school" @disabled($schoolOptions->isEmpty())>
-                    @foreach ($schoolOptions as $option)
-                        <option value="{{ $option->id }}">{{ $option->name }}</option>
-                    @endforeach
-                </select>
-            </label>
+            {{-- The Budget office reads every school and the Bookkeeper its
+                 assigned ones, so the report opens on one school at a time:
+                 the picker is the page's scope control, not a filter, and it
+                 offers only the schools the account may read. It is
+                 searchable — a division's roster is longer than a plain
+                 select shows comfortably — and typing only narrows the menu:
+                 the report moves when a school is picked (chooseSchool()),
+                 never on the text alone. The menu's open/closed state is a
+                 class (like the matrix editor's combobox), so a Livewire
+                 re-render never resurrects it mid-typing. --}}
+            <div
+                class="users-per-page wfp-school-picker"
+                x-data="{ open: false }"
+                @click.outside="if (open) { open = false; $wire.resetSchoolSearch() }"
+            >
+                <label for="wfpReportSchool">School</label>
+
+                <div class="mem-combo">
+                    <span class="mem-combo__search" aria-hidden="true">
+                        <x-icon name="search" :size="15" />
+                    </span>
+
+                    <input
+                        id="wfpReportSchool"
+                        type="text"
+                        autocomplete="off"
+                        role="combobox"
+                        aria-autocomplete="list"
+                        aria-controls="wfpReportSchoolOptions"
+                        :aria-expanded="String(open)"
+                        wire:model.live.debounce.300ms="schoolSearch"
+                        placeholder="Search school…"
+                        @focus="open = true"
+                        @input="open = true"
+                        @keydown.escape="if (open) { open = false; $wire.resetSchoolSearch() }"
+                    >
+
+                    @if (trim($schoolSearch) !== '')
+                        <button
+                            type="button"
+                            class="mem-combo__clear"
+                            wire:click="$set('schoolSearch', '')"
+                            aria-label="Clear school search"
+                            title="Clear"
+                        >
+                            <x-icon name="x" :size="14" />
+                        </button>
+                    @endif
+
+                    <div
+                        id="wfpReportSchoolOptions"
+                        class="mem-combo__menu"
+                        role="listbox"
+                        :class="open ? 'open' : ''"
+                    >
+                        @forelse ($schoolOptions as $option)
+                            <button
+                                type="button"
+                                role="option"
+                                class="mem-combo__option"
+                                wire:key="wfp-school-opt-{{ $option->id }}"
+                                wire:click="chooseSchool({{ $option->id }})"
+                                @click="open = false"
+                                aria-selected="{{ (string) $option->id === $schoolId ? 'true' : 'false' }}"
+                            >
+                                <span class="mem-combo__option-main">
+                                    <span class="mem-combo__option-title">{{ $option->name }}</span>
+                                    <span class="mem-combo__option-sub">
+                                        {{ $option->district?->name ?? 'No district' }}@if ($option->school_id) · {{ $option->school_id }}@endif
+                                    </span>
+                                </span>
+
+                                @if ((string) $option->id === $schoolId)
+                                    <span class="mem-combo__option-meta" title="Report on screen">
+                                        <x-icon name="check" :size="14" />
+                                    </span>
+                                @endif
+                            </button>
+                        @empty
+                            <div class="mem-combo__empty">No schools match “{{ trim($schoolSearch) }}”.</div>
+                        @endforelse
+                    </div>
+                </div>
+            </div>
         @endif
 
         <label class="users-per-page">
