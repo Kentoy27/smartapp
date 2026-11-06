@@ -471,7 +471,7 @@ class SchoolAllotmentImporterTest extends TestCase
 
     /* -------------------------------------------------------- certification */
 
-    public function test_a_changed_amount_clears_the_certification_in_the_preview(): void
+    public function test_a_changed_amount_on_a_certified_allotment_is_locked_in_the_preview(): void
     {
         $school = $this->school('school1', '12345');
         $budget = $this->budgetOfficer();
@@ -486,15 +486,29 @@ class SchoolAllotmentImporterTest extends TestCase
 
         $analysis = SchoolAllotmentImporter::analyzeText('12345, 2000', 2026, false);
 
-        $this->assertSame('update', $analysis['rows'][0]['action']);
-        $this->assertTrue($analysis['rows'][0]['clears_certification']);
-        $this->assertSame(1, $analysis['clearsCertificationCount']);
+        $this->assertTrue($analysis['rows'][0]['locked']);
+        $this->assertNull($analysis['rows'][0]['action']);
+        $this->assertFalse($analysis['rows'][0]['valid']);
+        $this->assertSame(SchoolAllotmentImporter::LOCKED_MESSAGE, $analysis['rows'][0]['errors'][0]);
+        $this->assertSame(0, $analysis['readyCount']);
+        $this->assertSame(1, $analysis['lockedCount']);
+        $this->assertSame(0, $analysis['invalidCount']);
 
+        // A blank amount (the clear toggle on) is refused the same way — the
+        // certificate is never cleared by a bulk row either.
+        $clear = SchoolAllotmentImporter::analyzeText('12345,', 2026, true);
+
+        $this->assertTrue($clear['rows'][0]['locked']);
+        $this->assertSame(1, $clear['lockedCount']);
+
+        // Re-stating the same figure changes nothing and stays accepted, so a
+        // re-uploaded export never trips the lock.
         $same = SchoolAllotmentImporter::analyzeText('12345, 1000.00', 2026, false);
 
         $this->assertSame('unchanged', $same['rows'][0]['action']);
-        $this->assertFalse($same['rows'][0]['clears_certification']);
-        $this->assertSame(0, $same['clearsCertificationCount']);
+        $this->assertFalse($same['rows'][0]['locked']);
+        $this->assertTrue($same['rows'][0]['valid']);
+        $this->assertSame(0, $same['lockedCount']);
     }
 
     /* --------------------------------------------------------------- commit */
@@ -532,7 +546,7 @@ class SchoolAllotmentImporterTest extends TestCase
         $this->assertSame(1500000.0, (float) $audits[1]->amount);
     }
 
-    public function test_commit_clears_the_certification_an_amount_change_invalidates(): void
+    public function test_commit_leaves_a_certified_allotment_untouched(): void
     {
         $school = $this->school('school1', '12345');
         $budget = $this->budgetOfficer();
@@ -548,11 +562,50 @@ class SchoolAllotmentImporterTest extends TestCase
         $analysis = SchoolAllotmentImporter::analyzeText('12345, 2000', 2026, false);
         $report = SchoolAllotmentImporter::commit($analysis['rows'], [], 2026, $budget);
 
-        $this->assertSame(1, $report['cleared_certification']);
+        // The preview refused the row, so commit skips it: nothing written,
+        // nothing audited, the certificate intact.
+        $this->assertSame(0, $report['processed']);
+        $this->assertSame(1, $report['skipped']);
 
         $allotment = SchoolAllotment::query()->firstOrFail();
 
-        $this->assertFalse($allotment->isCertified());
+        $this->assertSame(1000.0, (float) $allotment->amount);
+        $this->assertTrue($allotment->isCertified());
+        $this->assertSame(0, SchoolAllotmentAudit::query()->count());
+    }
+
+    public function test_commit_holds_its_own_lock_for_a_certified_row_handed_in_directly(): void
+    {
+        $school = $this->school('school1', '12345');
+        $budget = $this->budgetOfficer();
+
+        SchoolAllotment::create([
+            'school_id' => $school->id,
+            'year' => 2026,
+            'amount' => 1000,
+            'certified_by' => $budget->id,
+            'certified_at' => now(),
+        ]);
+
+        // The analysis already refuses such a row; commit re-checks the stored
+        // state itself, so a caller that skips the preview cannot slip past it.
+        $report = SchoolAllotmentImporter::commit([
+            [
+                'line' => 1,
+                'school_id' => '12345',
+                'school_db_id' => $school->id,
+                'school_division' => SchoolDivision::ELEMENTARY,
+                'amount' => 2000.0,
+                'valid' => true,
+                'superseded' => false,
+            ],
+        ], [], 2026, $budget);
+
+        $this->assertSame(0, $report['processed']);
+        $this->assertSame(1, $report['skipped']);
+        $this->assertSame(SchoolAllotmentImporter::LOCKED_MESSAGE, $report['errors'][0]['error']);
+        $this->assertSame(1000.0, (float) SchoolAllotment::query()->firstOrFail()->amount);
+        $this->assertSame(0, SchoolAllotmentAudit::query()->count());
     }
 
     public function test_commit_keeps_a_certification_when_the_same_amount_is_restated(): void
@@ -573,7 +626,6 @@ class SchoolAllotmentImporterTest extends TestCase
 
         $this->assertSame(0, $report['processed']);
         $this->assertSame(1, $report['unchanged']);
-        $this->assertSame(0, $report['cleared_certification']);
         $this->assertTrue(SchoolAllotment::query()->firstOrFail()->isCertified());
         // An unchanged row writes nothing to the trail.
         $this->assertSame(0, SchoolAllotmentAudit::query()->count());
@@ -584,13 +636,7 @@ class SchoolAllotmentImporterTest extends TestCase
         $school = $this->school('school1', '12345');
         $budget = $this->budgetOfficer();
 
-        SchoolAllotment::create([
-            'school_id' => $school->id,
-            'year' => 2026,
-            'amount' => 1000,
-            'certified_by' => $budget->id,
-            'certified_at' => now(),
-        ]);
+        SchoolAllotment::create(['school_id' => $school->id, 'year' => 2026, 'amount' => 1000]);
 
         $analysis = SchoolAllotmentImporter::analyzeText('12345,', 2026, true);
         $report = SchoolAllotmentImporter::commit($analysis['rows'], [], 2026, $budget);
@@ -603,6 +649,41 @@ class SchoolAllotmentImporterTest extends TestCase
         $this->assertSame(SchoolAllotmentAudit::ACTION_CLEAR, $audit->action);
         $this->assertSame(1000.0, (float) $audit->previous_amount);
         $this->assertNull($audit->amount);
+    }
+
+    public function test_commit_never_clears_a_certified_allotment(): void
+    {
+        $school = $this->school('school1', '12345');
+        $budget = $this->budgetOfficer();
+
+        SchoolAllotment::create([
+            'school_id' => $school->id,
+            'year' => 2026,
+            'amount' => 1000,
+            'certified_by' => $budget->id,
+            'certified_at' => now(),
+        ]);
+
+        // The preview refuses the row; commit's own guard holds even when it
+        // is handed the row directly.
+        $report = SchoolAllotmentImporter::commit([
+            [
+                'line' => 1,
+                'school_id' => '12345',
+                'school_db_id' => $school->id,
+                'school_division' => SchoolDivision::ELEMENTARY,
+                'amount' => null,
+                'valid' => true,
+                'superseded' => false,
+            ],
+        ], [], 2026, $budget);
+
+        $this->assertSame(0, $report['processed']);
+        $this->assertSame(1, $report['skipped']);
+        $this->assertSame(SchoolAllotmentImporter::LOCKED_MESSAGE, $report['errors'][0]['error']);
+        $this->assertSame(1, SchoolAllotment::query()->count());
+        $this->assertTrue(SchoolAllotment::query()->firstOrFail()->isCertified());
+        $this->assertSame(0, SchoolAllotmentAudit::query()->count());
     }
 
     public function test_commit_leaves_invalid_superseded_and_unchecked_rows_untouched(): void

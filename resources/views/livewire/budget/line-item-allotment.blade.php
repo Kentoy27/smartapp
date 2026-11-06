@@ -1,8 +1,8 @@
 {{-- PER LINE ITEM EXPENDITURE — the Budget office's copy of a school's annual
      allotment report, and the school Bookkeeper's copy of it too. It is the
      same printed form the School Head reads on /wfp/line-items; the Budget
-     office and the Bookkeeper oversee every school, so a school picker
-     replaces the SH's fixed school.
+     office reads every school, the Bookkeeper reads the schools on its
+     assignment list, so a school picker replaces the SH's fixed school.
 
      The form itself is the shared partial, so this page cannot report the
      figures differently from the school's own copy. Everything is derived on
@@ -39,8 +39,15 @@
     <div class="page-header">
         <h1>Per Line Item Expenditure</h1>
         <p>
-            Every school’s annual MOOE allotment, allocated per line item or object of expenditure.
-            Choose a school to read the report its School Head reads.
+            @if ($this->scopedToAssignedSchools())
+                Your assigned schools’ annual MOOE allotment, allocated per line
+                item or object of expenditure. Choose a school to read the report
+                its School Head reads.
+            @else
+                Every school’s annual MOOE allotment, allocated per line item or
+                object of expenditure. Choose a school to read the report its
+                School Head reads.
+            @endif
             @if ($this->school)
                 <span class="mem-chip">{{ $this->school->name }}</span>
             @endif
@@ -50,8 +57,15 @@
     @if (! $this->school)
         <div class="card">
             <div class="ac-import-error mem-banner mem-banner--notice" role="status">
-                No schools are registered yet, so there is no expenditure to report.
-                Ask an administrator to add a school first.
+                @if ($this->hasNoAssignedSchools())
+                    Your account is not assigned to any school yet, so there is no
+                    report to read here. Add the schools you are responsible for in
+                    <strong>Update My Profile</strong> (the account menu), or ask an
+                    administrator to assign them.
+                @else
+                    No schools are registered yet, so there is no expenditure to report.
+                    Ask an administrator to add a school first.
+                @endif
             </div>
         </div>
     @else
@@ -69,7 +83,7 @@
             // status and never stands for the Bookkeeper's office.
             'canCheck' => $canCheck,
             'preparedBy' => $preparedBy,
-            'schoolOptions' => $this->schools,
+            'schoolOptions' => $this->schoolOptions,
             'exportUrl' => route('budget.per-line-item.export', [
                 'school' => $this->school->id,
                 'year' => $this->year,

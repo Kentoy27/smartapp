@@ -39,9 +39,13 @@ trait BuildsWfpTemplates
     /**
      * @param  int  $dataRows  how many blank styled data rows the table has
      * @param  array<string, string>|null  $labels  header labels (null = the standard set; [] = none)
+     * @param  bool  $withApprovalBlock  add the "Approved:" signature block below
+     *                                   the TOTAL row, shaped like the official
+     *                                   template's (label, name, signature line,
+     *                                   title)
      * @return string the workbook bytes
      */
-    private function wfpTemplateBytes(int $dataRows = 3, ?array $labels = null): string
+    private function wfpTemplateBytes(int $dataRows = 3, ?array $labels = null, bool $withApprovalBlock = false): string
     {
         $labels ??= $this->wfpHeaderLabels;
         $headerRow = 3;
@@ -80,10 +84,31 @@ trait BuildsWfpTemplates
         $totalCells .= '<c r="H'.$totalRow.'" s="6"><f>SUM(H'.$firstData.':H'.($totalRow - 1).')</f><v>0</v></c>';
         $rows .= '<row r="'.$totalRow.'">'.$totalCells.'</row>';
 
+        $lastRow = $totalRow;
+
+        if ($withApprovalBlock) {
+            // Mirrors the official template's rhythm: label, then three rows
+            // down the name cell, the signature line beneath it, and the
+            // "Schools Division Superintendent" title five rows below the
+            // label. The filler must find this block after it shifts the rows
+            // above it during trimming.
+            $labelRow = $totalRow + 2;
+            $nameRow = $labelRow + 3;
+            $signatureRow = $labelRow + 4;
+            $titleRow = $labelRow + 5;
+
+            $rows .= '<row r="'.$labelRow.'"><c r="A'.$labelRow.'" s="1" t="inlineStr"><is><t xml:space="preserve">Approved:</t></is></c></row>';
+            $rows .= '<row r="'.$nameRow.'"><c r="A'.$nameRow.'" s="5"/></row>';
+            $rows .= '<row r="'.$signatureRow.'"><c r="A'.$signatureRow.'" s="6"/></row>';
+            $rows .= '<row r="'.$titleRow.'"><c r="A'.$titleRow.'" s="1" t="inlineStr"><is><t xml:space="preserve">Schools Division Superintendent</t></is></c></row>';
+
+            $lastRow = $titleRow;
+        }
+
         $sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             .'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
             .'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-            .'<dimension ref="A1:'.$lastCol.$totalRow.'"/>'
+            .'<dimension ref="A1:'.$lastCol.$lastRow.'"/>'
             .'<cols><col min="2" max="2" width="30" customWidth="1"/></cols>'
             .'<sheetData>'.$rows.'</sheetData>'
             .'<mergeCells count="1"><mergeCell ref="A1:M1"/></mergeCells>'

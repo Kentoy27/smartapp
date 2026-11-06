@@ -471,6 +471,89 @@ class WfpTemplateFiller
         return $cells;
     }
 
+    /**
+     * The cell that carries the Superadmin's printed sign-off, located in the
+     * workbook AFTER it has been filled. The filler trims unused data rows and
+     * shifts every row below them, so the template's fixed row numbers are not
+     * safe; the label and its title are found in the actual sheet instead.
+     *
+     * Returns [] when the template has no "Approved:" label followed by a
+     * "Schools Division Superintendent" title, or when there is no name. That
+     * is deliberate: a workbook without the signature block must not be
+     * guessed at, and a plan without a recorded approval must not be signed.
+     *
+     * @return array<string, string> cell reference => text
+     */
+    public static function approvalCells(string $workbookBytes, ?string $approver): array
+    {
+        $approver = trim((string) $approver);
+        $label = self::normalize((string) config('wfp.template.approval_label', 'Approved:'));
+
+        if ($approver === '' || $label === '') {
+            return [];
+        }
+
+        $parts = self::readParts($workbookBytes);
+        [$sheetPath] = self::resolveSheet($parts, (string) config('wfp.template.sheet', 'WFP'));
+
+        if ($sheetPath === null || ! isset($parts[$sheetPath])) {
+            return [];
+        }
+
+        [$byRow] = self::gridByRow($parts[$sheetPath], self::sharedStrings($parts));
+
+        foreach ($byRow as $labelRow => $cells) {
+            foreach ($cells as $labelColumn => $text) {
+                if (self::normalize($text) !== $label) {
+                    continue;
+                }
+
+                $titleRow = self::approvalTitleRow($byRow, (int) $labelRow);
+
+                if ($titleRow === null) {
+                    continue;
+                }
+
+                // The signature line sits between the name and the title:
+                // label / blank / name / signature / blank / title.
+                $nameRow = $titleRow - 2;
+
+                if ($nameRow <= (int) $labelRow) {
+                    continue;
+                }
+
+                return [strtoupper((string) $labelColumn).$nameRow => $approver];
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * The row carrying the approval title ("Schools Division Superintendent")
+     * beneath the label, or null when the block is not there.
+     *
+     * @param  array<int, array<string, string>>  $byRow
+     */
+    private static function approvalTitleRow(array $byRow, int $labelRow): ?int
+    {
+        $title = self::normalize((string) config('wfp.template.approval_title', 'Schools Division Superintendent'));
+
+        if ($title === '') {
+            return null;
+        }
+
+        for ($row = $labelRow + 1; $row <= $labelRow + 12; $row++) {
+            foreach (($byRow[$row] ?? []) as $text) {
+                if (str_contains(self::normalize($text), $title)) {
+                    return $row;
+                }
+            }
+        }
+
+        return null;
+    }
+
     /* ------------------------------------------------------------------
      * Writing
      * ----------------------------------------------------------------- */
@@ -594,6 +677,27 @@ class WfpTemplateFiller
             }
 
             $numeric = in_array($field, self::NUMERIC_FIELDS, true);
+
+            /*
+             * A grouped month-shaped row carries one target per month. Each
+             * lands in its own month's column, under the band that field's
+             * parent heading spans, so a recurring activity stays one line
+             * with every month it occurs in filled.
+             */
+            if ($field === 'physical_targets_by_month' || $field === 'financial_targets_by_month') {
+                $monthColumns = $field === 'physical_targets_by_month' ? $physicalMonths : $months;
+
+                foreach ((is_array($value) ? $value : []) as $monthNumber => $target) {
+                    if (isset($monthColumns[(int) $monthNumber])) {
+                        $writes[$monthColumns[(int) $monthNumber]] = [
+                            'value' => self::stringify($target),
+                            'numeric' => true,
+                        ];
+                    }
+                }
+
+                continue;
+            }
 
             // Month-shaped targets belong in their own month's column, under
             // the band that field's parent heading spans.

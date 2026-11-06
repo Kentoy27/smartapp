@@ -13,9 +13,11 @@ use App\Models\WfpPlan;
 use App\Models\WfpReportCheck;
 use App\Models\WfpResourceKind;
 use App\Models\WfpUnit;
+use App\Support\MemDuplicateChecker;
 use App\Support\MemImporter;
 use App\Support\WfpAllotment;
 use App\Support\WfpGenerator;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -74,6 +76,16 @@ class MemEditor extends Component
     /** The fields of one line being encoded in the modal. */
     public array $lineForm = [];
 
+    /**
+     * Additional resources for the line being encoded. The first resource's
+     * fields live in lineForm (the historical single-resource form); every
+     * entry here is another resource row, and each becomes its own line on
+     * save — the printed form's "Resources Needed" rows under one activity.
+     *
+     * @var array<int, array<string, mixed>>
+     */
+    public array $lineResources = [];
+
     /** The _key of the line being edited in the modal, or null when adding one. */
     public ?string $editingKey = null;
 
@@ -84,6 +96,13 @@ class MemEditor extends Component
      * @var array<int, int>
      */
     public array $lineMonths = [];
+
+    /**
+     * Whether the line being encoded is a repeated item ('yes') — copied
+     * into (or, when editing, kept in) the months the picker checks — or
+     * 'no': written only to the month being edited. Defaults to 'no'.
+     */
+    public string $lineRepeated = 'no';
 
     /** The live query behind the account combobox (title or object code). */
     public string $accountSearch = '';
@@ -116,6 +135,36 @@ class MemEditor extends Component
 
     /** A template chosen while the user has edits: awaits replace or keep. */
     public ?int $pendingTemplateId = null;
+
+    /* Duplicate checker for the Add a Line form. */
+
+    /**
+     * The exact match the last save was refused over, as the checker's
+     * payload — the modal shows it with "Add separately anyway". Locked: only
+     * the save gate sets it, so a crafted request cannot fabricate a warning.
+     *
+     * @var array<string, mixed>|null
+     */
+    #[Locked]
+    public ?array $duplicateWarning = null;
+
+    /**
+     * The NORMALIZED description the user explicitly confirmed for a separate
+     * entry — via "Add separately anyway", or by reusing an existing
+     * activity. The save gate lets an exact match through only while the
+     * line's description still normalizes to this; editing the text drops it
+     * (updatedLineFormActivityDescription()).
+     */
+    #[Locked]
+    public ?string $duplicateConfirmedFor = null;
+
+    /**
+     * The existing line whose activity details the modal was filled from
+     * ("Use existing activity"), or null. Informational only: it drives the
+     * modal's reuse note and never alters the saved line.
+     */
+    #[Locked]
+    public ?int $reusedFromItemId = null;
 
     /**
      * Per-request memo for the master records normalisation looks up, so
@@ -241,6 +290,25 @@ class MemEditor extends Component
         ];
     }
 
+    /**
+     * One blank extra resource row. The first resource is the lineForm's own
+     * fields; these are the rows "Add resource" appends.
+     *
+     * @return array<string, mixed>
+     */
+    private function blankResourceRow(): array
+    {
+        return [
+            '_key' => 'res-'.bin2hex(random_bytes(8)),
+            'resource_kind' => '',
+            'quantity' => '',
+            'unit' => '',
+            'unit_cost' => '',
+            'resource_kind_id' => null,
+            'unit_id' => null,
+        ];
+    }
+
     /* --------------------------------------------------------------- rules */
 
     /**
@@ -322,16 +390,23 @@ class MemEditor extends Component
 
         $this->editingKey = null;
         $this->lineMonths = [(int) $matrix->month];
+        $this->lineRepeated = 'no';
         $this->lineSection = in_array($section, ['operations', 'project'], true) ? $section : 'operations';
         $this->lineForm = $this->blankRow($this->lineSection);
+        $this->lineResources = [];
         $this->accountSearch = '';
         $this->templateSearch = '';
         $this->appliedTemplateId = null;
         $this->appliedTemplateName = '';
         $this->appliedTemplateSnapshot = [];
         $this->pendingTemplateId = null;
+        $this->resetDuplicateState();
         $this->showLineModal = true;
         $this->resetValidation();
+
+        // The suggestion panel is Alpine-owned (wire:ignore), so it is reset
+        // by event: a fresh modal never opens over the last line's matches.
+        $this->dispatch('mem-line-modal-reset');
     }
 
     /**
@@ -366,10 +441,15 @@ class MemEditor extends Component
                 $this->lineMonths = $this->monthsHoldingLine($item);
             }
 
+            // A line already living in more than one month is a repeated
+            // item: reopen with Yes and the month picker visible.
+            $this->lineRepeated = count($this->lineMonths) > 1 ? 'yes' : 'no';
+
             $this->lineSection = in_array($row['section'] ?? '', ['operations', 'project'], true)
                 ? $row['section']
                 : 'operations';
             $this->lineForm = $row;
+            $this->lineResources = [];
             $this->accountSearch = (string) ($row['account_title'] ?? '');
             $this->templateSearch = '';
 
@@ -400,8 +480,11 @@ class MemEditor extends Component
             }
 
             $this->pendingTemplateId = null;
+            $this->resetDuplicateState();
             $this->showLineModal = true;
             $this->resetValidation();
+
+            $this->dispatch('mem-line-modal-reset');
 
             return;
         }
@@ -412,14 +495,262 @@ class MemEditor extends Component
         $this->showLineModal = false;
         $this->editingKey = null;
         $this->lineForm = [];
+        $this->lineResources = [];
         $this->lineMonths = [];
+        $this->lineRepeated = 'no';
         $this->accountSearch = '';
         $this->templateSearch = '';
         $this->appliedTemplateId = null;
         $this->appliedTemplateName = '';
         $this->appliedTemplateSnapshot = [];
         $this->pendingTemplateId = null;
+        $this->resetDuplicateState();
         $this->resetValidation();
+
+        $this->dispatch('mem-line-modal-reset');
+    }
+
+    /**
+     * Forget the duplicate checker's modal state: a standing warning, a
+     * reuse note and any confirmation all belong to the line that was on
+     * screen, never to the next one.
+     */
+    private function resetDuplicateState(): void
+    {
+        $this->duplicateWarning = null;
+        $this->duplicateConfirmedFor = null;
+        $this->reusedFromItemId = null;
+    }
+
+    /**
+     * The description changed: an "Add separately anyway" confirmation is
+     * tied to the text it was given for, and a standing warning describes
+     * the old text — both are dropped, so the save gate checks the new
+     * description fresh. (Livewire fires this while syncing the form, before
+     * the action being called runs.)
+     */
+    public function updatedLineFormActivityDescription(): void
+    {
+        $this->duplicateWarning = null;
+        $this->duplicateConfirmedFor = null;
+    }
+
+    /**
+     * The suggestion panel's "Add separately anyway": the user has seen the
+     * match and deliberately wants a separate entry, so the save gate lets
+     * this description through. The panel passes the text it was showing;
+     * when that no longer matches what is in the field, nothing is confirmed
+     * and the save simply re-checks.
+     */
+    public function confirmAddSeparate(string $description = ''): void
+    {
+        $this->guard();
+
+        $current = self::normalizedDescription($this->lineForm);
+        $confirmed = MemDuplicateChecker::normalize($description);
+
+        $this->duplicateWarning = null;
+
+        if ($current !== '' && $confirmed === $current) {
+            $this->duplicateConfirmedFor = $current;
+        }
+    }
+
+    /**
+     * The duplicate warning's "Add separately anyway": confirm and save in
+     * one step, so the refused save completes in a single click. The
+     * confirmation is taken from the WARNING's own description — if the user
+     * has since edited the text, it no longer applies and the save re-checks
+     * the new description from scratch.
+     */
+    public function confirmDuplicateAndSave(): void
+    {
+        $this->guard();
+
+        $current = self::normalizedDescription($this->lineForm);
+        $warned = MemDuplicateChecker::normalize((string) ($this->duplicateWarning['description'] ?? ''));
+
+        if ($current !== '' && $warned !== '' && $warned === $current) {
+            $this->duplicateConfirmedFor = $current;
+        }
+
+        $this->duplicateWarning = null;
+
+        $this->saveLineFromModal();
+    }
+
+    /** Drop the duplicate warning and keep editing the line. */
+    public function dismissDuplicateWarning(): void
+    {
+        $this->guard();
+
+        $this->duplicateWarning = null;
+    }
+
+    /**
+     * "Use existing activity": fill the line being encoded with the matching
+     * entry's ACTIVITY details — objective, description, account, funding
+     * source, outputs, MOVs — leaving the resource columns alone, so the
+     * resource being typed is added under the existing activity. That is how
+     * this editor already models reuse: several lines share one activity's
+     * details, one per resource row, and each is saved as its own line. The
+     * matching entry itself is never touched.
+     *
+     * The entry is loaded through this matrix's id, so only a line of the
+     * matrix being edited can ever be reused.
+     */
+    public function useExistingActivity(int $itemId): void
+    {
+        $matrix = $this->guard();
+
+        $item = MonthlyExpenditureItem::query()
+            ->where('matrix_id', $matrix->id)
+            ->find($itemId);
+
+        abort_if($item === null, 404);
+
+        $section = in_array($item->section, ['operations', 'project'], true)
+            ? $item->section
+            : 'operations';
+
+        // Reusing a line of the other section switches the form to it. The
+        // same rule updatedLineSection() applies: a template of the old
+        // section no longer describes this line, so its link is dropped
+        // (the values already on screen stay).
+        if ($section !== $this->lineSection) {
+            $this->lineSection = $section;
+
+            $template = $this->appliedTemplateId !== null
+                ? WfpLineTemplate::find($this->appliedTemplateId)
+                : null;
+
+            if ($template === null || $template->line_type !== $section) {
+                $this->appliedTemplateId = null;
+                $this->appliedTemplateName = '';
+                $this->appliedTemplateSnapshot = [];
+            }
+        }
+
+        $this->lineForm['section'] = $section;
+        $this->lineForm['objective'] = (string) ($item->objective ?? '');
+        $this->lineForm['activity_description'] = (string) $item->activity_description;
+        $this->lineForm['account_title'] = (string) ($item->account_title ?? '');
+        $this->lineForm['account_code'] = (string) ($item->account_code ?? '');
+        $this->lineForm['account_classification_id'] = $item->account_classification_id;
+        $this->lineForm['funding_source'] = (string) ($item->funding_source ?? '');
+        $this->lineForm['funding_source_id'] = $item->funding_source_id;
+        $this->lineForm['organizational_classification'] = (string) ($item->organizational_classification ?? '');
+        $this->lineForm['org_classification_id'] = $item->org_classification_id;
+        $this->lineForm['major_output'] = (string) ($item->major_output ?? '');
+        $this->lineForm['performance_indicator'] = (string) ($item->performance_indicator ?? '');
+        $this->lineForm['activity_movs'] = (string) ($item->activity_movs ?? '');
+        $this->lineForm['wfp_line_template_id'] = $item->wfp_line_template_id;
+
+        $this->accountSearch = (string) ($item->account_title ?? '');
+
+        // The user engaged with the existing entry deliberately: the save
+        // gate treats this as the confirmation for this description.
+        $this->duplicateConfirmedFor = MemDuplicateChecker::normalize((string) $item->activity_description);
+        $this->duplicateWarning = null;
+        $this->reusedFromItemId = (int) $item->id;
+
+        foreach ([
+            'section', 'objective', 'activity_description', 'account_title', 'account_code',
+            'funding_source', 'organizational_classification', 'major_output',
+            'performance_indicator', 'activity_movs',
+        ] as $field) {
+            $this->resetValidation('lineForm.'.$field);
+        }
+    }
+
+    /** Dismiss the modal's reuse note; the filled fields stay as they are. */
+    public function clearReusedActivity(): void
+    {
+        $this->guard();
+
+        $this->reusedFromItemId = null;
+    }
+
+    /**
+     * Whether the line's description has been explicitly confirmed for a
+     * separate entry and the confirmation still belongs to the current text.
+     */
+    private function duplicateConfirmed(): bool
+    {
+        return $this->duplicateConfirmedFor !== null
+            && $this->duplicateConfirmedFor !== ''
+            && $this->duplicateConfirmedFor === self::normalizedDescription($this->lineForm);
+    }
+
+    /**
+     * @param  array<string, mixed>  $form
+     */
+    private static function normalizedDescription(array $form): string
+    {
+        return MemDuplicateChecker::normalize((string) ($form['activity_description'] ?? ''));
+    }
+
+    /**
+     * Append another Resource Needed row to the line being encoded. On save
+     * every filled row becomes its own line sharing the activity, account and
+     * section encoded above it.
+     */
+    public function addLineResource(): void
+    {
+        $this->guard();
+
+        $this->lineResources[] = $this->blankResourceRow();
+    }
+
+    /** Remove one of the extra resource rows (the first row is lineForm). */
+    public function removeLineResource(int $index): void
+    {
+        $this->guard();
+
+        if (! array_key_exists($index, $this->lineResources)) {
+            return;
+        }
+
+        unset($this->lineResources[$index]);
+
+        $this->lineResources = array_values($this->lineResources);
+
+        $this->resetValidation('lineResources');
+    }
+
+    /**
+     * Switching the repeat control back to No drops any checked months: a
+     * hidden picker must not leave memberships behind, or Yes → No would
+     * still write the months chosen moments ago.
+     */
+    public function updatedLineRepeated(): void
+    {
+        if ($this->lineRepeated === 'yes') {
+            return;
+        }
+
+        $this->lineMonths = [(int) $this->matrix->month];
+        $this->resetValidation('lineMonths');
+    }
+
+    /**
+     * "Apply to all": tick every month that already has a matrix. Months
+     * without one stay unselectable — adding the year is still the only
+     * path that creates months.
+     */
+    public function applyLineToAllMonths(): void
+    {
+        $this->guard();
+
+        $this->lineMonths = [];
+
+        foreach ($this->months as $tab) {
+            if ($tab['id'] !== null) {
+                $this->lineMonths[] = (int) $tab['month'];
+            }
+        }
+
+        $this->resetValidation('lineMonths');
     }
 
     /**
@@ -457,6 +788,29 @@ class MemEditor extends Component
 
         $this->validate($this->lineRules(), $this->lineAttributes());
 
+        // The duplicate gate: a FRESH server-side check for an exact
+        // description match already standing in this matrix — the suggestion
+        // panel's results are advisory and may be stale. Unless the user has
+        // explicitly confirmed a separate entry for this exact text, the save
+        // is refused once with the match shown; "Add separately anyway" then
+        // records the confirmation and the save proceeds.
+        if (! $this->duplicateConfirmed()) {
+            $match = MemDuplicateChecker::exactMatch(
+                $this->matrix,
+                (string) ($this->lineForm['activity_description'] ?? ''),
+                $existing !== null ? (int) $existing->id : null,
+            );
+
+            if ($match !== null) {
+                $this->duplicateWarning = MemDuplicateChecker::payload($match, 'exact');
+                $this->dispatch('mem-duplicate-recheck');
+
+                return;
+            }
+        }
+
+        $this->duplicateWarning = null;
+
         $currentMonth = (int) $this->matrix->month;
 
         if ($this->editingKey !== null) {
@@ -472,6 +826,10 @@ class MemEditor extends Component
             $inCurrentMonth = in_array($currentMonth, $months, true);
             $dropped = false;
 
+            $lineRows = $this->lineRowsForSave($existing, true);
+            $primaryRow = $lineRows[0];
+            $extraRows = array_slice($lineRows, 1);
+
             // The picker is the line's membership, so the month this page
             // shows is not special: checked, its row is edited in place;
             // unchecked, the row leaves the grid and persist() deletes it.
@@ -482,7 +840,7 @@ class MemEditor extends Component
 
                 if ($inCurrentMonth) {
                     // Keep the row's identity; the form only carries its fields.
-                    $updated = array_merge($row, $this->lineForm);
+                    $updated = array_merge($row, $primaryRow);
                     $updated['_key'] = $row['_key'];
                     $updated['id'] = $row['id'];
 
@@ -496,18 +854,30 @@ class MemEditor extends Component
                 break;
             }
 
-            $row = array_merge($this->blankRow($this->lineSection), $this->lineForm);
+            // Extra resource rows are new lines of the same activity, written
+            // to this month and to the checked sibling months.
+            if ($inCurrentMonth) {
+                foreach ($extraRows as $extraRow) {
+                    $this->items[] = $this->asNewItemRow($extraRow);
+                }
+            }
+
+            $row = array_merge($this->blankRow($this->lineSection), $primaryRow);
 
             $this->closeLineModal();
 
             $removed = [];
 
-            $saved = DB::transaction(function () use ($row, $existing, $siblings, $months, $dropped, $currentMonth, &$removed): bool {
+            $saved = DB::transaction(function () use ($row, $existing, $siblings, $months, $dropped, $currentMonth, $extraRows, &$removed): bool {
                 if (! $this->persist()) {
                     return false;
                 }
 
                 $this->applyEditToMonths($row, $existing, $siblings);
+
+                foreach ($extraRows as $extraRow) {
+                    $this->copyLineToMonths($extraRow, $siblings);
+                }
 
                 $removed = $this->removeLineFromUncheckedMonths($existing, $months);
 
@@ -550,22 +920,24 @@ class MemEditor extends Component
 
         $inCurrentMonth = in_array($currentMonth, $months, true);
 
-        $row = array_merge($this->blankRow($this->lineSection), $this->lineForm);
-        $row['_key'] = 'new-'.bin2hex(random_bytes(8));
-        $row['id'] = null;
+        $lineRows = $this->lineRowsForSave(null, false);
 
         if ($inCurrentMonth) {
-            $this->items[] = $row;
+            foreach ($lineRows as $lineRow) {
+                $this->items[] = $this->asNewItemRow($lineRow);
+            }
         }
 
         $this->closeLineModal();
 
-        $saved = DB::transaction(function () use ($row, $siblings, $inCurrentMonth): bool {
+        $saved = DB::transaction(function () use ($lineRows, $siblings, $inCurrentMonth): bool {
             if ($inCurrentMonth && ! $this->persist()) {
                 return false;
             }
 
-            $this->copyLineToMonths($row, $siblings);
+            foreach ($lineRows as $lineRow) {
+                $this->copyLineToMonths($lineRow, $siblings);
+            }
 
             // Writing any month changes the year's lines, so the Bookkeeper's
             // check no longer describes what the report will show.
@@ -585,7 +957,9 @@ class MemEditor extends Component
         // A current-month-only add already shows its result in the grid; the
         // alert is for the months this page does not show.
         if (count($months) > 1 || ! $inCurrentMonth) {
-            $this->successMessage = 'Line added to '.$this->monthList($months).' '.$this->matrix->year.'.';
+            $label = count($lineRows) === 1 ? 'Line added' : count($lineRows).' lines added';
+
+            $this->successMessage = $label.' to '.$this->monthList($months).' '.$this->matrix->year.'.';
         }
 
         // The other months' totals and the year's balance changed too.
@@ -599,7 +973,11 @@ class MemEditor extends Component
      * reaches. Returns null (with an error on the form) when a checked month
      * has no matrix — adding the year is the one path that creates months.
      *
-     * @return array{0: array<int, int>, 1: \Illuminate\Database\Eloquent\Collection<int, MonthlyExpenditureMatrix>}|null
+     * A line that is not repeated writes only the month being edited: the
+     * month picker is hidden for it, and any stale checked months the browser
+     * still holds are ignored, so "No" always means this month.
+     *
+     * @return array{0: array<int, int>, 1: Collection<int, MonthlyExpenditureMatrix>}|null
      */
     private function checkedMonths(): ?array
     {
@@ -612,7 +990,10 @@ class MemEditor extends Component
         ]);
 
         /** @var array<int, int> $months */
-        $months = array_values(array_unique(array_map('intval', $this->lineMonths)));
+        $months = $this->lineRepeated === 'yes'
+            ? array_values(array_unique(array_map('intval', $this->lineMonths)))
+            : [(int) $this->matrix->month];
+
         sort($months);
 
         $otherMonths = array_values(array_diff($months, [(int) $this->matrix->month]));
@@ -721,7 +1102,7 @@ class MemEditor extends Component
      * alone, exactly as the update path leaves it alone.
      *
      * @param  array<int, int>  $checkedMonths
-     * @return array<int, int>  the months the line was removed from
+     * @return array<int, int> the months the line was removed from
      */
     private function removeLineFromUncheckedMonths(?MonthlyExpenditureItem $snapshot, array $checkedMonths): array
     {
@@ -862,6 +1243,16 @@ class MemEditor extends Component
             }
         }
 
+        // The extra Resource Needed rows, validated with the same rules the
+        // grid applies to a line's resource columns.
+        $rules['lineResources'] = ['array'];
+        $rules['lineResources.*.resource_kind'] = ['nullable', 'string', 'max:255'];
+        $rules['lineResources.*.quantity'] = ['nullable', 'numeric', 'min:0'];
+        $rules['lineResources.*.unit'] = ['nullable', 'string', 'max:64'];
+        $rules['lineResources.*.unit_cost'] = ['nullable', 'numeric', 'min:0'];
+        $rules['lineResources.*.resource_kind_id'] = ['nullable', 'integer'];
+        $rules['lineResources.*.unit_id'] = ['nullable', 'integer'];
+
         return $rules;
     }
 
@@ -876,7 +1267,116 @@ class MemEditor extends Component
             }
         }
 
+        $attributes['lineResources.*.resource_kind'] = 'resource kind';
+        $attributes['lineResources.*.quantity'] = 'quantity';
+        $attributes['lineResources.*.unit'] = 'unit';
+        $attributes['lineResources.*.unit_cost'] = 'unit cost';
+
         return $attributes;
+    }
+
+    /* ----------------------------------------------------------- resources */
+
+    /**
+     * The resource columns of one row, so the primary lineForm row and the
+     * extra lineResources rows can be read by the same code.
+     *
+     * @param  array<string, mixed>  $row
+     * @return array<string, mixed>
+     */
+    private static function resourceFields(array $row): array
+    {
+        return [
+            'resource_kind' => (string) ($row['resource_kind'] ?? ''),
+            'quantity' => $row['quantity'] ?? '',
+            'unit' => (string) ($row['unit'] ?? ''),
+            'unit_cost' => $row['unit_cost'] ?? '',
+            'resource_kind_id' => $row['resource_kind_id'] ?? null,
+            'unit_id' => $row['unit_id'] ?? null,
+        ];
+    }
+
+    /**
+     * Whether a resource row carries no detail at all. Blank rows are ignored
+     * on save, so an "Add resource" click the SH changed their mind about
+     * never creates an empty line.
+     *
+     * @param  array<string, mixed>  $resource
+     */
+    private static function resourceIsBlank(array $resource): bool
+    {
+        foreach (['resource_kind', 'quantity', 'unit', 'unit_cost'] as $field) {
+            if (trim((string) ($resource[$field] ?? '')) !== '') {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * The complete lines the modal's resource rows stand for. Each row is the
+     * line's shared fields (activity, account, section…) plus that row's own
+     * resource columns, normalised exactly like a grid row.
+     *
+     * Adding drops blank rows; editing keeps the primary row even when its
+     * resource columns are blank, because that row is the line being edited.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function lineRowsForSave(?MonthlyExpenditureItem $existing, bool $editing): array
+    {
+        $resources = [self::resourceFields($this->lineForm)];
+
+        foreach ($this->lineResources as $resource) {
+            $resources[] = self::resourceFields($resource);
+        }
+
+        if (! $editing && $resources !== [] && self::resourceIsBlank($resources[0])) {
+            array_shift($resources);
+        }
+
+        $resources = array_values(array_filter(
+            $resources,
+            static fn (array $resource): bool => $editing || ! self::resourceIsBlank($resource),
+        ));
+
+        // No resource details at all: keep one row with empty resource
+        // columns, exactly as the single-resource form allowed.
+        if ($resources === []) {
+            $resources[] = self::resourceFields([]);
+        }
+
+        $rows = [];
+
+        foreach ($resources as $index => $resource) {
+            $row = array_merge($this->lineForm, $resource);
+
+            // Only the row being edited may keep an inactive lookup link; a
+            // new line can never be stamped with one.
+            $rows[] = $this->normaliseRow(
+                $row,
+                $editing && $index === 0 ? $existing : null,
+            );
+        }
+
+        return $rows;
+    }
+
+    /**
+     * A row about to be appended to the grid as a new, unsaved line: fresh key
+     * and no stored id, so persist() inserts it instead of updating another
+     * month's line.
+     *
+     * @param  array<string, mixed>  $row
+     * @return array<string, mixed>
+     */
+    private function asNewItemRow(array $row): array
+    {
+        $row['_key'] = 'new-'.bin2hex(random_bytes(8));
+        $row['id'] = null;
+
+        return $row;
     }
 
     public function removeRow(string $key): void
@@ -1463,6 +1963,16 @@ class MemEditor extends Component
             ['status' => WfpPlan::STATUS_DRAFT],
         );
 
+        // A plan under final review — or already approved — is not the
+        // School Head's to rewrite from the MEM. A returned plan is editable
+        // again, so it still reaches the generator.
+        if (! $plan->isEditable()) {
+            $this->errorMessage = 'This WFP is '.strtolower($plan->statusLabel())
+                .' and can no longer be regenerated.';
+
+            return null;
+        }
+
         $plan->generated_by = $user->id;
         $plan->save();
 
@@ -1633,8 +2143,6 @@ class MemEditor extends Component
     /**
      * Whether the line's template-owned fields differ from the snapshot of
      * the last applied template — i.e. the user has edited them.
-     *
-     * @return bool
      */
     public function hasTemplateEdits(): bool
     {
@@ -1703,6 +2211,7 @@ class MemEditor extends Component
 
             if ($mode === 'replace') {
                 $this->lineForm[$field] = $value;
+
                 continue;
             }
 

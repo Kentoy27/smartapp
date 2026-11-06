@@ -130,8 +130,8 @@ class MonthlyExpenditureMatrix extends Model
      * May this user open the matrix at all? Currently the owning School Head
      * — the same account set as {@see managedBy()}, kept as its own gate so
      * the page routes and every write can diverge without touching each
-     * other (the Bookkeeper checks lines on the division-wide Monthly
-     * Expenditure page instead, never here).
+     * other (the Bookkeeper checks lines on the Monthly Expenditure page
+     * instead, never here).
      */
     public function canBeViewedBy(?User $user): bool
     {

@@ -136,6 +136,7 @@ class ApplicationSmokeTest extends TestCase
             '/wfp/matrices',
             '/wfp/matrices/template',
             '/wfp/matrices/1',
+            '/wfp/matrices/1/duplicate-check',
             '/wfp/plans/1',
             '/wfp/plans/1/export',
             '/admin/wfp-setup',
@@ -378,10 +379,13 @@ class ApplicationSmokeTest extends TestCase
      * guest must never reach anything at all.
      *
      * Note how this is asserted. Livewire's test harness does NOT throw for
-     * a guard in mount(): it renders the framework's error page as the
-     * component's output. Actions behave differently and do throw. Asserting
-     * "an exception was raised" here would silently pass a component that
-     * happily rendered — so this asserts on what actually came back.
+     * a guard: a mount() abort renders the framework's error page as the
+     * component's output, and an action's abort comes back as the request's
+     * 404 response (assert on ->html() / ->assertNotFound() accordingly).
+     * Asserting "an exception was raised" would silently pass a component
+     * that happily rendered — so this asserts on what actually came back.
+     * (Only probing a method directly on ->instance() throws, being plain
+     * PHP — see BookkeeperRoleTest.)
      */
     public function test_role_boundaries_hold_for_every_superadmin_component(): void
     {
@@ -455,7 +459,7 @@ class ApplicationSmokeTest extends TestCase
     }
 
     /**
-     * The Bookkeeper's interface is the division-wide checking pages alone:
+     * The Bookkeeper's interface is the school-scoped checking pages alone:
      * the staff pages and the School Head's WFP workspace (components and
      * model-bound editors) refuse it with the same 404 they give any other
      * uninvited role.
@@ -485,7 +489,7 @@ class ApplicationSmokeTest extends TestCase
             $this->assertStringContainsString(
                 'Page Not Found',
                 $html,
-                $component.' rendered for a Bookkeeper; its module is the WFP alone.'
+                $component.' rendered for a Bookkeeper; its module is the checking pages alone.'
             );
         }
     }

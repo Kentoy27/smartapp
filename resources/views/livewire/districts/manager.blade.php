@@ -81,6 +81,7 @@
                                                 <tr>
                                                     <th scope="col">School Name</th>
                                                     <th scope="col">School ID</th>
+                                                    <th scope="col">Divisions</th>
                                                     <th scope="col">Users</th>
                                                     <th scope="col" class="district-actions-col">Actions</th>
                                                 </tr>
@@ -89,7 +90,7 @@
                                                 @foreach ($this->selectedDistrictSchools as $school)
                                                     @if ($editingSchoolId === $school->id)
                                                         <tr wire:key="school-edit-{{ $school->id }}">
-                                                            <td colspan="4">
+                                                            <td colspan="5">
                                                                 <form wire:submit="saveEditSchool" class="school-edit-form">
                                                                     {{-- Same panel as Add School: a header that says what
                                                                          is being edited and where it lives, the same two
@@ -130,6 +131,27 @@
                                                                         </div>
                                                                     </div>
 
+                                                                    <fieldset class="field school-divisions-field">
+                                                                        <legend>Divisions</legend>
+                                                                        <div class="field-hint">
+                                                                            The divisions this school operates. The user form offers only these.
+                                                                        </div>
+                                                                        <div class="school-division-options">
+                                                                            @foreach ($this->divisionOptions() as $option)
+                                                                                <label class="school-division-option">
+                                                                                    <input
+                                                                                        type="checkbox"
+                                                                                        value="{{ $option['value'] }}"
+                                                                                        wire:model.live="editSchoolDivisions"
+                                                                                    >
+                                                                                    <span>{{ $option['label'] }}</span>
+                                                                                </label>
+                                                                            @endforeach
+                                                                        </div>
+                                                                        @error('editSchoolDivisions') <div class="error-text">{{ $message }}</div> @enderror
+                                                                        @error('editSchoolDivisions.*') <div class="error-text">{{ $message }}</div> @enderror
+                                                                    </fieldset>
+
                                                                     <div class="school-edit-actions">
                                                                         <button type="button" class="btn-ghost" wire:click="cancelEditSchool">Cancel</button>
                                                                         <button type="submit" class="btn-primary" wire:loading.attr="disabled" wire:target="saveEditSchool">
@@ -150,6 +172,13 @@
                                                                 </span>
                                                             </td>
                                                             <td><span class="badge">{{ $school->school_id !== null ? $school->school_id : '—' }}</span></td>
+                                                            <td>
+                                                                <span class="school-division-badges">
+                                                                    @foreach ($school->availableDivisions() as $division)
+                                                                        <span class="badge">{{ \App\Support\SchoolDivision::label($division) }}</span>
+                                                                    @endforeach
+                                                                </span>
+                                                            </td>
                                                             <td>{{ $school->users_count }}</td>
                                                             <td class="district-actions-col">
                                                                 <x-row-menu :label="'More actions for '.$school->name">
@@ -168,7 +197,7 @@
                                                 @endforeach
                                                 @if ($this->selectedDistrictSchools->isEmpty())
                                                     <tr>
-                                                        <td colspan="4" class="table-empty">
+                                                        <td colspan="5" class="table-empty">
                                                             {{ $schoolSearch !== '' ? 'No schools match your search.' : 'No schools yet — add the first one.' }}
                                                         </td>
                                                     </tr>
@@ -233,6 +262,27 @@
                                                     @error('schoolId') <div class="error-text">{{ $message }}</div> @enderror
                                                 </div>
                                             </div>
+
+                                            <fieldset class="field school-divisions-field">
+                                                <legend>Divisions</legend>
+                                                <div class="field-hint">
+                                                    The divisions this school operates. The user form offers only these.
+                                                </div>
+                                                <div class="school-division-options">
+                                                    @foreach ($this->divisionOptions() as $option)
+                                                        <label class="school-division-option">
+                                                            <input
+                                                                type="checkbox"
+                                                                value="{{ $option['value'] }}"
+                                                                wire:model.live="schoolDivisions"
+                                                            >
+                                                            <span>{{ $option['label'] }}</span>
+                                                        </label>
+                                                    @endforeach
+                                                </div>
+                                                @error('schoolDivisions') <div class="error-text">{{ $message }}</div> @enderror
+                                                @error('schoolDivisions.*') <div class="error-text">{{ $message }}</div> @enderror
+                                            </fieldset>
 
                                             <div class="school-edit-actions">
                                                 <button type="button" class="btn-ghost" wire:click="cancelSchoolForm">Cancel</button>

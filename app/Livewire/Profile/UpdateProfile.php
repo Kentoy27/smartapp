@@ -2,7 +2,9 @@
 
 namespace App\Livewire\Profile;
 
+use App\Livewire\Concerns\ManagesAssignedSchools;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\On;
 use Livewire\Component;
@@ -11,10 +13,12 @@ use Livewire\Component;
  * The "Update My Profile" modal behind the account menu.
  *
  * Every signed-in account — user or superadmin — edits only its OWN record:
- * the id never comes from the browser, and role, school and superadmin rights
- * are not fields here at all, so a crafted request cannot promote itself or
- * move itself to another school. Those stay with the administrator who
- * assigns them.
+ * the id never comes from the browser, and role and superadmin rights are not
+ * fields here at all, so a crafted request cannot promote itself. The base
+ * school stays with the administrator too; the ONE school decision an account
+ * makes here is the Bookkeeper's own assignment list, which is the roster its
+ * checking pages are scoped to (User::canAccessSchool()). Every other role's
+ * school assignment is untouched by this form.
  *
  * Username and email are the two ways in, so they stay unique across the
  * system. The password is optional and only changes when the account proves
@@ -23,6 +27,8 @@ use Livewire\Component;
  */
 class UpdateProfile extends Component
 {
+    use ManagesAssignedSchools;
+
     /**
      * Whether the modal is on screen. Opening is driven from the account menu
      * with the `open-profile-modal` event, so the layout owns the trigger and
@@ -78,6 +84,11 @@ class UpdateProfile extends Component
         $this->username = (string) $account->username;
         $this->email = (string) ($account->email ?? '');
 
+        // The Bookkeeper's roster, read fresh from the database: the modal
+        // always opens on what is actually saved, never on a selection a
+        // previous visit left behind.
+        $this->loadAssignedSchools($account);
+
         $this->resetPasswordFields();
 
         $this->successMessage = null;
@@ -112,19 +123,39 @@ class UpdateProfile extends Component
         $validated = $this->validate();
         $passwordChanged = filled($validated['password']);
 
-        $account->name = $validated['name'];
-        $account->position = $validated['position'] ?: null;
-        $account->username = $validated['username'];
-        $account->email = $validated['email'];
+        // The details and the roster are one save: a failure in either must
+        // not leave the other half-written.
+        DB::transaction(function () use ($account, $validated): void {
+            $account->name = $validated['name'];
+            $account->position = $validated['position'] ?: null;
+            $account->username = $validated['username'];
+            $account->email = $validated['email'];
 
-        // Blank means "keep the current password" — the field is on screen
-        // only so the account can change it, not as a required step.
-        if ($passwordChanged) {
-            $account->password = $validated['password'];
-        }
+            // Blank means "keep the current password" — the field is on screen
+            // only so the account can change it, not as a required step.
+            if ($passwordChanged) {
+                $account->password = $validated['password'];
+            }
 
-        $account->save();
-        $this->showModal = false;
+            $account->save();
+            $this->showModal = false;
+            // Blank means "keep the current password" — the field is on screen
+            // only so the account can change it, not as a required step.
+            if (filled($validated['password'])) {
+                $account->password = $validated['password'];
+            }
+
+            $account->save();
+
+            // The Bookkeeper's assignment list is the one school decision this
+            // form owns: the list on screen replaces the stored one whole, so
+            // removing a school revokes the access with it. For every other
+            // role the rules never carry the field, so a crafted payload is
+            // not even validated — and can never reach this line.
+            if ($account->isBookkeeperRole()) {
+                $account->syncAssignedSchools($validated['assigned_schools'] ?? []);
+            }
+        });
 
         $this->resetPasswordFields();
         $this->resetValidation();
@@ -152,8 +183,12 @@ class UpdateProfile extends Component
     /**
      * Validation rules for the account's own form.
      *
-     * Role, school and superadmin rights are deliberately absent: they are not
-     * this form's to change, so there is nothing for a request to smuggle in.
+     * Role, the base school and superadmin rights are deliberately absent:
+     * they are not this form's to change, so there is nothing for a request
+     * to smuggle in. The Bookkeeper's assignment list is the exception — it
+     * is the account's own roster to keep current — and its rules exist only
+     * for a Bookkeeper, so for every other role a crafted list is ignored
+     * rather than saved.
      *
      * @return array<string, array<int, mixed>>
      */
@@ -161,25 +196,37 @@ class UpdateProfile extends Component
     {
         $account = $this->account();
 
-        return [
+        $rules = [
             'name' => ['required', 'string', 'max:255'],
             'position' => ['nullable', 'string', 'max:255'],
             'username' => [
-                'required', 'string', 'max:255', 'alpha_dash',
+                'required',
+                'string',
+                'max:255',
+                'alpha_dash',
                 Rule::unique('users', 'username')->ignore($account->getKey()),
             ],
             'email' => [
-                'required', 'string', 'email', 'max:255',
+                'required',
+                'string',
+                'email',
+                'max:255',
                 Rule::unique('users', 'email')->ignore($account->getKey()),
             ],
             // Only asked for when a new password is actually being set.
             'current_password' => [
-                Rule::requiredIf(fn () => filled($this->password)),
+                Rule::requiredIf(fn() => filled($this->password)),
                 'string',
                 'current_password',
             ],
             'password' => ['nullable', 'string', 'min:8', 'confirmed'],
         ];
+
+        if ($account->isBookkeeperRole()) {
+            $rules = array_merge($rules, $this->assignedSchoolRules());
+        }
+
+        return $rules;
     }
 
     /**
@@ -196,7 +243,7 @@ class UpdateProfile extends Component
             'email' => 'email',
             'current_password' => 'current password',
             'password' => 'new password',
-        ];
+        ] + $this->assignedSchoolAttributes();
     }
 
     /**

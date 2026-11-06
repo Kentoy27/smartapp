@@ -8,6 +8,7 @@ use App\Models\MovRequirement;
 use App\Models\OpcrfSubmission;
 use App\Models\User;
 use App\Models\UserMov;
+use App\Models\WfpPlan;
 use App\Support\SchoolDivision;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
@@ -58,7 +59,7 @@ class Sidebar extends Component
         // other group once the reader says so.
         $this->openGroups['wfp'] = true;
 
-        if (! request()->routeIs('mov.index')) {
+        if (!request()->routeIs('mov.index')) {
             return;
         }
 
@@ -96,7 +97,7 @@ class Sidebar extends Component
             if ($requirement?->category?->part !== null) {
                 $partId = $requirement->category->part->id;
                 $this->movOpenParts[$partId] = true;
-                $this->movOpenCategories[$partId.':'.$requirement->category->id] = true;
+                $this->movOpenCategories[$partId . ':' . $requirement->category->id] = true;
 
                 if ($requirement->kra_label !== null && trim($requirement->kra_label) !== '') {
                     $this->movOpenKras[$this->kraNodeKey($requirement->category->id, $requirement->kra_label)] = true;
@@ -112,7 +113,7 @@ class Sidebar extends Component
 
             if ($category?->part !== null) {
                 $this->movOpenParts[$category->part->id] = true;
-                $this->movOpenCategories[$category->part->id.':'.$category->id] = true;
+                $this->movOpenCategories[$category->part->id . ':' . $category->id] = true;
             }
         }
     }
@@ -177,6 +178,18 @@ class Sidebar extends Component
      * shown as a live badge on the superadmin OPCRF item.
      */
     public ?int $opcrfCount = null;
+
+    /**
+     * Number of AIP submissions still awaiting the superadmin's approval,
+     * shown as a live badge on the superadmin Review AIP item.
+     */
+    public ?int $aipCount = null;
+
+    /**
+     * Number of WFPs submitted and still awaiting the Superadmin's final
+     * decision, shown as a live badge on the WFP Final Approvals item.
+     */
+    public ?int $wfpApprovalCount = null;
 
     /**
      * The navigation items, in the order they are listed.
@@ -256,6 +269,22 @@ class Sidebar extends Component
                 'order' => 15,
             ];
 
+            // WFP Final Approvals: the Superadmin's queue of Budget-certified
+            // plans submitted by the School Heads. Only the Superadmin may
+            // decide one, so the item is absent for administrators.
+            if (Auth::user()?->canApproveWfp()) {
+                $items[] = [
+                    'label' => 'WFP Final Approvals',
+                    'route' => 'wfp.approvals.index',
+                    'path' => 'wfp-approvals',
+                    'icon' => 'check-circle',
+                    'badge' => $this->wfpApprovalCount,
+                    'badge_title' => '%d WFPs awaiting final approval',
+                    'section' => 'Files',
+                    'order' => 16,
+                ];
+            }
+
             if (Auth::user()?->canManageUsersAndSchools()) {
                 $items[] = [
                     'label' => 'Users',
@@ -316,6 +345,11 @@ class Sidebar extends Component
                 ];
             }
         } elseif (Auth::user()?->isBudgetRole()) {
+            // No "Review AIP" entry here: the Budget office's navigation is
+            // its financial workspace alone. The queue stays open to the role
+            // (User::canReviewAip()) and its dashboard card links to it, so
+            // this is navigation, not a boundary.
+            //
             // The budget side of the WFP workflow is one group, like the
             // School Head's: the plans the schools uploaded, the ceiling the
             // Budget office sets, the per-line detail checked against both,
@@ -367,14 +401,14 @@ class Sidebar extends Component
                 ],
             ];
         } elseif (Auth::user()?->isBookkeeperRole()) {
-            // The Bookkeeper works the same division-wide checking pages the
-            // Budget office does — the Monthly Expenditure lines and the
-            // annual Per Line Item Expenditure report, where the check is
-            // signed — so the group mirrors the Budget office's, without the
-            // Budget-only destinations (uploaded-plan review, allotment
-            // setting and certification). No OPCRF, MOV or AIP destination
-            // exists for the role; the pages it lacks are refused by their
-            // own guards, not by this absence.
+            // The Bookkeeper works the same checking pages the Budget office
+            // does — the Monthly Expenditure lines and the annual Per Line
+            // Item Expenditure report, where the check is signed — narrowed
+            // to the schools on its assignment list, so the group mirrors the
+            // Budget office's without the Budget-only destinations
+            // (uploaded-plan review, allotment setting and certification).
+            // No OPCRF, MOV or AIP destination exists for the role; the pages
+            // it lacks are refused by their own guards, not by this absence.
             $items[] = [
                 'label' => 'WFP',
                 'route' => 'budget.lineitems.index',
@@ -544,14 +578,14 @@ class Sidebar extends Component
         if ($suffix !== '') {
             foreach ($items as $index => $item) {
                 if (($item['path'] ?? null) === 'wfp') {
-                    $items[$index]['label'] = ($item['label'] ?? '').$suffix;
+                    $items[$index]['label'] = ($item['label'] ?? '') . $suffix;
                 }
 
                 foreach (($item['children'] ?? []) as $childIndex => $child) {
                     $key = (string) ($child['key'] ?? '');
 
                     if (str_starts_with($key, 'wfp-') || str_starts_with($key, 'budget-')) {
-                        $items[$index]['children'][$childIndex]['label'] = ($child['label'] ?? '').$suffix;
+                        $items[$index]['children'][$childIndex]['label'] = ($child['label'] ?? '') . $suffix;
                     }
                 }
             }
@@ -608,7 +642,7 @@ class Sidebar extends Component
         if (str_starts_with($node, 'category-')) {
             $segments = explode('-', substr($node, 9));
 
-            $this->toggleKey($this->movOpenCategories, ($segments[0] ?? '').':'.($segments[1] ?? ''));
+            $this->toggleKey($this->movOpenCategories, ($segments[0] ?? '') . ':' . ($segments[1] ?? ''));
 
             return;
         }
@@ -659,7 +693,7 @@ class Sidebar extends Component
 
         $parts = MovPart::query()
             ->active()
-            ->with(['categories' => fn ($query) => $query->active()->with(['requirements' => fn ($q) => $q->active()])])
+            ->with(['categories' => fn($query) => $query->active()->with(['requirements' => fn($q) => $q->active()])])
             ->orderBy('part_order')
             ->orderBy('id')
             ->get();
@@ -697,14 +731,14 @@ class Sidebar extends Component
                     $categoryDone += $own->isEmpty() ? 0 : 1;
 
                     $mov = [
-                        'key' => 'mov-'.$requirement->id,
+                        'key' => 'mov-' . $requirement->id,
                         'sort_number' => $requirement->mov_number,
                         'section' => (string) $requirement->id,
                         'label' => $requirement->label(),
                         'hint' => $requirement->title,
                         // A MOV number means nothing on its own in a list
                         // this deep, so the tooltip carries the whole trail.
-                        'title' => $requirement->trail().' — '.$requirement->title,
+                        'title' => $requirement->trail() . ' — ' . $requirement->title,
                         'url' => route('mov.index', ['mov' => $requirement->id]),
                         'status' => $status['key'],
                         'status_label' => $status['label'],
@@ -723,12 +757,12 @@ class Sidebar extends Component
 
                     $kraKey = $this->kraNodeKey($category->id, $kraLabel);
 
-                    if (! isset($kraGroups[$kraKey])) {
+                    if (!isset($kraGroups[$kraKey])) {
                         $kraGroups[$kraKey] = [
                             'key' => $kraKey,
                             'section' => null,
                             'label' => $kraLabel,
-                            'title' => $category->trail().' → '.$kraLabel,
+                            'title' => $category->trail() . ' → ' . $kraLabel,
                             'meta' => '0/0',
                             'open' => isset($this->movOpenKras[$kraKey]),
                             'children' => [],
@@ -739,7 +773,7 @@ class Sidebar extends Component
 
                     $kraGroups[$kraKey]['children'][] = $mov;
                     $kraGroups[$kraKey]['done'] += $own->isEmpty() ? 0 : 1;
-                    $kraGroups[$kraKey]['meta'] = $kraGroups[$kraKey]['done'].'/'.count($kraGroups[$kraKey]['children']);
+                    $kraGroups[$kraKey]['meta'] = $kraGroups[$kraKey]['done'] . '/' . count($kraGroups[$kraKey]['children']);
                 }
 
                 $orderedKras = array_values($kraGroups);
@@ -762,8 +796,10 @@ class Sidebar extends Component
                 });
 
                 foreach ($orderedKras as &$kraGroup) {
-                    usort($kraGroup['children'], static fn (array $left, array $right): int =>
-                        [$left['sort_number'], (int) $left['section']] <=> [$right['sort_number'], (int) $right['section']]
+                    usort(
+                        $kraGroup['children'],
+                        static fn(array $left, array $right): int =>
+                            [$left['sort_number'], (int) $left['section']] <=> [$right['sort_number'], (int) $right['section']]
                     );
 
                     foreach ($kraGroup['children'] as &$mov) {
@@ -788,15 +824,15 @@ class Sidebar extends Component
                 $partDone += $categoryDone;
 
                 $categories[] = [
-                    'key' => 'category-'.$part->id.'-'.$category->id,
+                    'key' => 'category-' . $part->id . '-' . $category->id,
                     'section' => (string) $category->id,
                     'label' => $category->name,
                     'title' => $category->trail(),
                     // The letter alone is ambiguous this deep; the trail says
                     // where it sits, and the count says how far it is.
-                    'meta' => $categoryDone.'/'.$categoryTotal,
+                    'meta' => $categoryDone . '/' . $categoryTotal,
                     'url' => route('mov.index', ['category' => $category->id]),
-                    'open' => isset($this->movOpenCategories[$part->id.':'.$category->id]),
+                    'open' => isset($this->movOpenCategories[$part->id . ':' . $category->id]),
                     'children' => $movs,
                 ];
             }
@@ -811,8 +847,8 @@ class Sidebar extends Component
                     $tree[] = [
                         'key' => $category['key'],
                         'section' => $category['section'],
-                        'label' => 'PART 1-'.$category['label'],
-                        'title' => 'PART 1-'.$category['label'],
+                        'label' => 'PART 1-' . $category['label'],
+                        'title' => 'PART 1-' . $category['label'],
                         'meta' => $category['meta'],
                         'open' => $category['open'],
                         'children' => $category['children'],
@@ -823,11 +859,11 @@ class Sidebar extends Component
             }
 
             $tree[] = [
-                'key' => 'part-'.$part->id,
+                'key' => 'part-' . $part->id,
                 'section' => null,
                 'label' => $part->name,
                 'title' => $part->name,
-                'meta' => $partDone.'/'.$partTotal,
+                'meta' => $partDone . '/' . $partTotal,
                 'open' => isset($this->movOpenParts[$part->id]),
                 'children' => $categories,
             ];
@@ -838,7 +874,7 @@ class Sidebar extends Component
 
     private function kraNodeKey(int $categoryId, string $kraLabel): string
     {
-        return 'kra-'.$categoryId.'-'.sha1($kraLabel);
+        return 'kra-' . $categoryId . '-' . sha1($kraLabel);
     }
 
     /**
@@ -908,6 +944,49 @@ class Sidebar extends Component
     }
 
     /**
+     * Fired the moment an AIP is submitted, and again once a decision lands
+     * — the superadmin's badge follows without a reload.
+     */
+    #[On('aip-plan-submitted')]
+    #[On('aip-plan-reviewed')]
+    public function refreshAipBadge(): void
+    {
+        if (Auth::user()?->canReviewAip()) {
+            $this->aipCount = $this->pendingAipPlans();
+        }
+    }
+
+    /**
+     * WFPs submitted and still waiting for the Superadmin's decision.
+     */
+    private function pendingWfpApprovals(): int
+    {
+        return Auth::user()?->canApproveWfp()
+            ? WfpPlan::query()->where('status', WfpPlan::STATUS_PENDING_APPROVAL)->count()
+            : 0;
+    }
+
+    /** A submission or decision happened — refresh the live badge. */
+    #[On('wfp-plan-submitted')]
+    #[On('wfp-plan-reviewed')]
+    public function refreshWfpApprovalCount(): void
+    {
+        $this->wfpApprovalCount = $this->pendingWfpApprovals();
+    }
+
+    /**
+     * AIP submissions still awaiting the signed-in reviewer's own action.
+     */
+    private function pendingAipPlans(): int
+    {
+        $user = Auth::user();
+
+        return $user instanceof User
+            ? AipPlan::awaitingReviewFrom($user)->count()
+            : 0;
+    }
+
+    /**
      * Submissions still awaiting the signed-in superadmin's own action —
      * the current holder of the review step counts a row, not the original
      * reviewer it auto-routed onward from (Eve sees a forwarded submission
@@ -929,6 +1008,18 @@ class Sidebar extends Component
         } else {
             $this->usersCount = null;
             $this->opcrfCount = null;
+        }
+
+        if (Auth::user()?->canReviewAip()) {
+            $this->aipCount = $this->pendingAipPlans();
+        } else {
+            $this->aipCount = null;
+        }
+
+        if (Auth::user()?->canApproveWfp()) {
+            $this->wfpApprovalCount = $this->pendingWfpApprovals();
+        } else {
+            $this->wfpApprovalCount = null;
         }
 
         return view('livewire.sidebar');

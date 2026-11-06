@@ -9,6 +9,7 @@ use App\Models\District;
 use App\Models\MonthlyExpenditureItem;
 use App\Models\MonthlyExpenditureMatrix;
 use App\Models\School;
+use App\Models\SchoolAllotment;
 use App\Models\User;
 use App\Models\WfpPlan;
 use App\Models\WfpReportCheck;
@@ -531,6 +532,186 @@ class MemMatrixTest extends TestCase
         $this->assertEquals(100.0, (float) $item->calculated_total);
     }
 
+    // ---------------------------------------------------- multiple resources
+
+    public function test_the_add_line_modal_can_encode_several_resources_at_once(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openLineModal')
+            ->assertSee('Add resource')
+            ->set('lineForm.activity_description', 'Procure office supplies')
+            ->set('lineForm.resource_kind', 'Bond Paper A4 70 gsm')
+            ->set('lineForm.quantity', '85')
+            ->set('lineForm.unit', 'reams')
+            ->set('lineForm.unit_cost', '250')
+            ->call('addLineResource')
+            ->assertCount('lineResources', 1)
+            // The extra row's money fields are live, so its own total follows.
+            ->assertSeeHtml('wire:model.live.debounce.300ms="lineResources.0.quantity"')
+            ->set('lineResources.0.resource_kind', 'Ballpen 0.75 Black')
+            ->set('lineResources.0.quantity', '68')
+            ->set('lineResources.0.unit', 'pcs')
+            ->set('lineResources.0.unit_cost', '10')
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors()
+            ->assertSet('showLineModal', false);
+
+        // One activity, two Resource Needed rows — exactly the printed form's
+        // shape: every filled row is its own line sharing the activity.
+        $items = MonthlyExpenditureItem::query()->orderBy('position')->get();
+
+        $this->assertCount(2, $items);
+
+        foreach ($items as $item) {
+            $this->assertSame('Procure office supplies', $item->activity_description);
+            $this->assertSame('operations', $item->section);
+        }
+
+        $this->assertSame('Bond Paper A4 70 gsm', $items[0]->resource_kind);
+        $this->assertSame('reams', $items[0]->unit);
+        $this->assertEquals(85.0, (float) $items[0]->quantity);
+        $this->assertEquals(21250.0, (float) $items[0]->calculated_total);
+
+        $this->assertSame('Ballpen 0.75 Black', $items[1]->resource_kind);
+        $this->assertSame('pcs', $items[1]->unit);
+        $this->assertEquals(68.0, (float) $items[1]->quantity);
+        $this->assertEquals(680.0, (float) $items[1]->calculated_total);
+    }
+
+    public function test_a_blank_resource_row_is_ignored_on_save(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openLineModal')
+            ->set('lineForm.activity_description', 'Procure office supplies')
+            // The primary row is left empty; the first extra row carries the
+            // resource, and a second extra row is never filled in.
+            ->call('addLineResource')
+            ->set('lineResources.0.resource_kind', 'Bond Paper A4 70 gsm')
+            ->set('lineResources.0.quantity', '85')
+            ->set('lineResources.0.unit', 'reams')
+            ->set('lineResources.0.unit_cost', '250')
+            ->call('addLineResource')
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors();
+
+        $item = MonthlyExpenditureItem::firstOrFail();
+
+        $this->assertSame('Procure office supplies', $item->activity_description);
+        $this->assertSame('Bond Paper A4 70 gsm', $item->resource_kind);
+        $this->assertEquals(21250.0, (float) $item->calculated_total);
+        $this->assertSame(1, MonthlyExpenditureItem::count());
+    }
+
+    public function test_several_resources_are_copied_into_every_checked_month(): void
+    {
+        $sh = $this->schoolHead();
+        $january = $this->matrixFor($sh, month: 1);
+        $february = $this->matrixFor($sh, month: 2);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
+            ->call('openLineModal')
+            ->set('lineForm.activity_description', 'Procure office supplies')
+            ->set('lineForm.resource_kind', 'Bond Paper A4 70 gsm')
+            ->set('lineForm.quantity', '85')
+            ->set('lineForm.unit', 'reams')
+            ->set('lineForm.unit_cost', '250')
+            ->call('addLineResource')
+            ->set('lineResources.0.resource_kind', 'Ballpen 0.75 Black')
+            ->set('lineResources.0.quantity', '68')
+            ->set('lineResources.0.unit', 'pcs')
+            ->set('lineResources.0.unit_cost', '10')
+            ->set('lineRepeated', 'yes')
+            ->set('lineMonths', [1, 2])
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors()
+            ->assertSet('successMessage', '2 lines added to Jan and Feb 2026.');
+
+        foreach ([$january, $february] as $matrix) {
+            $items = $matrix->items()->get();
+
+            $this->assertCount(2, $items);
+            $this->assertSame(
+                ['Bond Paper A4 70 gsm', 'Ballpen 0.75 Black'],
+                $items->pluck('resource_kind')->all(),
+            );
+            $this->assertEquals(21930.0, (float) $items->sum('calculated_total'));
+        }
+    }
+
+    public function test_editing_a_line_can_add_more_resources_to_the_checked_months(): void
+    {
+        $sh = $this->schoolHead();
+        $january = $this->matrixFor($sh, month: 1);
+        $february = $this->matrixFor($sh, month: 2);
+
+        // The original line is applied to both months first.
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
+            ->call('openLineModal')
+            ->set('lineForm.activity_description', 'Procure office supplies')
+            ->set('lineForm.resource_kind', 'Bond Paper A4 70 gsm')
+            ->set('lineForm.quantity', '85')
+            ->set('lineForm.unit_cost', '250')
+            ->set('lineRepeated', 'yes')
+            ->set('lineMonths', [1, 2])
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors();
+
+        $original = $january->items()->firstOrFail();
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january->fresh()])
+            ->call('openEditModal', 'item-'.$original->id)
+            ->call('addLineResource')
+            ->set('lineResources.0.resource_kind', 'Ballpen 0.75 Black')
+            ->set('lineResources.0.quantity', '68')
+            ->set('lineResources.0.unit', 'pcs')
+            ->set('lineResources.0.unit_cost', '10')
+            ->set('lineMonths', [1, 2])
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors();
+
+        foreach ([$january, $february] as $matrix) {
+            $this->assertSame(2, $matrix->items()->count());
+            $this->assertSame(1, $matrix->items()->where('resource_kind', 'Ballpen 0.75 Black')->count());
+        }
+    }
+
+    public function test_an_extra_resource_quantity_must_be_numeric(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openLineModal')
+            ->set('lineForm.activity_description', 'Procure office supplies')
+            ->call('addLineResource')
+            ->set('lineResources.0.quantity', 'ten')
+            ->call('saveLineFromModal')
+            ->assertHasErrors(['lineResources.0.quantity'])
+            ->assertSet('showLineModal', true);
+
+        $this->assertSame(0, MonthlyExpenditureItem::count());
+    }
+
+    public function test_an_extra_resource_row_can_be_removed_before_saving(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openLineModal')
+            ->call('addLineResource')
+            ->call('addLineResource')
+            ->assertCount('lineResources', 2)
+            ->call('removeLineResource', 0)
+            ->assertCount('lineResources', 1);
+    }
+
     // ------------------------------------------------------- apply to months
 
     public function test_the_add_line_modal_checks_the_current_month_by_default(): void
@@ -540,9 +721,63 @@ class MemMatrixTest extends TestCase
 
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
             ->call('openLineModal')
+            // A new line is not repeated until the user says so: the month
+            // picker stays hidden, with only the current month selected.
+            ->assertSet('lineRepeated', 'no')
             ->assertSet('lineMonths', [3])
+            ->assertSee('Is this repeated item?')
+            ->assertDontSee('Apply to months');
+    }
+
+    public function test_choosing_yes_reveals_the_months_and_apply_to_all_ticks_every_existing_month(): void
+    {
+        $sh = $this->schoolHead();
+        $january = $this->matrixFor($sh, month: 1);
+        $this->matrixFor($sh, month: 2);
+        $this->matrixFor($sh, month: 3);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
+            ->call('openLineModal')
+            ->set('lineRepeated', 'yes')
             ->assertSee('Apply to months')
-            ->assertSeeHtml('wire:model="lineMonths"');
+            ->assertSeeHtml('wire:model="lineMonths"')
+            // Months without a matrix stay visible but unselectable.
+            ->assertSee('No matrix yet — add the year first')
+            ->call('applyLineToAllMonths')
+            ->assertSet('lineMonths', [1, 2, 3]);
+    }
+
+    public function test_a_line_that_is_not_repeated_writes_only_the_current_month(): void
+    {
+        $sh = $this->schoolHead();
+        $january = $this->matrixFor($sh, month: 1);
+        $february = $this->matrixFor($sh, month: 2);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
+            ->call('openLineModal')
+            ->set('lineForm.activity_description', 'Procure office supplies')
+            // Even a stale month selection cannot make a "No" line write
+            // beyond the month being edited.
+            ->set('lineMonths', [1, 2])
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors();
+
+        $this->assertSame(1, $january->items()->count());
+        $this->assertSame(0, $february->items()->count());
+    }
+
+    public function test_switching_back_to_no_resets_the_months_to_the_current_month(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh, month: 3);
+        $this->matrixFor($sh, month: 2);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openLineModal')
+            ->set('lineRepeated', 'yes')
+            ->set('lineMonths', [2, 3])
+            ->set('lineRepeated', 'no')
+            ->assertSet('lineMonths', [3]);
     }
 
     public function test_adding_a_line_copies_it_into_every_checked_month(): void
@@ -558,6 +793,7 @@ class MemMatrixTest extends TestCase
             ->set('lineForm.resource_kind', 'MOOE')
             ->set('lineForm.quantity', '1')
             ->set('lineForm.unit_cost', '1500')
+            ->set('lineRepeated', 'yes')
             ->set('lineMonths', [1, 2, 3])
             ->call('saveLineFromModal')
             ->assertHasNoErrors()
@@ -587,6 +823,7 @@ class MemMatrixTest extends TestCase
 
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
             ->call('openLineModal')
+            ->set('lineRepeated', 'yes')
             // The missing month is shown, but not selectable: adding the year
             // is still the only path that creates months.
             ->assertSee('No matrix yet — add the year first')
@@ -617,6 +854,7 @@ class MemMatrixTest extends TestCase
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
             ->call('openLineModal')
             ->set('lineForm.activity_description', 'Monthly internet')
+            ->set('lineRepeated', 'yes')
             ->set('lineMonths', [2])
             ->call('saveLineFromModal')
             ->assertHasNoErrors();
@@ -644,6 +882,12 @@ class MemMatrixTest extends TestCase
 
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
             ->call('openEditModal', 'item-'.$item->id)
+            // A line held by one month only is not repeated: the picker is
+            // hidden until the user says Yes.
+            ->assertSet('lineRepeated', 'no')
+            ->assertSet('lineMonths', [3])
+            ->assertDontSee('Apply to months')
+            ->set('lineRepeated', 'yes')
             ->assertSee('Apply to months')
             ->assertSee('Checked months keep the line — unchecking one removes it there.')
             // The month holding the line opens checked, like any other month
@@ -721,6 +965,7 @@ class MemMatrixTest extends TestCase
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
             ->call('openEditModal', 'item-'.$jan->id)
             ->set('lineForm.activity_description', 'Monthly internet (revised)')
+            ->set('lineRepeated', 'yes')
             ->set('lineMonths', [1, 2])
             ->call('saveLineFromModal')
             ->assertHasNoErrors();
@@ -760,6 +1005,7 @@ class MemMatrixTest extends TestCase
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
             ->call('openEditModal', 'item-'.$jan->id)
             ->set('lineForm.unit_cost', '2000')
+            ->set('lineRepeated', 'yes')
             ->set('lineMonths', [1, 2])
             ->call('saveLineFromModal')
             ->assertHasNoErrors();
@@ -790,6 +1036,7 @@ class MemMatrixTest extends TestCase
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
             ->call('openEditModal', 'item-'.$jan->id)
             ->set('lineForm.unit_cost', '2000')
+            ->set('lineRepeated', 'yes')
             // February has no matrix: adding the year is still the only path
             // that creates months.
             ->set('lineMonths', [1, 2])
@@ -819,6 +1066,7 @@ class MemMatrixTest extends TestCase
 
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
             ->call('openEditModal', 'item-'.$jan->id)
+            ->set('lineRepeated', 'yes')
             // January is just a month like the rest: clearing it removes the
             // line from this month and leaves it only where still checked.
             ->set('lineMonths', [2])
@@ -952,6 +1200,7 @@ class MemMatrixTest extends TestCase
             // The months already holding this line open checked, so an edit
             // keeps applying there without re-ticking them.
             ->call('openEditModal', 'item-'.$jan->id)
+            ->assertSet('lineRepeated', 'yes')
             ->assertSet('lineMonths', [1, 2])
             ->set('lineForm.unit_cost', '2000')
             ->call('saveLineFromModal')
@@ -990,7 +1239,8 @@ class MemMatrixTest extends TestCase
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
             ->call('openEditModal', 'item-'.$jan->id)
             // February's line is no longer a copy of this one, so the edit
-            // does not claim it.
+            // does not claim it — one month only, so not a repeated item.
+            ->assertSet('lineRepeated', 'no')
             ->assertSet('lineMonths', [1]);
     }
 
@@ -1720,8 +1970,8 @@ class MemMatrixTest extends TestCase
         // The form's own headings and both section banners.
         $this->assertStringContainsString('2026 MONTHLY EXPENDITURE MATRIX', $sheet);
         $this->assertStringContainsString('MONTH: JULY 2026', $sheet);
-        $this->assertStringContainsString('Operations-Related Expenses', $sheet);
-        $this->assertStringContainsString('Project-Related Expenses', $sheet);
+        $this->assertStringContainsString('Operations-Related Expenditures', $sheet);
+        $this->assertStringContainsString('Project-Related Expenditures', $sheet);
 
         // The line itself, and the account it is charged to.
         $this->assertStringContainsString('Procure office supplies', $sheet);
@@ -1730,10 +1980,89 @@ class MemMatrixTest extends TestCase
         // 10 × 250, written as a real NUMBER (not text) the reviewer can sum.
         $this->assertStringContainsString('<v>2500</v>', $sheet);
         $this->assertStringContainsString('Subtotal', $sheet);
-        $this->assertStringContainsString('TOTAL', $sheet);
+        $this->assertStringContainsString('TOTAL:', $sheet);
+
+        // The form's four signatory blocks, in its own words.
+        $this->assertStringContainsString('Prepared by:', $sheet);
+        $this->assertStringContainsString('Checked as the Correctness of', $sheet);
+        $this->assertStringContainsString('Account Titles and Codes:', $sheet);
+        $this->assertStringContainsString('Certifying Availability of', $sheet);
+        $this->assertStringContainsString('Allotment:', $sheet);
+        $this->assertStringContainsString('Approved:', $sheet);
+        $this->assertStringNotContainsString('Checked by the Completeness', $sheet);
+
+        // The printed roles under each block. No check or certification is on
+        // record for this school and year, so those two keep their blank line.
+        $this->assertStringContainsString('School Principal I', $sheet);
+        $this->assertStringContainsString('Senior Bookkeeper', $sheet);
+        $this->assertStringContainsString('Budget Officer III', $sheet);
+        $this->assertStringContainsString('Schools Division Superintendent', $sheet);
 
         // The signature block names the exporter as the prepared-by.
         $this->assertStringContainsString($sh->name, $sheet);
+
+        unlink($path);
+    }
+
+    public function test_the_export_prints_the_bookkeeper_and_budget_officer_who_signed_off(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        // The line is written BEFORE the sign-offs: any MEM write clears the
+        // report check, because the check no longer describes the lines.
+        $matrix->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Procure office supplies',
+            'quantity' => 1,
+            'unit_cost' => 100,
+            'account_title' => 'Office Supplies Expenses',
+            'account_code' => '5020301000',
+        ]);
+
+        $bookkeeper = User::factory()->create([
+            'role' => 'bookkeeper',
+            'is_superadmin' => false,
+            'name' => 'Edilyn Lirazan',
+            'position' => 'Senior Bookkeeper',
+        ]);
+
+        $budgetOfficer = User::factory()->create([
+            'role' => 'budget',
+            'is_superadmin' => false,
+            'name' => 'Lyn Rose E. Otea',
+            'position' => 'Budget Officer III',
+        ]);
+
+        WfpReportCheck::create([
+            'school_id' => $sh->school_id,
+            'year' => 2026,
+            'checked_by' => $bookkeeper->id,
+            'checked_at' => now(),
+        ]);
+
+        SchoolAllotment::create([
+            'school_id' => $sh->school_id,
+            'year' => 2026,
+            'amount' => 50000,
+            'certified_by' => $budgetOfficer->id,
+            'certified_at' => now(),
+        ]);
+
+        $response = $this->actingAs($sh)
+            ->get(route('wfp.matrices.export', ['matrix' => $matrix->id]));
+
+        $response->assertOk();
+
+        $path = tempnam(sys_get_temp_dir(), 'mem-export-').'.xlsx';
+        file_put_contents($path, $response->getContent());
+
+        $sheet = (new PurePhpZipReader($path))->part('xl/worksheets/sheet1.xml');
+
+        $this->assertNotNull($sheet);
+        $this->assertStringContainsString('Edilyn Lirazan', $sheet);
+        $this->assertStringContainsString('Lyn Rose E. Otea', $sheet);
 
         unlink($path);
     }

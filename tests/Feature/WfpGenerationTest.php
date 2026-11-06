@@ -8,8 +8,10 @@ use App\Models\District;
 use App\Models\MonthlyExpenditureItem;
 use App\Models\MonthlyExpenditureMatrix;
 use App\Models\School;
+use App\Models\SchoolAllotment;
 use App\Models\User;
 use App\Models\WfpPlan;
+use App\Models\WfpReportCheck;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Tests\Concerns\BuildsWfpTemplates;
@@ -65,6 +67,28 @@ class WfpGenerationTest extends TestCase
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])->call('generateWfp');
 
         return [$matrix, WfpPlan::firstOrFail()];
+    }
+
+    /** Budget's two sign-offs on the plan's allotment report. */
+    private function budgetReview(WfpPlan $plan): void
+    {
+        $bookkeeper = User::factory()->create(['role' => 'bookkeeper', 'is_superadmin' => false]);
+        $budget = User::factory()->create(['role' => 'budget', 'is_superadmin' => false]);
+
+        WfpReportCheck::create([
+            'school_id' => $plan->school_id,
+            'year' => $plan->year,
+            'checked_by' => $bookkeeper->id,
+            'checked_at' => now(),
+        ]);
+
+        SchoolAllotment::create([
+            'school_id' => $plan->school_id,
+            'year' => $plan->year,
+            'amount' => 50000,
+            'certified_by' => $budget->id,
+            'certified_at' => now(),
+        ]);
     }
 
     public function test_generating_from_the_editor_creates_a_plan_and_redirects(): void
@@ -141,17 +165,32 @@ class WfpGenerationTest extends TestCase
         $this->assertFalse($plan->fresh()->isOutOfDate());
     }
 
-    public function test_a_plan_can_be_approved(): void
+    public function test_a_plan_can_be_submitted_and_then_approved_by_the_superadmin(): void
     {
         $sh = $this->schoolHead();
         [, $plan] = $this->generatedPlan($sh);
 
+        $this->budgetReview($plan);
+
         Livewire::actingAs($sh)->test(WfpPlanEditor::class, ['plan' => $plan])
-            ->call('approve');
+            ->call('submitForApproval');
+
+        $this->assertSame(WfpPlan::STATUS_PENDING_APPROVAL, $plan->fresh()->status);
+        $this->assertSame($sh->id, $plan->fresh()->submitted_by);
+        $this->assertNotNull($plan->fresh()->submitted_at);
+        $this->assertNull($plan->fresh()->approved_by);
+
+        $superadmin = User::factory()->create(['role' => 'superadmin', 'is_superadmin' => true]);
+        $plan->fresh()->markApproved($superadmin);
 
         $this->assertSame(WfpPlan::STATUS_FINALIZED, $plan->fresh()->status);
-        $this->assertSame($sh->id, $plan->fresh()->approved_by);
+        $this->assertSame($superadmin->id, $plan->fresh()->approved_by);
         $this->assertNotNull($plan->fresh()->approved_at);
+        $this->assertDatabaseHas('wfp_approvals', [
+            'wfp_plan_id' => $plan->id,
+            'decision' => 'approved',
+            'decided_by' => $superadmin->id,
+        ]);
     }
 
     public function test_the_export_returns_a_patched_workbook(): void

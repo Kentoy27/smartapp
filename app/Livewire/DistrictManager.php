@@ -4,6 +4,7 @@ namespace App\Livewire;
 
 use App\Models\District;
 use App\Models\School;
+use App\Support\SchoolDivision;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -49,6 +50,14 @@ class DistrictManager extends Component
     public string $schoolId = '';
 
     /**
+     * The divisions the new school operates. Elementary is preselected so
+     * the common case stays one click; the administrator checks any others.
+     *
+     * @var array<int, string>
+     */
+    public array $schoolDivisions = [SchoolDivision::ELEMENTARY];
+
+    /**
      * The edit-school form: opens for $editingSchoolId.
      */
     public ?int $editingSchoolId = null;
@@ -56,6 +65,13 @@ class DistrictManager extends Component
     public string $editSchoolName = '';
 
     public string $editSchoolId = '';
+
+    /**
+     * The divisions the edited school operates.
+     *
+     * @var array<int, string>
+     */
+    public array $editSchoolDivisions = [];
 
     /** Inline district rename state: ['id' => int]. */
     public ?array $editing = null;
@@ -99,6 +115,7 @@ class DistrictManager extends Component
 
         return School::query()
             ->where('district_id', $this->selectedDistrictId)
+            ->with('divisionSettings')
             ->withCount('users')
             ->when($this->schoolSearch !== '', function ($query): void {
                 $term = '%'.str_replace(['%', '_'], ['\%', '\_'], $this->schoolSearch).'%';
@@ -152,6 +169,22 @@ class DistrictManager extends Component
         $this->dispatch('districts-changed');
     }
 
+    /**
+     * The division choices a school can be configured with.
+     *
+     * @return array<int, array{value: string, label: string}>
+     */
+    public function divisionOptions(): array
+    {
+        return array_map(
+            fn (string $division): array => [
+                'value' => $division,
+                'label' => SchoolDivision::label($division),
+            ],
+            SchoolDivision::all(),
+        );
+    }
+
     /* ---------- ADD SCHOOL ---------- */
 
     public function openSchoolForm(int $districtId): void
@@ -161,6 +194,7 @@ class DistrictManager extends Component
         $this->schoolFormDistrictId = $districtId;
         $this->schoolName = '';
         $this->schoolId = '';
+        $this->schoolDivisions = [SchoolDivision::ELEMENTARY];
         $this->cancelEditSchool();
         $this->resetValidation();
     }
@@ -170,6 +204,7 @@ class DistrictManager extends Component
         $this->schoolFormDistrictId = null;
         $this->schoolName = '';
         $this->schoolId = '';
+        $this->schoolDivisions = [SchoolDivision::ELEMENTARY];
         $this->resetValidation();
     }
 
@@ -185,11 +220,17 @@ class DistrictManager extends Component
             ],
             // The DepEd school ID is unique across the whole system.
             'schoolId' => ['required', 'string', 'max:20', 'unique:schools,school_id'],
+            // A school must operate at least one division; each value is
+            // re-validated here because the checkboxes are only a convenience.
+            'schoolDivisions' => ['required', 'array', 'min:1'],
+            'schoolDivisions.*' => [Rule::in(SchoolDivision::all())],
         ], [
             'schoolName.required' => 'The school name is required.',
             'schoolName.unique' => 'This school already exists in the district.',
             'schoolId.required' => 'The School ID is required.',
             'schoolId.unique' => 'That School ID is already used by another school.',
+            'schoolDivisions.required' => 'Choose at least one division the school operates.',
+            'schoolDivisions.min' => 'Choose at least one division the school operates.',
         ]);
 
         $school = School::create([
@@ -198,8 +239,11 @@ class DistrictManager extends Component
             'school_id' => trim($this->schoolId),
         ]);
 
+        $this->syncSchoolDivisions($school, $this->schoolDivisions);
+
         $this->schoolName = '';
         $this->schoolId = '';
+        $this->schoolDivisions = [SchoolDivision::ELEMENTARY];
         $this->selectedDistrictId = $school->district_id;
         $this->schoolFormDistrictId = null;
         $this->dispatch('districts-changed');
@@ -216,6 +260,7 @@ class DistrictManager extends Component
         $this->editingSchoolId = $school->id;
         $this->editSchoolName = $school->name;
         $this->editSchoolId = (string) $school->school_id;
+        $this->editSchoolDivisions = $school->availableDivisions();
         $this->cancelSchoolForm();
         $this->resetValidation();
     }
@@ -225,6 +270,7 @@ class DistrictManager extends Component
         $this->editingSchoolId = null;
         $this->editSchoolName = '';
         $this->editSchoolId = '';
+        $this->editSchoolDivisions = [];
         $this->resetValidation();
     }
 
@@ -245,17 +291,23 @@ class DistrictManager extends Component
                 'required', 'string', 'max:20',
                 Rule::unique('schools', 'school_id')->ignore($school->id),
             ],
+            'editSchoolDivisions' => ['required', 'array', 'min:1'],
+            'editSchoolDivisions.*' => [Rule::in(SchoolDivision::all())],
         ], [
             'editSchoolName.required' => 'The school name is required.',
             'editSchoolName.unique' => 'This school already exists in the district.',
             'editSchoolId.required' => 'The School ID is required.',
             'editSchoolId.unique' => 'That School ID is already used by another school.',
+            'editSchoolDivisions.required' => 'Choose at least one division the school operates.',
+            'editSchoolDivisions.min' => 'Choose at least one division the school operates.',
         ]);
 
         $school->update([
             'name' => trim($this->editSchoolName),
             'school_id' => trim($this->editSchoolId),
         ]);
+
+        $this->syncSchoolDivisions($school, $this->editSchoolDivisions);
 
         $this->cancelEditSchool();
         $this->dispatch('districts-changed');
@@ -388,6 +440,28 @@ class DistrictManager extends Component
         $this->dispatch('districts-changed');
     }
 
+    /**
+     * Write the school's division menu. A division switched off keeps its row
+     * (inactive) so re-enabling it is a toggle, not a new configuration.
+     *
+     * @param  array<int, string>  $divisions
+     */
+    private function syncSchoolDivisions(School $school, array $divisions): void
+    {
+        $selected = SchoolDivision::validAccessList($divisions);
+
+        $school->divisionSettings()->update(['is_active' => false]);
+
+        foreach ($selected as $division) {
+            $school->divisionSettings()->updateOrCreate(
+                ['division_code' => $division],
+                ['is_active' => true],
+            );
+        }
+
+        $school->unsetRelation('divisionSettings');
+    }
+
     private function resetForms(): void
     {
         $this->selectedDistrictId = null;
@@ -396,9 +470,11 @@ class DistrictManager extends Component
         $this->schoolFormDistrictId = null;
         $this->schoolName = '';
         $this->schoolId = '';
+        $this->schoolDivisions = [SchoolDivision::ELEMENTARY];
         $this->editingSchoolId = null;
         $this->editSchoolName = '';
         $this->editSchoolId = '';
+        $this->editSchoolDivisions = [];
         $this->editing = null;
         $this->editingName = '';
         $this->showDeleteSchoolModal = false;

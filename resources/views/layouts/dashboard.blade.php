@@ -10,6 +10,7 @@
          cached an older copy keep painting the stale sheet at the same URL,
          which is why a broken stylesheet can survive a fresh deploy. --}}
     <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=47">
+    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=34">
     <title>@yield('title', 'Dashboard — SmartApp')</title>
     <script>
         /* Apply the saved theme before first paint to avoid a flash.
@@ -4533,6 +4534,64 @@
             min-width: 0;
         }
 
+        /* The divisions a school operates: compact checkboxes on the add/
+           edit-school panels, and the same list as badges in the table. */
+        .school-divisions-field {
+            margin-top: 14px;
+            padding: 0;
+            border: 0;
+        }
+
+        .school-divisions-field legend {
+            padding: 0;
+            font-size: 0.8125rem;
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .school-division-options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .school-add-panel .school-division-option,
+        .school-edit-form .school-division-option {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.8125rem;
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .school-add-panel .school-division-option:has(input:checked),
+        .school-edit-form .school-division-option:has(input:checked) {
+            border-color: var(--primary);
+            background: var(--primary-soft);
+        }
+
+        .school-add-panel .school-division-option input[type="checkbox"],
+        .school-edit-form .school-division-option input[type="checkbox"] {
+            width: auto;
+            min-width: 0;
+            margin: 0;
+            padding: 0;
+            accent-color: var(--primary);
+            box-shadow: none;
+        }
+
+        .school-division-badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+
         /* The two fields carry the app's standard form treatment — the same
            input, label and focus ring as the Add District / Add User forms —
            plus a leading icon so they read as designed fields rather than raw
@@ -5384,6 +5443,66 @@
             font-size: 0.8125rem;
             flex-shrink: 0;
             border-top: 1px solid var(--border);
+        }
+
+        /* ---------- BACK TO TOP ----------
+           Floating affordance for the long pages (matrices, workbooks):
+           appears once the reader is a screen or so down and returns the
+           document to the top. Fixed to the viewport, so it takes no place
+           in the flow. Hidden with visibility rather than display, so the
+           entrance can animate; pointer-events is off while hidden. */
+        .scroll-top-btn {
+            margin-bottom: 25px;
+            position: fixed;
+            right: 20px;
+            bottom: 20px;
+            z-index: 90; /* above page content, below header/menus/drawer */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 42px;
+            height: 42px;
+            padding: 0;
+            border: 1px solid var(--border);
+            border-radius: 50%;
+            background: var(--bg-panel);
+            color: var(--text-muted);
+            box-shadow: var(--shadow-card);
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(6px);
+            pointer-events: none;
+            transition:
+                opacity 0.18s ease,
+                transform 0.18s ease,
+                visibility 0s linear 0.18s,
+                color 0.15s,
+                border-color 0.15s;
+        }
+
+        .scroll-top-btn.is-visible {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+            pointer-events: auto;
+            transition:
+                opacity 0.18s ease,
+                transform 0.18s ease,
+                visibility 0s,
+                color 0.15s,
+                border-color 0.15s;
+        }
+
+        .scroll-top-btn:hover {
+            color: var(--primary);
+            border-color: var(--primary);
+        }
+
+        .scroll-top-btn:focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: 2px;
         }
 
         /* ---------- MOBILE SIDEBAR BACKDROP ---------- */
@@ -7509,6 +7628,12 @@
                 transition-duration: 0.01ms !important;
                 transition-delay: 0s !important;
             }
+
+            /* Same for the back-to-top button: it still appears, instantly. */
+            .scroll-top-btn {
+                transition-duration: 0.01ms !important;
+                transition-delay: 0s !important;
+            }
         }
 
         /* Pop animation for the freshly-shown icon after a switch */
@@ -7718,6 +7843,13 @@
             </footer>
         </div>
     </div>
+
+    {{-- Back to top: fixed to the viewport, revealed by initScrollTop once
+         the document is scrolled down. Lives outside .layout so no layout
+         container can clip it. --}}
+    <button type="button" class="scroll-top-btn" id="scrollTopBtn" title="Back to top" aria-label="Back to top">
+        <x-icon name="arrow-up" :size="20" />
+    </button>
 
     <div class="modal-backdrop" id="creditsModal" role="presentation" aria-hidden="true">
         <section class="modal credits-modal" role="dialog" aria-modal="true" aria-labelledby="creditsModalTitle" aria-describedby="creditsModalDescription">
@@ -7970,11 +8102,48 @@
                 });
             }
 
+            /* Show the back-to-top button only after the reader is a screen
+               or so down. Queried fresh on every call: wire:navigate swaps
+               the button element (and the whole body) per navigation. */
+            function updateScrollTop() {
+                var button = document.getElementById('scrollTopBtn');
+                if (!button) return;
+                button.classList.toggle('is-visible', window.scrollY > 400);
+            }
+
+            function initScrollTop() {
+                var button = document.getElementById('scrollTopBtn');
+                if (!button) return;
+
+                /* The scroll listener lives on window and is bound once for
+                   the lifetime of the document: this initializer re-runs on
+                   every navigation, and capturing the (swapped) element here
+                   would both leak listeners and go stale. */
+                if (!window.__smartappScrollTopBound) {
+                    window.__smartappScrollTopBound = true;
+                    window.addEventListener('scroll', updateScrollTop, { passive: true });
+                }
+
+                if (!button.dataset.scrollTopBound) {
+                    button.dataset.scrollTopBound = '1';
+
+                    button.addEventListener('click', function() {
+                        /* Reduced-motion readers get the return trip without
+                           the animation. */
+                        var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                        window.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
+                    });
+                }
+
+                updateScrollTop(); // a page restored mid-scroll shows it right away
+            }
+
             function initAll() {
                 initLayoutChrome();
                 initUserMenu();
                 initThemeToggle();
                 initCreditsModal();
+                initScrollTop();
             }
 
             // First load...

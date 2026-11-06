@@ -3,6 +3,15 @@
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Support\Env;
+
+// Load .env into the request-local superglobals only. Apache's Windows MPM
+// (mpm_winnt) serves requests on many threads in one process, while PHP's
+// putenv() changes the process-wide environment and request shutdown restores
+// it. A concurrent request can therefore see APP_KEY removed mid-bootstrap,
+// which Dotenv's immutable loader refuses to repopulate — producing the
+// intermittent "No application encryption key has been specified" 500.
+Env::disablePutenv();
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(

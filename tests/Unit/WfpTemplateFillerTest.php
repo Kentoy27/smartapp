@@ -197,6 +197,43 @@ class WfpTemplateFillerTest extends TestCase
         $this->assertStringNotContainsString('<row r="9"', $sheet);
     }
 
+    public function test_one_grouped_row_fills_a_target_for_each_month(): void
+    {
+        $bytes = $this->wfpMonthlyTemplateBytes(3);
+        $layout = WfpTemplateFiller::locate(WfpTemplateFiller::readParts($bytes));
+
+        // A recurring activity grouped into ONE row, carrying its per-month
+        // targets instead of one row per month.
+        $rows = [[
+            'program_activity' => 'Monthly Internet',
+            'physical_targets_by_month' => [1 => 1, 2 => 2],
+            'financial_targets_by_month' => [1 => 2099, 2 => 1500],
+            'account_code' => '5020301000',
+        ]];
+
+        $filled = WfpTemplateFiller::fill($bytes, $rows, $layout);
+        $sheet = $this->wfpSheetXml($filled);
+
+        // January and February land in their own columns…
+        $this->assertSame('1.00', $this->wfpCellText($sheet, 'C6'));
+        $this->assertSame('2099.00', $this->wfpCellText($sheet, 'G6'));
+        $this->assertSame('2.00', $this->wfpCellText($sheet, 'D6'));
+        $this->assertSame('1500.00', $this->wfpCellText($sheet, 'I6'));
+
+        // …the activity is written once, and the monthless object code still
+        // reaches every month's Object Code column.
+        $this->assertSame('Monthly Internet', $this->wfpCellText($sheet, 'B6'));
+        $this->assertSame('5020301000', $this->wfpCellText($sheet, 'H6'));
+        $this->assertSame('5020301000', $this->wfpCellText($sheet, 'J6'));
+        $this->assertSame('5020301000', $this->wfpCellText($sheet, 'L6'));
+
+        // The unused months stay empty, the template's own formula survives,
+        // and the band is trimmed to one line.
+        $this->assertSame('', $this->wfpCellText($sheet, 'E6'));
+        $this->assertSame('SUM(G6:J6)', $this->wfpCellFormula($sheet, 'K6'));
+        $this->assertStringNotContainsString('<row r="8"', $sheet);
+    }
+
     public function test_a_monthless_row_writes_its_code_into_every_monthly_column(): void
     {
         $bytes = $this->wfpMonthlyTemplateBytes(3);

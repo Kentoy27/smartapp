@@ -9,8 +9,8 @@ use App\Models\User;
 /**
  * The Monthly Expenditure Matrix as the printed DepEd form: one .xlsx sheet
  * with the school/division header, the lines grouped under Operations- and
- * Project-Related Expenses with their subtotals, the monthly TOTAL, and the
- * Prepared / Checked / Approved signature block.
+ * Project-Related Expenditures with their subtotals, the monthly TOTAL, and
+ * the Prepared / Checked / Certifying / Approved signature block.
  *
  * The workbook is BUILT FROM SCRATCH — a MEM has no archived file to patch
  * (unlike a WFP, which rewrites the official template). It is a minimal but
@@ -62,6 +62,22 @@ final class MemXlsxExporter
     {
         $school = $matrix->school;
         $district = $school?->district;
+
+        // The two sign-offs the form prints besides the preparer's name: the
+        // Bookkeeper's check of the account titles and codes, and the Budget
+        // Officer's certification of the allotment. They are the same records
+        // the annual report prints; a matrix with no sign-off keeps the blank
+        // line the form has always carried.
+        $checked = WfpAllotment::checking(
+            (int) $matrix->school_id,
+            (int) $matrix->year,
+            $matrix->schoolDivision(),
+        );
+        $certified = WfpAllotment::certification(
+            (int) $matrix->school_id,
+            (int) $matrix->year,
+            $matrix->schoolDivision(),
+        );
 
         $merges = [];
         $rows = [];
@@ -126,8 +142,8 @@ final class MemXlsxExporter
         $projectTotal = 0.0;
 
         foreach ([
-            MonthlyExpenditureMatrix::SECTION_OPERATIONS => 'Operations-Related Expenses',
-            MonthlyExpenditureMatrix::SECTION_PROJECT => 'Project-Related Expenses',
+            MonthlyExpenditureMatrix::SECTION_OPERATIONS => 'Operations-Related Expenditures',
+            MonthlyExpenditureMatrix::SECTION_PROJECT => 'Project-Related Expenditures',
         ] as $section => $banner) {
             $sectionTotal = 0.0;
 
@@ -203,7 +219,7 @@ final class MemXlsxExporter
         $grandTotal = round($operationsTotal + $projectTotal, 2);
 
         $addRow(
-            self::cell($r, 'A', self::S_TOT_LABEL, 'TOTAL')
+            self::cell($r, 'A', self::S_TOT_LABEL, 'TOTAL:')
             .self::numericCell($r, 'G', $grandTotal, self::S_TOT_VALUE)
             .self::blankCell($r, 'H', self::S_TOT_VALUE)
             .self::blankCell($r, 'I', self::S_TOT_VALUE)
@@ -212,38 +228,61 @@ final class MemXlsxExporter
 
         /* ---------------------------------------------------- signatures */
 
-        $addRow('');
-        $addRow('');
+        // The form's four blocks, left to right: the School Head prepares,
+        // the Bookkeeper checks the account titles and codes, the Budget
+        // Officer certifies the allotment, and the SDS approves. The second
+        // label wraps under the first, as the printed column is narrow; the
+        // blank rows below the labels are the space a wet signature goes in.
         $addRow('');
 
         $r = $row + 1;
 
         $addRow(
             self::cell($r, 'A', self::S_LABEL, 'Prepared by:')
-            .self::cell($r, 'E', self::S_LABEL, 'Checked by the Completeness / Certifying')
-            .self::cell($r, 'H', self::S_LABEL, 'Approved by:')
+            .self::cell($r, 'B', self::S_LABEL, 'Checked as the Correctness of')
+            .self::cell($r, 'C', self::S_LABEL, 'Certifying Availability of')
+            .self::cell($r, 'F', self::S_LABEL, 'Approved:')
         );
 
-        $r = $row + 1;
-
-        $addRow(self::cell($r, 'E', self::S_PLAIN, 'Availability of Account Titles and Codes:'));
+        $merges[] = 'C'.$r.':E'.$r;
+        $merges[] = 'F'.$r.':I'.$r;
 
         $r = $row + 1;
 
         $addRow(
-            self::cell($r, 'A', self::S_PLAIN, $exporter?->name ?? '')
+            self::cell($r, 'B', self::S_LABEL, 'Account Titles and Codes:')
+            .self::cell($r, 'C', self::S_LABEL, 'Allotment:')
+        );
+
+        $merges[] = 'C'.$r.':E'.$r;
+
+        $addRow('');
+        $addRow('');
+        $addRow('');
+
+        $r = $row + 1;
+
+        $addRow(
+            self::cell($r, 'A', self::S_PLAIN, $exporter?->name ?: '_________________')
+            .self::cell($r, 'B', self::S_PLAIN, $checked['name'] ?? '_________________')
+            .self::cell($r, 'C', self::S_PLAIN, $certified['name'] ?? '_________________')
             .self::cell($r, 'F', self::S_PLAIN, '_________________')
-            .self::cell($r, 'G', self::S_PLAIN, 'Bookkeeper')
-            .self::cell($r, 'H', self::S_PLAIN, '_________________')
         );
+
+        $merges[] = 'C'.$r.':E'.$r;
+        $merges[] = 'F'.$r.':I'.$r;
 
         $r = $row + 1;
 
         $addRow(
-            self::cell($r, 'A', self::S_PLAIN, 'School Principal I')
-            .self::cell($r, 'G', self::S_PLAIN, 'Budget Officer')
-            .self::cell($r, 'H', self::S_PLAIN, 'Schools Division Superintendent')
+            self::cell($r, 'A', self::S_PLAIN, $exporter?->position ?: 'School Principal I')
+            .self::cell($r, 'B', self::S_PLAIN, $checked['position'] ?? 'Senior Bookkeeper')
+            .self::cell($r, 'C', self::S_PLAIN, $certified['position'] ?? 'Budget Officer III')
+            .self::cell($r, 'F', self::S_PLAIN, 'Schools Division Superintendent')
         );
+
+        $merges[] = 'C'.$r.':E'.$r;
+        $merges[] = 'F'.$r.':I'.$r;
 
         /* ------------------------------------------------------- package */
 

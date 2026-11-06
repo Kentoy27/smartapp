@@ -47,6 +47,13 @@ use Livewire\WithPagination;
  * every other role gets a 404 from the route and from mount(). The filters
  * (year, school, month, search) are read-only narrowing — they can never
  * reach a school's data outside the query they build here.
+ *
+ * WHICH schools the page can reach is a second, independent boundary: the
+ * Budget office is division-wide, but a Bookkeeper reads only the schools on
+ * its assignment list (User::visibleSchoolIds()). The roster, the year list
+ * and every query below are narrowed through schoolId() / the visible ids,
+ * and a school id that names a real school outside the list is refused with
+ * the same 404 as an uninvited role — a URL is not a permission.
  */
 #[Title('Monthly Expenditure — SmartApp')]
 class BudgetLineItemChecker extends Component
@@ -82,11 +89,17 @@ class BudgetLineItemChecker extends Component
 
         // The two id filters are narrowing only, so a malformed value is
         // simply dropped rather than allowed to reach the query. A school
-        // that no longer exists falls back to the index of schools.
+        // that no longer exists falls back to the index of schools — but a
+        // school that exists and is not on the account's roster is refused
+        // outright, because asking for it was a request for its data.
         $this->school = ctype_digit($this->school) ? $this->school : '';
 
-        if ($this->school !== '' && ! School::query()->whereKey((int) $this->school)->exists()) {
-            $this->school = '';
+        if ($this->school !== '') {
+            if (! School::query()->whereKey((int) $this->school)->exists()) {
+                $this->school = '';
+            } else {
+                $this->guardSchool((int) $this->school);
+            }
         }
 
         $this->month = $this->monthNumber() === null ? '' : $this->month;
@@ -102,10 +115,40 @@ class BudgetLineItemChecker extends Component
         return $user;
     }
 
+    /**
+     * Refuse a school id the account may not read. Only the Bookkeeper is
+     * roster-bound (User::canAccessSchool()); for the Budget office this
+     * never fires, so its division-wide reach is unchanged.
+     */
+    private function guardSchool(int $schoolId): void
+    {
+        abort_unless($this->user()->canAccessSchool($schoolId), 404);
+    }
+
     /** The financial division this page is checking. */
     private function division(): string
     {
         return $this->user()->activeDivision();
+    }
+
+    /**
+     * Whether the page is narrowed to the account's assigned schools (the
+     * Bookkeeper) rather than the whole division. The view reads it to say
+     * whose roster it is listing.
+     */
+    public function scopedToAssignedSchools(): bool
+    {
+        return $this->user()->visibleSchoolIds() !== null;
+    }
+
+    /**
+     * Whether the page is roster-scoped AND the roster is empty — the one
+     * case the index says so instead of drawing an empty table, because the
+     * fix is an assignment, not a filter.
+     */
+    public function hasNoAssignedSchools(): bool
+    {
+        return $this->user()->visibleSchoolIds() === [];
     }
 
     /* --------------------------------------------------------------- state */
@@ -125,6 +168,11 @@ class BudgetLineItemChecker extends Component
         if (! ctype_digit($this->school)
             || ! School::query()->whereKey((int) $this->school)->exists()) {
             $this->school = '';
+        } else {
+            // A crafted $wire.set() to another school's id is refused the
+            // same way the URL is — the filter narrows the account's own
+            // roster, it never widens it.
+            $this->guardSchool((int) $this->school);
         }
 
         // Moving between the school index and one school's detail starts the
@@ -181,6 +229,11 @@ class BudgetLineItemChecker extends Component
         if (! School::query()->whereKey($schoolId)->exists()) {
             return;
         }
+
+        // The index only draws rows from the account's own roster, but the
+        // action is callable on its own: a school outside that roster is
+        // refused, never opened.
+        $this->guardSchool($schoolId);
 
         $this->school = (string) $schoolId;
         $this->month = '';
@@ -247,8 +300,11 @@ class BudgetLineItemChecker extends Component
     #[Computed]
     public function years(): array
     {
+        $visible = $this->user()->visibleSchoolIds();
+
         $years = MonthlyExpenditureMatrix::query()
             ->where('school_division', $this->division())
+            ->when($visible !== null, fn (Builder $query) => $query->whereIn('school_id', $visible))
             ->distinct()
             ->pluck('year')
             ->map(fn ($year): string => (string) $year)
@@ -278,10 +334,17 @@ class BudgetLineItemChecker extends Component
     {
         $term = trim($this->search);
 
+        // The Budget office sees the whole roster; the Bookkeeper sees the
+        // schools on its assignment list and nothing else. A list with no
+        // schools draws an empty index, never a division-wide fallback.
+        $visible = $this->user()->visibleSchoolIds();
+
         $schools = School::query()
+            ->when($visible !== null, fn (Builder $query) => $query->whereIn('id', $visible))
             ->with([
                 'district',
                 'users' => fn ($query) => $query
+                    ->with('school.divisionSettings')
                     ->where('role', 'user')
                     ->orderBy('name')
                     ->orderBy('username'),
@@ -339,6 +402,7 @@ class BudgetLineItemChecker extends Component
             ->with([
                 'district',
                 'users' => fn ($query) => $query
+                    ->with('school.divisionSettings')
                     ->where('role', 'user')
                     ->orderBy('name')
                     ->orderBy('username'),
@@ -500,7 +564,6 @@ class BudgetLineItemChecker extends Component
                 'monthly_expenditure_items.*',
                 'mem.month as matrix_month',
                 'mem.year as matrix_year',
-                'mem.status as matrix_status',
                 'schools.name as school_name',
             ])
             ->orderBy('schools.name')
@@ -527,12 +590,14 @@ class BudgetLineItemChecker extends Component
         $schoolId = $this->schoolId();
         $month = $this->monthNumber();
         $term = trim($this->search);
+        $visible = $this->user()->visibleSchoolIds();
 
         return MonthlyExpenditureItem::query()
             ->join('monthly_expenditure_matrices as mem', 'mem.id', '=', 'monthly_expenditure_items.matrix_id')
             ->join('schools', 'schools.id', '=', 'mem.school_id')
             ->where('mem.year', (int) $this->year)
             ->where('mem.school_division', $this->division())
+            ->when($visible !== null, fn (Builder $query) => $query->whereIn('mem.school_id', $visible))
             ->when($schoolId !== null, fn (Builder $query) => $query->where('mem.school_id', $schoolId))
             ->when($month !== null, fn (Builder $query) => $query->where('mem.month', $month))
             ->when($term !== '', function (Builder $query) use ($term): void {
@@ -555,8 +620,11 @@ class BudgetLineItemChecker extends Component
 
     private function defaultYear(): int
     {
+        $visible = $this->user()->visibleSchoolIds();
+
         $latest = (int) MonthlyExpenditureMatrix::query()
             ->where('school_division', $this->division())
+            ->when($visible !== null, fn (Builder $query) => $query->whereIn('school_id', $visible))
             ->max('year');
 
         return $latest > 0 ? $latest : (int) now()->year;
@@ -569,9 +637,21 @@ class BudgetLineItemChecker extends Component
             && (int) $this->year <= MemYearInitializer::MAX_YEAR;
     }
 
+    /**
+     * The id of the school whose detail is open, or null for the index. The
+     * last line of defence behind the mount()/updatedSchool() guards: an id
+     * this account may not read resolves to "no school", so the page falls
+     * back to the index instead of ever showing that school's lines.
+     */
     private function schoolId(): ?int
     {
-        return ctype_digit($this->school) ? (int) $this->school : null;
+        if (! ctype_digit($this->school)) {
+            return null;
+        }
+
+        $id = (int) $this->school;
+
+        return $this->user()->canAccessSchool($id) ? $id : null;
     }
 
     private function monthNumber(): ?int
