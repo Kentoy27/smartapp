@@ -2144,9 +2144,13 @@ body.sorting .mem-drag-handle { cursor: grabbing; }
 .aip-template-signatures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; padding: 24px 18px 18px; font-size: 0.75rem; }
 .aip-template-signature { display: flex; flex-direction: column; min-width: 0; gap: 3px; }
 .aip-template-signature strong { margin-top: 22px; }
-.aip-template-signatures--review { padding-inline: 0; }
-.aip-review-signature { display: block; width: min(100%, 180px); height: 42px; margin: 4px 0 2px; object-fit: contain; object-position: left center; }
-.aip-review-signature-date { display: block; margin: 0 0 2px; color: var(--text-muted); font-size: 0.68rem; }
+.aip-template-signatures--review { align-items: start; padding-inline: 0; text-align: left; }
+.aip-template-signature--review { align-items: flex-start; gap: 4px; text-align: left; }
+.aip-template-signature--review .aip-template-signature__label { font-weight: 700; }
+.aip-template-signature--review .aip-template-signature__image { display: flex; align-items: center; width: 100%; max-width: 180px; height: 46px; }
+.aip-template-signature--review .aip-template-signature__name { margin-top: 0; line-height: 1.35; }
+.aip-review-signature { display: block; width: 100%; height: 42px; margin: 0; object-fit: contain; object-position: left center; }
+.aip-review-signature-date { display: block; min-height: 1em; margin: 0; color: var(--text-muted); font-size: 0.68rem; }
 @media (max-width: 560px) { .aip-template-signatures { grid-template-columns: 1fr; } }
 .aip-wfp-note { margin: 0 0 4px; }
 .aip-title-card { padding: 18px 22px; border-left: 4px solid var(--border); transition: border-color 0.2s ease; }

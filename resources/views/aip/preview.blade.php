@@ -41,5 +41,8 @@
         @endif
 
         @include('aip.partials.preview-table', ['rows' => $rows])
+        @if ($plan->submitted_at !== null)
+            @include('aip.partials.signatures', ['plan' => $plan])
+        @endif
     </section>
 @endsection

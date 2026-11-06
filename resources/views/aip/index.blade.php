@@ -82,6 +82,9 @@
                                                     <p class="aip-record-preview__filename">Uploaded file: <strong>{{ $plan->original_file_name }}</strong></p>
                                                 @endif
                                                 @include('aip.partials.preview-table', ['rows' => $plan->form_data['rows'] ?? []])
+                                                @if ($plan->submitted_at !== null)
+                                                    @include('aip.partials.signatures', ['plan' => $plan])
+                                                @endif
                                             </div>
                                         </dialog>
                                     </div>

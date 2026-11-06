@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Livewire\AipSubmissionUpload;
 use App\Livewire\Sidebar;
 use App\Models\AipPlan;
+use App\Models\AipReview;
 use App\Models\District;
 use App\Models\School;
 use App\Models\User;
@@ -310,13 +311,99 @@ class AipPageTest extends TestCase
         $this->get(route('aip.plans.export', ['plan' => $plan->id]))
             ->assertNotFound();
 
-        $duplicate = UploadedFile::fake()->createWithContent('another-aip.docx', file_get_contents($template));
+        $previousSourcePath = $plan->source_file_path;
+        $duplicate = UploadedFile::fake()->createWithContent('completed-aip.docx', file_get_contents($template));
         Livewire::actingAs($user)
             ->test(AipSubmissionUpload::class)
             ->call('openModal')
             ->set('aipFile', $duplicate)
-            ->assertHasErrors('aipFile');
+            ->assertHasNoErrors()
+            ->assertSee('restart review')
+            ->call('submit')
+            ->assertRedirect(route('aip.index'));
+
+        $plan->refresh();
+        $this->assertSame(AipPlan::STATUS_PENDING, $plan->status);
+        $this->assertSame('completed-aip.docx', $plan->original_file_name);
+        $this->assertNotSame($previousSourcePath, $plan->source_file_path);
+        $this->assertSame(2, $plan->versions()->count());
+        $this->assertSame(2, $plan->reviews()->count());
         $this->assertSame(1, AipPlan::where('school_id', $school->id)->where('year', 2027)->count());
+    }
+
+    public function test_school_head_can_replace_an_approved_aip_and_restart_its_review_route(): void
+    {
+        Storage::fake('local');
+        config([
+            'aip.review_route' => 'Rebonie',
+            'aip.next_reviewer' => 'Eve',
+            'aip.final_reviewer' => 'SY',
+        ]);
+
+        $owner = $this->schoolHead();
+        $reviewer = User::factory()->create([
+            'username' => 'Rebonie',
+            'role' => 'viewer',
+            'is_superadmin' => false,
+        ]);
+        $district = District::create(['name' => 'District I']);
+        $school = School::create(['name' => 'Alpha Elementary School', 'district_id' => $district->id]);
+        $owner->update(['school_id' => $school->id]);
+        $oldSource = 'aip-uploads/'.$school->id.'/approved.docx';
+        Storage::disk('local')->put($oldSource, 'old document');
+
+        $plan = AipPlan::create([
+            'school_id' => $school->id,
+            'year' => 2027,
+            'created_by' => $owner->id,
+            'status' => AipPlan::STATUS_APPROVED,
+            'reviewer_id' => $reviewer->id,
+            'assigned_to' => $reviewer->id,
+            'approved_by' => $reviewer->id,
+            'approved_at' => now(),
+            'reviewed_at' => now(),
+            'submitted_at' => now(),
+            'source_file_path' => $oldSource,
+            'original_file_name' => 'same-name.docx',
+            'form_data' => ['rows' => [['pillar' => 'Pillar 1: ACCESS', 'ppa' => 'Previously approved']]],
+        ]);
+        $plan->archiveVersion(AipPlan::STATUS_APPROVED, $owner);
+        $plan->reviews()->create([
+            'reviewer_id' => $owner->id,
+            'action' => AipReview::ACTION_SUBMIT,
+            'new_status' => AipPlan::STATUS_PENDING,
+            'reviewed_at' => now(),
+        ]);
+        $plan->reviews()->create([
+            'reviewer_id' => $reviewer->id,
+            'action' => AipReview::ACTION_COMPLIANCE,
+            'new_status' => AipPlan::STATUS_APPROVED,
+            'reviewed_at' => now(),
+        ]);
+
+        $template = storage_path('forms/FY-2026-ANNUAL-IMPLEMENTATION-PLAN-1.docx');
+        $upload = UploadedFile::fake()->createWithContent('same-name.docx', file_get_contents($template));
+
+        Livewire::actingAs($owner)
+            ->test(AipSubmissionUpload::class)
+            ->call('openModal')
+            ->set('aipFile', $upload)
+            ->assertHasNoErrors()
+            ->assertSee('restart review')
+            ->call('submit')
+            ->assertRedirect(route('aip.index'));
+
+        $plan->refresh();
+        $this->assertSame(AipPlan::STATUS_PENDING, $plan->status);
+        $this->assertSame($reviewer->id, $plan->assigned_to);
+        $this->assertNull($plan->approved_by);
+        $this->assertNull($plan->approved_at);
+        $this->assertNull($plan->reviewed_at);
+        $this->assertSame('same-name.docx', $plan->original_file_name);
+        $this->assertNotSame($oldSource, $plan->source_file_path);
+        $this->assertSame(2, $plan->versions()->count());
+        $this->assertSame(3, $plan->reviews()->count());
+        $this->assertSame(AipReview::ACTION_SUBMIT, $plan->reviews()->latest('id')->firstOrFail()->action);
     }
 
     public function test_school_head_can_replace_and_resubmit_a_returned_aip_repeatedly(): void
@@ -415,6 +502,95 @@ class AipPageTest extends TestCase
             ->assertDontSee('aip-record-preview-dialog__actions', false)
             ->assertDontSee('Download original DOCX')
             ->assertDontSee('href="'.route('aip.plans.preview', ['plan' => $plan->id]).'"', false);
+    }
+
+    public function test_submitted_aip_previews_show_the_submitter_and_approved_reviewer_signatures(): void
+    {
+        Storage::fake('local');
+        config([
+            'aip.review_route' => 'Rebonie',
+            'aip.next_reviewer' => 'Eve',
+            'aip.final_reviewer' => 'SY',
+        ]);
+
+        $owner = $this->schoolHead();
+        $rebonie = User::factory()->create([
+            'name' => 'Rebonie F. Emboltorio',
+            'username' => 'Rebonie',
+            'role' => 'viewer',
+            'is_superadmin' => false,
+        ]);
+        $eve = $this->superadmin();
+        $sy = User::factory()->create([
+            'name' => 'Superadmin SY',
+            'username' => 'SY',
+            'role' => 'superadmin',
+            'is_superadmin' => true,
+        ]);
+        $district = District::create(['name' => 'District I']);
+        $school = School::create(['name' => 'Alpha Elementary School', 'district_id' => $district->id]);
+        $owner->update(['school_id' => $school->id]);
+
+        foreach ([$owner, $rebonie, $eve, $sy] as $signer) {
+            $this->addSignatureTo($signer);
+        }
+
+        $submittedAt = now();
+        $plan = AipPlan::create([
+            'school_id' => $school->id,
+            'year' => 2027,
+            'created_by' => $owner->id,
+            'status' => AipPlan::STATUS_APPROVED,
+            'submitted_at' => $submittedAt,
+            'approved_by' => $sy->id,
+            'approved_at' => $submittedAt,
+            'form_data' => ['rows' => [[
+                'pillar' => 'Pillar 1: ACCESS',
+                'ppa' => 'Reading intervention',
+            ]]],
+        ]);
+
+        $plan->reviews()->create([
+            'reviewer_id' => $owner->id,
+            'action' => AipReview::ACTION_SUBMIT,
+            'new_status' => AipPlan::STATUS_PENDING,
+            'reviewed_at' => $submittedAt,
+        ]);
+
+        foreach ([$rebonie, $eve, $sy] as $reviewer) {
+            $plan->reviews()->create([
+                'reviewer_id' => $reviewer->id,
+                'action' => AipReview::ACTION_COMPLIANCE,
+                'new_status' => AipPlan::STATUS_APPROVED,
+                'reviewed_at' => $submittedAt,
+            ]);
+        }
+
+        $signatureUrls = [
+            route('aip.signature', ['plan' => $plan, 'signer' => $owner]),
+            route('aip.signature', ['plan' => $plan, 'signer' => $rebonie]),
+            route('aip.signature', ['plan' => $plan, 'signer' => $eve]),
+            route('aip.signature', ['plan' => $plan, 'signer' => $sy]),
+        ];
+
+        $this->actingAs($owner)
+            ->get(route('aip.index'))
+            ->assertOk()
+            ->assertSee('Digital signature of '.$owner->name)
+            ->assertSee('Digital signature of '.$rebonie->name)
+            ->assertSee('Digital signature of '.$eve->name)
+            ->assertSee('Digital signature of '.$sy->name);
+
+        $preview = $this->get(route('aip.plans.preview', ['plan' => $plan->id]))
+            ->assertOk()
+            ->assertSee('Digital signature of '.$owner->name)
+            ->assertSee('Digital signature of '.$rebonie->name)
+            ->assertSee('Digital signature of '.$eve->name)
+            ->assertSee('Digital signature of '.$sy->name);
+
+        foreach ($signatureUrls as $signatureUrl) {
+            $preview->assertSee($signatureUrl, false);
+        }
     }
 
     public function test_upload_preview_shows_completed_aip_items_as_readable_cards(): void

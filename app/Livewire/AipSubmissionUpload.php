@@ -112,17 +112,13 @@ class AipSubmissionUpload extends Component
             return;
         }
 
-        if ($existingPlan !== null && ! $existingPlan->isEditable()) {
-            $this->addError('aipFile', "The FY {$this->detectedYear} AIP is already under review or approved. It can only be replaced after it is returned for revision.");
-
-            return;
-        }
-
         $this->isReplacingReturned = $existingPlan?->isReturned() ?? false;
         $this->analysisMessage = count($this->previewRows).' AIP row(s) found. '
             .($this->isReplacingReturned
                 ? 'This upload will replace the returned FY '.$this->detectedYear.' AIP and resubmit it for review.'
-                : 'Review the preview before submitting.');
+                : ($existingPlan !== null
+                    ? 'This upload will replace the existing FY '.$this->detectedYear.' AIP, preserve its submission history, and restart review.'
+                    : 'Review the preview before submitting.'));
     }
 
     public function submit(): mixed
@@ -173,12 +169,6 @@ class AipSubmissionUpload extends Component
             return null;
         }
 
-        if ($existingPlan !== null && ! $existingPlan->isEditable()) {
-            $this->addError('aipFile', "The FY {$year} AIP is already under review or approved. It can only be replaced after it is returned for revision.");
-
-            return null;
-        }
-
         $storedPath = $this->aipFile->storeAs(
             'aip-uploads/'.$user->school_id,
             Str::uuid()->toString().'.docx',
@@ -202,15 +192,11 @@ class AipSubmissionUpload extends Component
                         return 'not-owner';
                     }
 
-                    if (! $plan->isEditable()) {
-                        return 'locked';
-                    }
+                    $isReturned = $plan->isReturned();
 
-                    if ($plan->isReturned()) {
-                        return $plan->replaceReturnedUpload($user, $imported['rows'], $storedPath, $originalName)
-                            ? 'resubmitted'
-                            : 'locked';
-                    }
+                    return $plan->replaceUpload($user, $imported['rows'], $storedPath, $originalName)
+                        ? ($isReturned ? 'resubmitted' : 'restarted')
+                        : 'locked';
                 } else {
                     $plan = AipPlan::firstOrCreate(
                         ['school_id' => $user->school_id, 'year' => $year],
@@ -252,7 +238,7 @@ class AipSubmissionUpload extends Component
                 'aipFile',
                 $result === 'not-owner'
                     ? "An AIP for FY {$year} belongs to another School Head account."
-                    : "The FY {$year} AIP is no longer available for replacement. It can only be replaced while it is a draft or returned for revision."
+                    : "The FY {$year} AIP is no longer available for replacement. Please try uploading it again."
             );
 
             return null;
@@ -260,9 +246,11 @@ class AipSubmissionUpload extends Component
 
         session()->flash(
             'status',
-            $result === 'resubmitted'
-                ? "FY {$year} AIP updated and resubmitted for review."
-                : "FY {$year} AIP submitted and is Pending Review."
+            match ($result) {
+                'resubmitted' => "FY {$year} AIP updated and resubmitted for review.",
+                'restarted' => "FY {$year} AIP replaced. Its submission history was preserved and review restarted.",
+                default => "FY {$year} AIP submitted and is Pending Review.",
+            }
         );
 
         return $this->redirect(route('aip.index'), navigate: true);

@@ -668,6 +668,42 @@ class AipPlan extends Model
     }
 
     /**
+     * Replace the School Head's current upload and submit it as a new version.
+     * Returned plans keep their existing reviewer; all other states restart
+     * the review route from its first configured reviewer.
+     *
+     * @param  array<int, array<string, string>>  $rows
+     */
+    public function replaceUpload(
+        User $owner,
+        array $rows,
+        string $sourceFilePath,
+        string $originalFileName,
+    ): bool {
+        if (! $this->managedBy($owner)) {
+            return false;
+        }
+
+        if ($this->isReturned()) {
+            return $this->replaceReturnedUpload($owner, $rows, $sourceFilePath, $originalFileName);
+        }
+
+        $this->form_data = ['rows' => $rows];
+        $this->source_file_path = $sourceFilePath;
+        $this->original_file_name = $originalFileName;
+        $this->updated_by = $owner->id;
+        $this->version = ((int) $this->version) + 1;
+        $this->reviewed_at = null;
+        $this->approved_by = null;
+        $this->approved_at = null;
+        $this->assigned_to = null;
+        $this->save();
+        $this->submit($owner);
+
+        return true;
+    }
+
+    /**
      * The reviewer approves the submitted plan — this is the only path that
      * sets 'approved'; nothing marks a plan approved implicitly.
      */
