@@ -199,7 +199,9 @@ Route::middleware('auth')->group(function () {
     })->name('aip.signature')->where(['plan' => '[0-9]+', 'signer' => '[0-9]+']);
 
     Route::get('/aip/{plan}', function (AipPlan $plan) {
-        abort(404);
+        abort_unless($plan->canEditContentsBy(Auth::user()), 404);
+
+        return view('aip.edit', compact('plan'));
     })->name('aip.plans.edit')->where('plan', '[0-9]+');
 
     Route::get('/aip/{plan}/print', function (AipPlan $plan) {
@@ -416,12 +418,15 @@ Route::middleware('auth')->group(function () {
         return view('opcrf.schedule');
     })->name('opcrf.schedule');
 
-    // Review Opcrf: the superadmin's window into every staff submission —
-    // read-only review of the submitted OPCR (with a download of the
-    // submitted file) and each submission's MOVs as a view-only record.
+    // Review OPCRF: superadmins review routed submissions; SDS Viewers may
+    // validate full Parts I–IV workbooks before they reach the first reviewer.
     Route::get('/opcrf-review', function () {
         $user = Auth::user();
-        abort_unless($user instanceof User && $user->hasAdminAccess(), 404);
+        abort_unless(
+            $user instanceof User
+                && ($user->hasAdminAccess() || $user->canReviewAllOpcrfSubmissions()),
+            404
+        );
 
         return view('opcrf.review');
     })->name('opcrf.review');
@@ -1080,8 +1085,9 @@ Route::middleware('auth')->group(function () {
             ->header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'");
     })->name('mov.preview')->where('mov', '[0-9]+');
 
-    // The same file as a download. Owner or superadmin only — the storage
-    // path is never exposed and never lives under a public URL.
+    // The same file as a download. Owner, superadmin, or the currently
+    // assigned full-OPCRF validator may access it; the storage path is never
+    // exposed and never lives under a public URL.
     Route::get('/movs/{mov}/download', function (UserMov $mov) {
         /** @var FilesystemAdapter $disk */
         $disk = Storage::disk(config('mov.disk', 'local'));

@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use DateTimeInterface;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\DB;
 
 class OpcrfSubmission extends Model
 {
@@ -959,6 +960,56 @@ class OpcrfSubmission extends Model
                 ->where('role', 'user')
                 ->where('is_superadmin', false)
                 ->exists();
+    }
+
+    /**
+     * Record the SDS Viewer/Validator's check of a full workbook, then route
+     * it to the first superadmin without marking it approved.
+     *
+     * @param  array<int, array<int, string>>  $objectiveRemarks
+     */
+    public function validateAndForwardToSuperadmin(
+        User $validator,
+        User $recipient,
+        ?string $remarks = null,
+        array $objectiveRemarks = []
+    ): bool {
+        if (
+            ! $validator->canReviewAllOpcrfSubmissions()
+            || $this->opcrf_part !== self::FULL_WORKBOOK
+            || ! $this->hasFile()
+            || (int) $this->assigned_to !== (int) $validator->id
+            || ! in_array($this->status, [self::STATUS_PENDING, self::STATUS_RESUBMITTED], true)
+            || ! $recipient->hasAdminAccess()
+            || (int) $recipient->id === (int) $validator->id
+        ) {
+            return false;
+        }
+
+        return DB::transaction(function () use ($validator, $recipient, $remarks, $objectiveRemarks): bool {
+            $reviewedAt = now();
+            $currentStatus = (string) $this->status;
+
+            $this->reviews()->create([
+                'reviewer_id' => $validator->id,
+                'action' => OpcrfReview::ACTION_VALIDATE,
+                'remarks' => $remarks,
+                'objective_remarks' => $objectiveRemarks === [] ? null : $objectiveRemarks,
+                'from_id' => $validator->id,
+                'previous_status' => $currentStatus,
+                'new_status' => $currentStatus,
+                'reviewed_at' => $reviewedAt,
+            ]);
+
+            if (! $this->forwardTo($validator, $recipient)) {
+                throw new \LogicException('The submission could not be forwarded to the superadmin.');
+            }
+
+            $this->reviewer_id = $recipient->id;
+            $this->save();
+
+            return true;
+        });
     }
 
     /**

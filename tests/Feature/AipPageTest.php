@@ -118,6 +118,31 @@ class AipPageTest extends TestCase
         $this->assertFalse($otherPlan->managedBy($owner));
     }
 
+    public function test_school_head_can_open_and_update_a_returned_aip_from_the_records_page(): void
+    {
+        $owner = $this->schoolHead();
+        $plan = AipPlan::create([
+            'school_id' => $owner->school_id,
+            'year' => 2026,
+            'created_by' => $owner->id,
+            'status' => AipPlan::STATUS_RETURNED,
+            'review_remarks' => 'Please update the activity targets.',
+            'submitted_at' => now(),
+        ]);
+
+        $this->actingAs($owner)
+            ->get(route('aip.index'))
+            ->assertOk()
+            ->assertSee('Please update the activity targets.')
+            ->assertSee('Update / Upload AIP')
+            ->assertSee(route('aip.plans.edit', ['plan' => $plan->id]));
+
+        $this->get(route('aip.plans.edit', ['plan' => $plan->id]))
+            ->assertOk()
+            ->assertSee('Import AIP DOCX')
+            ->assertSee('Resubmit for review');
+    }
+
     public function test_the_authoring_page_is_closed_to_superadmins_and_viewers(): void
     {
         $this->actingAs($this->superadmin())->get(route('aip.index'))->assertNotFound();
@@ -292,6 +317,66 @@ class AipPageTest extends TestCase
             ->set('aipFile', $duplicate)
             ->assertHasErrors('aipFile');
         $this->assertSame(1, AipPlan::where('school_id', $school->id)->where('year', 2027)->count());
+    }
+
+    public function test_school_head_can_replace_and_resubmit_a_returned_aip_repeatedly(): void
+    {
+        Storage::fake('local');
+        $user = $this->schoolHead();
+        $district = District::create(['name' => 'District I']);
+        $school = School::create(['name' => 'Alpha Elementary School', 'district_id' => $district->id]);
+        $user->update(['school_id' => $school->id]);
+        $reviewer = $this->superadmin();
+        $template = storage_path('forms/FY-2026-ANNUAL-IMPLEMENTATION-PLAN-1.docx');
+        $bytes = file_get_contents($template);
+        $oldPath = 'aip-uploads/'.$school->id.'/old.docx';
+        Storage::disk('local')->put($oldPath, $bytes);
+
+        $plan = AipPlan::create([
+            'school_id' => $school->id,
+            'year' => 2027,
+            'created_by' => $user->id,
+            'form_data' => ['rows' => [['ppa' => 'Original plan content']]],
+            'status' => AipPlan::STATUS_PENDING,
+            'reviewer_id' => $reviewer->id,
+            'source_file_path' => $oldPath,
+            'original_file_name' => 'old.docx',
+            'submitted_at' => now(),
+        ]);
+        $plan->returnForRevision($reviewer, 'Please revise this AIP.');
+
+        foreach (['revision-one.docx', 'revision-two.docx'] as $index => $fileName) {
+            $upload = UploadedFile::fake()->createWithContent($fileName, $bytes);
+
+            Livewire::actingAs($user)
+                ->test(AipSubmissionUpload::class)
+                ->call('openModal')
+                ->set('aipFile', $upload)
+                ->assertSet('detectedYear', 2027)
+                ->assertSet('isReplacingReturned', true)
+                ->assertHasNoErrors()
+                ->call('submit')
+                ->assertRedirect(route('aip.index'));
+
+            $plan->refresh();
+            $this->assertSame(AipPlan::STATUS_RESUBMITTED, $plan->status);
+            $this->assertSame($fileName, $plan->original_file_name);
+            Storage::disk('local')->assertExists($plan->source_file_path);
+            $this->assertSame($index + 1, $plan->versions()->count());
+            $this->assertDatabaseHas('aip_reviews', [
+                'aip_plan_id' => $plan->id,
+                'reviewer_id' => $user->id,
+                'action' => 'resubmit',
+            ]);
+
+            if ($index === 0) {
+                $this->assertSame(
+                    'Original plan content',
+                    $plan->versions()->orderBy('version_number')->firstOrFail()->snapshot['form_data']['rows'][0]['ppa'],
+                );
+                $plan->returnForRevision($reviewer, 'Please revise the updated AIP.');
+            }
+        }
     }
 
     public function test_aip_record_preview_opens_in_a_modal_with_the_analyzed_document_rows(): void

@@ -143,7 +143,9 @@
                                 </th>
                             @endforeach
                             @if ($showReviewerRemarks)
-                                <th class="opcrf-sheet-reviewer-remarks" scope="col">Superadmin Remarks</th>
+                                <th class="opcrf-sheet-reviewer-remarks" scope="col">
+                                    {{ auth()->user()->canReviewAllOpcrfSubmissions() ? 'Validator Remarks' : 'Superadmin Remarks' }}
+                                </th>
                             @endif
                         </tr>
                     </thead>
@@ -193,7 +195,7 @@
                                                     wire:model.defer="objectiveRemarks.{{ $pi }}.{{ $ei }}"
                                                     rows="3"
                                                     maxlength="2000"
-                                                    aria-label="Superadmin remarks for Part {{ $part['key'] }} objective {{ $entry['number'] }}"
+                                                    aria-label="{{ auth()->user()->canReviewAllOpcrfSubmissions() ? 'Validator' : 'Superadmin' }} remarks for Part {{ $part['key'] }} objective {{ $entry['number'] }}"
                                                     placeholder="Add remarks for objective {{ $entry['number'] }}…"
                                                 ></textarea>
                                                 @if ($showMovReview ?? false)

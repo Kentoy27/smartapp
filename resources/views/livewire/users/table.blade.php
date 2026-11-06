@@ -222,8 +222,8 @@
                             <label class="role-option">
                                 <input type="radio" name="selectedRole" value="viewer" wire:model="selectedRole">
                                 <span class="role-option-body">
-                                    <strong>SDS Viewer</strong>
-                                    <small>View users only, no account changes</small>
+                                    <strong>SDS Viewer / Validator</strong>
+                                    <small>Validate full OPCRF workbooks and review district records</small>
                                 </span>
                             </label>
 
@@ -344,8 +344,8 @@
                                     wire:model.live="role"
                                 >
                                 <span class="role-option-body">
-                                    <strong>SDS Viewer</strong>
-                                    <small>View users only, no account changes</small>
+                                    <strong>SDS Viewer / Validator</strong>
+                                    <small>Validate full OPCRF workbooks and review district records</small>
                                 </span>
                             </label>
 

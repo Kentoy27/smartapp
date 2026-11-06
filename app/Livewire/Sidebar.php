@@ -406,14 +406,14 @@ class Sidebar extends Component
                 ],
             ];
         } else {
-            // Viewers may see the OPCRF status page, but not download a
-            // template or open an editable Part.
+            // The SDS Viewer/Validator uses the OPCRF review queue; the
+            // School Head status page remains available from that page.
             if (Auth::user()?->canViewOpcrfParts()) {
                 $items[] = [
                     'label' => 'OPCRF',
-                    'route' => 'opcrf.index',
-                    'path' => 'opcrf',
-                    'icon' => 'clipboard-list',
+                    'route' => Auth::user()?->canReviewAllOpcrfSubmissions() ? 'opcrf.review' : 'opcrf.index',
+                    'path' => Auth::user()?->canReviewAllOpcrfSubmissions() ? 'opcrf-review' : 'opcrf',
+                    'icon' => Auth::user()?->canReviewAllOpcrfSubmissions() ? 'eye' : 'clipboard-list',
                     'section' => 'Files',
                     'order' => 10,
                 ];
@@ -452,6 +452,7 @@ class Sidebar extends Component
                     'section' => 'Files',
                     'order' => 9,
                 ];
+
             }
 
             if (Auth::user()?->canAccessSip()) {

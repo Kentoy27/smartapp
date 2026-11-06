@@ -121,7 +121,11 @@
                         </div>
 
                         <p class="aip-upload-modal__notice">
-                            Submitting sends this AIP to <strong>Pending Review</strong>. A plan already on file for this fiscal year cannot be replaced.
+                            @if ($isReplacingReturned)
+                                This upload will replace the returned plan and send the revision to <strong>Pending Review</strong>.
+                            @else
+                                Submitting sends this AIP to <strong>Pending Review</strong>. An existing draft can be updated; plans already under review or approved cannot be replaced.
+                            @endif
                         </p>
                     @endif
 
@@ -135,7 +139,7 @@
                             wire:target="submit"
                             @disabled(! $analysisMessage || $errors->has('aipFile'))
                         >
-                            <span wire:loading.remove wire:target="submit">Submit AIP for review</span>
+                            <span wire:loading.remove wire:target="submit">{{ $isReplacingReturned ? 'Replace and resubmit AIP' : 'Submit AIP for review' }}</span>
                             <span wire:loading wire:target="submit">Submitting…</span>
                         </button>
                     </div>

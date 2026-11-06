@@ -19,15 +19,21 @@
 
     @include('livewire.opcrf.partials.mov-evidence-modal')
 
-    {{-- SUBMISSIONS TABLE: every staff submission, newest first. --}}
+    {{-- SDS Viewers receive only full workbooks awaiting validation. --}}
     <div class="card">
         <div class="card-head">
-            <div class="card-title">All OPCRF submissions</div>
+            <div class="card-title">
+                {{ auth()->user()->canReviewAllOpcrfSubmissions() ? 'Full OPCRF submissions to validate' : 'All OPCRF submissions' }}
+            </div>
         </div>
         @if ($this->submissions->isEmpty())
             <p class="card-text">
-                Nothing to review yet — submissions appear here the moment a
-                staff member confirms their OPCR.
+                @if (auth()->user()->canReviewAllOpcrfSubmissions())
+                    No full Parts I–IV OPCRFs are waiting for validation.
+                @else
+                    Nothing to review yet — submissions appear here the moment a
+                    staff member confirms their OPCR.
+                @endif
             </p>
         @else
             <div class="table-wrap">
@@ -83,16 +89,18 @@
                                             <x-icon name="eye" :size="15" />
                                             <span>Review</span>
                                         </x-row-menu-item>
-                                        <x-row-menu-item
-                                            wire:click="openDelete({{ $submission->id }})"
-                                            wire:loading.attr="disabled"
-                                            wire:target="openDelete"
-                                            title="Delete the submission for {{ $submission->review_period }}"
-                                            danger
-                                        >
-                                            <x-icon name="trash" :size="15" />
-                                            <span>Delete</span>
-                                        </x-row-menu-item>
+                                        @if (auth()->user()->hasAdminAccess())
+                                            <x-row-menu-item
+                                                wire:click="openDelete({{ $submission->id }})"
+                                                wire:loading.attr="disabled"
+                                                wire:target="openDelete"
+                                                title="Delete the submission for {{ $submission->review_period }}"
+                                                danger
+                                            >
+                                                <x-icon name="trash" :size="15" />
+                                                <span>Delete</span>
+                                            </x-row-menu-item>
+                                        @endif
                                     </x-row-menu>
                                 </td>
                             </tr>
@@ -138,13 +146,19 @@
                     reported results, the competency ratings, the summary of
                     ratings and both improvement plans. A field the staff
                     member left empty says so instead of being filled in.
-                    Enter feedback in the Superadmin Remarks column beside
-                    each numbered objective; the School Head can view those
-                    notes with the submitted OPCRF. Add any decision remarks,
-                    then approve it (the submission then routes onward to the
-                    next superadmin automatically) or
-                    return it for revision — the submitted file is never
-                    replaced.
+                    @if (auth()->user()->canReviewAllOpcrfSubmissions())
+                        Enter validation feedback in the Validator Remarks
+                        column beside each numbered objective, then forward
+                        this full workbook to the first Superadmin. Validation
+                        does not approve the OPCRF.
+                    @else
+                        Enter feedback in the Superadmin Remarks column beside
+                        each numbered objective; the School Head can view those
+                        notes with the submitted OPCRF. Add any decision remarks,
+                        then approve it (the submission then routes onward to the
+                        next superadmin automatically) or return it for revision.
+                    @endif
+                    The submitted file is never replaced.
                 </p>
 
                 {{-- THE WORKBOOK ITSELF, as the reviewer's to open: what
@@ -156,7 +170,7 @@
                      keep agree. Submissions filed before a signature was on
                      the account download exactly as uploaded, with no
                      signature to show. --}}
-                @if ($this->reviewSubmission()->hasFile())
+                @if ($this->reviewSubmission()->hasFile() && auth()->user()->hasAdminAccess())
                     <div class="opcrf-download-row">
                         <a
                             class="btn-ghost"
@@ -218,8 +232,12 @@
                                     'rateeSignature' => $this->reviewSubmission()->rateeSignature(),
                                     'reviewSignatures' => $this->reviewSignatures,
                                     'reviewerRemarks' => $this->objectiveRemarks,
-                                    'canEditObjectiveRemarks' => $this->reviewSubmission()->isAssignedTo(auth()->user()),
-                                    'showMovReview' => $this->reviewSubmission()->opcrf_part === \App\Models\OpcrfSubmission::FULL_WORKBOOK,
+                                    'canEditObjectiveRemarks' => $this->reviewSubmission()->isAssignedTo(auth()->user())
+                                        || (auth()->user()->canReviewAllOpcrfSubmissions()
+                                            && (int) $this->reviewSubmission()->assigned_to === (int) auth()->id()),
+                                    'showMovReview' => $this->reviewSubmission()->opcrf_part === \App\Models\OpcrfSubmission::FULL_WORKBOOK
+                                        && (auth()->user()->hasAdminAccess()
+                                            || auth()->user()->canReviewAllOpcrfSubmissions()),
                                     'workbook' => $this->reviewWorkbook ?? ['tabs' => [], 'part_two' => ['sections' => [], 'total_rows' => [], 'signers' => [], 'scale' => ['title' => '', 'levels' => []]], 'part_three' => ['components' => [], 'agreement' => [], 'overall' => null, 'rating' => '', 'rating_table' => [], 'signatures' => []], 'part_four' => ['office_plan' => [], 'office_feedback' => '', 'development_plan' => [], 'development_feedback' => '', 'signers' => [], 'sections' => []], 'extra_sheets' => []],
                                     'uid' => 'rv',
                                 ])
@@ -293,7 +311,38 @@
                                 <span class="badge {{ $this->reviewSubmission()->statusBadgeClass() }}">{{ $this->reviewSubmission()->statusLabelFor(auth()->user()) }}</span>
                             </div>
 
-                            @if ($this->reviewSubmission()->isAssignedTo(auth()->user()))
+                            @if (auth()->user()->canReviewAllOpcrfSubmissions())
+                                <p class="opcrf-review-card-desc">
+                                    Check all four parts of this submitted workbook and add any objective-level validator notes.
+                                    This action records validation and sends the workbook to the first Superadmin for review.
+                                </p>
+                                <label for="opcrfValidatorRemarks" class="opcrf-review-card-desc">Validation note (optional)</label>
+                                <textarea
+                                    id="opcrfValidatorRemarks"
+                                    class="form-control"
+                                    rows="3"
+                                    maxlength="2000"
+                                    wire:model="reviewRemarks"
+                                    placeholder="Add a general validation note for the Superadmin"
+                                ></textarea>
+                                @error('reviewRemarks')
+                                    <p class="field-error" role="alert">{{ $message }}</p>
+                                @enderror
+                                <div class="opcrf-decision-actions">
+                                    <button
+                                        type="button"
+                                        class="btn-primary"
+                                        wire:click="validateAndForward"
+                                        wire:loading.attr="disabled"
+                                        wire:target="validateAndForward"
+                                        title="Record validation and forward the full workbook"
+                                    >
+                                        <x-icon name="check" :size="14" />
+                                        <span wire:loading.remove wire:target="validateAndForward">Validate and Forward to Superadmin</span>
+                                        <span wire:loading wire:target="validateAndForward">Forwarding…</span>
+                                    </button>
+                                </div>
+                            @elseif ($this->reviewSubmission()->isAssignedTo(auth()->user()))
                                 <p class="opcrf-review-card-desc">
                                     Review the submission and choose an appropriate action.
                                     <strong>Approve</strong> records your approval and routes it to the next reviewer when one is configured,

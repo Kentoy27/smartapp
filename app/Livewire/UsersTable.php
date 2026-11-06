@@ -312,7 +312,7 @@ class UsersTable extends Component
             'administrator' => 'Administrator',
             'bookkeeper' => 'Bookkeeper',
             'budget' => 'Budget',
-            'viewer' => 'SDS Viewer',
+            'viewer' => 'SDS Viewer / Validator',
             default => 'SH',
         };
 

@@ -89,6 +89,13 @@
                                     @if ($plan->source_file_path)
                                         <a class="users-action" href="{{ route('aip.plans.source', ['plan' => $plan->id]) }}">DOCX</a>
                                     @endif
+                                    @if ($plan->isReturned() && $plan->canEditContentsBy(auth()->user()))
+                                        <a
+                                            class="users-action"
+                                            href="{{ route('aip.plans.edit', ['plan' => $plan->id]) }}"
+                                            wire:navigate
+                                        >Update / Upload AIP</a>
+                                    @endif
                                     @if ($plan->status === \App\Models\AipPlan::STATUS_DRAFT)
                                         <form method="POST" action="{{ route('aip.plans.submit', ['plan' => $plan->id]) }}">
                                             @csrf

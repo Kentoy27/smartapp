@@ -33,6 +33,8 @@ class OpcrfReview extends Model
 
     public const ACTION_FORWARD = 'forward';
 
+    public const ACTION_VALIDATE = 'validate';
+
     public const ACTION_RETURN = 'return';
 
     public const ACTION_RESUBMIT = 'resubmit';
@@ -83,6 +85,7 @@ class OpcrfReview extends Model
         return match ($this->action) {
             self::ACTION_COMPLIANCE, self::ACTION_COMPLIANCE_FINAL => 'Approved',
             self::ACTION_FORWARD => 'Forwarded',
+            self::ACTION_VALIDATE => 'Validated',
             self::ACTION_RETURN => 'Returned for Revision',
             self::ACTION_RESUBMIT => 'Resubmitted',
             default => ucfirst($this->action),

@@ -5,7 +5,11 @@ namespace Tests\Feature;
 use App\Livewire\OpcrfMovs;
 use App\Livewire\OpcrfReview;
 use App\Livewire\OpcrfUpload;
+use App\Models\MovCategory;
+use App\Models\MovPart;
+use App\Models\MovRequirement;
 use App\Models\OpcrfSubmission;
+use App\Models\UserMov;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -39,6 +43,18 @@ class OpcrfReviewTest extends TestCase
             'email' => 'adminuser@example.com',
             'password' => Hash::make('password123'),
             'is_superadmin' => true,
+        ]);
+    }
+
+    private function sdsValidator(): User
+    {
+        return User::create([
+            'name' => 'SDS Viewer',
+            'username' => 'validator',
+            'email' => 'validator@example.com',
+            'password' => Hash::make('password123'),
+            'role' => 'viewer',
+            'is_superadmin' => false,
         ]);
     }
 
@@ -91,6 +107,177 @@ class OpcrfReviewTest extends TestCase
             ->assertOk()
             ->assertSee('Review Opcrf')
             ->assertSee('All OPCRF submissions');
+    }
+
+    public function test_sds_viewer_can_open_the_full_opcrf_validation_queue(): void
+    {
+        $viewer = $this->sdsValidator();
+
+        $this->actingAs($viewer)
+            ->get(route('opcrf.review'))
+            ->assertOk()
+            ->assertSee('Full OPCRF submissions to validate');
+
+        Livewire::actingAs($viewer)
+            ->test(\App\Livewire\Sidebar::class)
+            ->assertSee(route('opcrf.review'))
+            ->assertDontSee('OPCRF Validation');
+    }
+
+    public function test_viewer_validates_a_full_workbook_and_forwards_it_to_eve_without_approving(): void
+    {
+        Storage::fake('local');
+        config(['opcrf.review_route' => 'Eve']);
+        $viewer = $this->sdsValidator();
+        $eve = $this->superadmin();
+        $eve->update(['username' => 'Eve']);
+        $staff = $this->staffUser();
+        $workbookPath = $this->buildFullOpcrfWorkbook();
+        $storedPath = 'opcrf-submissions/'.$staff->id.'/full-opcrf.xlsx';
+        Storage::disk('local')->put($storedPath, file_get_contents($workbookPath));
+        $submission = $this->createSubmission($staff, [
+            'opcrf_part' => OpcrfSubmission::FULL_WORKBOOK,
+            'reviewer_id' => $viewer->id,
+            'assigned_to' => $viewer->id,
+            'file_path' => $storedPath,
+            'file_original_name' => 'full-opcrf.xlsx',
+        ]);
+
+        Livewire::actingAs($viewer)
+            ->test(OpcrfReview::class)
+            ->assertSee('Full OPCRF submissions to validate')
+            ->assertSee('Full OPCRF (Parts I–IV)')
+            ->call('openReview', $submission->id)
+            ->assertSee('Validate and Forward to Superadmin')
+            ->assertSee('Review MOV #1')
+            ->assertDontSee('>Approve</span>', false)
+            ->assertDontSee('Return for Revision')
+            ->call('openMovEvidence', $submission->id, 1)
+            ->assertSet('reviewMovNumber', 1)
+            ->assertSee('MOV 1 Evidence')
+            ->call('closeMovEvidence')
+            ->set('reviewRemarks', 'Checked all four parts.')
+            ->call('validateAndForward')
+            ->assertSet('showReview', false)
+            ->assertSet('successMessage', 'Full OPCRF validated and forwarded to Superadmin Eve.');
+
+        $submission->refresh();
+        $this->assertSame(OpcrfSubmission::STATUS_FORWARDED, $submission->status);
+        $this->assertSame($eve->id, $submission->reviewer_id);
+        $this->assertSame($eve->id, $submission->assigned_to);
+        $this->assertNull($submission->approved_at);
+        $this->assertDatabaseHas('opcrf_reviews', [
+            'opcrf_submission_id' => $submission->id,
+            'reviewer_id' => $viewer->id,
+            'action' => 'validate',
+            'remarks' => 'Checked all four parts.',
+        ]);
+        $this->assertDatabaseHas('opcrf_reviews', [
+            'opcrf_submission_id' => $submission->id,
+            'reviewer_id' => $viewer->id,
+            'action' => 'forward',
+            'to_id' => $eve->id,
+        ]);
+
+        Livewire::actingAs($eve)
+            ->test(OpcrfReview::class)
+            ->assertSee($submission->employee_name)
+            ->assertSee('Pending Review');
+
+        $sy = $this->otherSuperadmin();
+        $submission->markCompliant($eve, routeTo: $sy);
+
+        Livewire::actingAs($eve)
+            ->test(OpcrfReview::class)
+            ->assertSee($submission->employee_name);
+    }
+
+    public function test_sds_viewer_queue_excludes_commitment_and_unassigned_full_workbooks(): void
+    {
+        $viewer = $this->sdsValidator();
+        $staff = $this->staffUser();
+        $commitment = $this->createSubmission($staff, [
+            'opcrf_part' => OpcrfSubmission::PART_ONE,
+            'reviewer_id' => $viewer->id,
+            'assigned_to' => $viewer->id,
+        ]);
+        $unassignedFull = $this->createSubmission($staff, [
+            'opcrf_part' => OpcrfSubmission::FULL_WORKBOOK,
+            'reviewer_id' => null,
+            'assigned_to' => null,
+        ]);
+
+        $component = Livewire::actingAs($viewer)->test(OpcrfReview::class)
+            ->assertDontSee($commitment->employee_name)
+            ->assertDontSee($unassignedFull->employee_name);
+
+        $component->call('openReview', $commitment->id)->assertNotFound();
+        $component->call('openReview', $unassignedFull->id)->assertNotFound();
+        $component->call('approveSubmission')->assertNotFound();
+        $component->call('returnSubmission')->assertNotFound();
+    }
+
+    public function test_only_the_assigned_full_opcrf_validator_can_preview_the_submitters_mov(): void
+    {
+        Storage::fake('local');
+        config(['mov.disk' => 'local']);
+
+        $viewer = $this->sdsValidator();
+        $otherViewer = User::create([
+            'name' => 'Other Viewer',
+            'username' => 'other-viewer',
+            'email' => 'other-viewer@example.com',
+            'password' => Hash::make('password123'),
+            'role' => 'viewer',
+            'is_superadmin' => false,
+        ]);
+        $staff = $this->staffUser();
+        $submission = $this->createSubmission($staff, [
+            'opcrf_part' => OpcrfSubmission::FULL_WORKBOOK,
+            'reviewer_id' => $viewer->id,
+            'assigned_to' => $viewer->id,
+        ]);
+
+        $part = MovPart::create(['name' => 'PART 1', 'part_order' => 1, 'is_active' => true]);
+        $category = MovCategory::create([
+            'mov_part_id' => $part->id,
+            'name' => 'A',
+            'category_order' => 1,
+            'is_active' => true,
+        ]);
+        $requirement = MovRequirement::create([
+            'mov_category_id' => $category->id,
+            'mov_number' => 1,
+            'title' => 'Evidence',
+            'is_required' => true,
+            'display_order' => 1,
+            'is_active' => true,
+        ]);
+        $path = 'mov-uploads/'.$staff->id.'/evidence.pdf';
+        Storage::disk('local')->put($path, '%PDF-1.4');
+        $mov = UserMov::create([
+            'user_id' => $staff->id,
+            'mov_requirement_id' => $requirement->id,
+            'original_name' => 'evidence.pdf',
+            'stored_path' => $path,
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 8,
+            'uploaded_at' => now(),
+        ]);
+
+        $this->actingAs($viewer)
+            ->get(route('mov.preview', $mov))
+            ->assertOk();
+
+        $this->actingAs($otherViewer)
+            ->get(route('mov.preview', $mov))
+            ->assertForbidden();
+
+        $submission->update(['assigned_to' => null]);
+
+        $this->actingAs($viewer)
+            ->get(route('mov.preview', $mov))
+            ->assertForbidden();
     }
 
     public function test_the_review_table_lists_every_staff_submission(): void
