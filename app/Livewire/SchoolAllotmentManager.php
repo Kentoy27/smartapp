@@ -39,6 +39,13 @@ use RuntimeException;
  * Certification is narrower still: only the Budget role signs for the Budget
  * office, so the administrative side can set and read the ceiling but cannot
  * certify it.
+ *
+ * A certified allotment is LOCKED. The certificate covers the figure on the
+ * row, so once the Budget office certifies a school's year, that row renders
+ * read-only and every write path refuses or skips it: the single-row Save is
+ * refused, the Save-all sweep skips the row and names it, and a bulk row that
+ * would change or clear it is reported instead of applied. The lock is scoped
+ * to the one school and year it certifies.
  */
 #[Title('School Allotments — SmartApp')]
 class SchoolAllotmentManager extends Component
@@ -135,8 +142,8 @@ class SchoolAllotmentManager extends Component
 
     public int $bulkSupersededCount = 0;
 
-    /** Ready rows whose certification the apply would clear. */
-    public int $bulkClearCertificationCount = 0;
+    /** Rows whose target is certified — read-only, so the apply skips them. */
+    public int $bulkLockedCount = 0;
 
     public ?string $bulkError = null;
 
@@ -146,7 +153,8 @@ class SchoolAllotmentManager extends Component
     /** The counts the confirmation restates, read fresh from the source. */
     public int $bulkApplyCount = 0;
 
-    public int $bulkApplyClearCertificationCount = 0;
+    /** Certified rows the confirmed apply will skip. */
+    public int $bulkApplyLockedCount = 0;
 
     /**
      * The divisions the confirmed rows will write to, in canonical order.
@@ -160,7 +168,7 @@ class SchoolAllotmentManager extends Component
     /**
      * The finished apply's report, while its result screen is showing.
      *
-     * @var array{processed: int, created: int, updated: int, cleared: int, unchanged: int, cleared_certification: int, skipped: int, errors: array<int, array{line: int, school_id: string, error: string}>}|null
+     * @var array{processed: int, created: int, updated: int, cleared: int, unchanged: int, skipped: int, errors: array<int, array{line: int, school_id: string, error: string}>}|null
      */
     public ?array $bulkResult = null;
 
@@ -281,13 +289,26 @@ class SchoolAllotmentManager extends Component
 
         $field = 'amounts.'.$schoolId;
 
+        $division = $this->division();
+        $existing = $this->findAllotment($school->id, $division);
+
+        // A certified allotment is locked: the certificate covers the figure
+        // on the row, so the save is refused before the typed value is even
+        // validated — a stale page that still carries the row's old field
+        // must not slip a change past the certification.
+        if ($existing?->isCertified() ?? false) {
+            $this->certifyingSchoolId = null;
+            $this->resetValidation($field);
+            $this->amounts[$schoolId] = number_format((float) $existing->amount, 2, '.', '');
+            $this->errorMessage = $school->name.'’s CY '.$this->year
+                .' allotment is certified by the Budget Office and read-only — it cannot be changed.';
+
+            return;
+        }
+
         $this->validateOnly($field, $this->amountRules($field), $this->amountMessages($field));
 
         $raw = $this->amounts[$schoolId] ?? null;
-
-        $division = $this->division();
-
-        $existing = $this->findAllotment($school->id, $division);
 
         $result = $this->persistAmount($user, $division, (int) $this->year, $school, $existing, $raw);
 
@@ -307,10 +328,7 @@ class SchoolAllotmentManager extends Component
         // database now holds (2 decimals, no thousands separators).
         $this->amounts[$schoolId] = number_format($result['amount'], 2, '.', '');
         $this->successMessage = 'Allotment saved — '.$school->name.' may consume '
-            .number_format($result['amount'], 2).' in CY '.$this->year.'.'
-            .($result['cleared_certification']
-                ? ' The previous certification was cleared because the amount changed.'
-                : '');
+            .number_format($result['amount'], 2).' in CY '.$this->year.'.';
     }
 
     /**
@@ -358,8 +376,10 @@ class SchoolAllotmentManager extends Component
         $created = 0;
         $updated = 0;
         $cleared = 0;
-        $clearedCertification = 0;
         $failed = 0;
+
+        /** @var array<int, string> $skippedCertified */
+        $skippedCertified = [];
 
         foreach ($schoolIds as $schoolId) {
             $school = $schools->get($schoolId);
@@ -411,16 +431,22 @@ class SchoolAllotmentManager extends Component
 
             $result = $this->persistAmount($user, $division, $year, $school, $record, $raw);
 
+            if ($result['status'] === 'locked') {
+                // Certified — read-only. The typed figure is thrown away and
+                // the stored one echoed back, and the school is named in the
+                // summary so the skip is never silent.
+                $skippedCertified[] = $school->name;
+                $this->amounts[$schoolId] = number_format((float) $result['amount'], 2, '.', '');
+
+                continue;
+            }
+
             match ($result['status']) {
                 'created' => $created++,
                 'updated' => $updated++,
                 'cleared' => $cleared++,
                 default => null,
             };
-
-            if ($result['cleared_certification']) {
-                $clearedCertification++;
-            }
 
             $this->amounts[$schoolId] = $result['amount'] === null
                 ? ''
@@ -438,14 +464,23 @@ class SchoolAllotmentManager extends Component
             $this->errorMessage = null;
         }
 
-        $this->successMessage = $this->saveAllSummary($saved, $created, $updated, $cleared, $clearedCertification);
+        $this->successMessage = $this->saveAllSummary($saved, $created, $updated, $cleared, $skippedCertified);
     }
 
-    /** The one-line account of a Save-all sweep, for the toast. */
-    private function saveAllSummary(int $saved, int $created, int $updated, int $cleared, int $clearedCertification): string
+    /**
+     * The one-line account of a Save-all sweep, for the toast.
+     *
+     * @param  array<int, string>  $skippedCertified  schools whose certified
+     *                                                allotments the sweep left alone
+     */
+    private function saveAllSummary(int $saved, int $created, int $updated, int $cleared, array $skippedCertified): string
     {
-        if ($saved === 0) {
+        if ($saved === 0 && $skippedCertified === []) {
             return 'Nothing to save — every amount already matches what is stored.';
+        }
+
+        if ($saved === 0) {
+            return 'Nothing saved — '.$this->certifiedSkipNote($skippedCertified).'.';
         }
 
         $parts = [];
@@ -464,13 +499,30 @@ class SchoolAllotmentManager extends Component
 
         $summary = 'Saved — '.implode(', ', $parts).' for CY '.$this->year.'.';
 
-        if ($clearedCertification > 0) {
-            $summary .= ' '.$clearedCertification
-                .($clearedCertification === 1 ? ' certification was' : ' certifications were')
-                .' cleared and must be given again.';
+        if ($skippedCertified !== []) {
+            $summary .= ' '.$this->certifiedSkipNote($skippedCertified).'.';
         }
 
         return $summary;
+    }
+
+    /**
+     * "Skipped 2 certified allotments — read-only: Alpha School, Beta School"
+     * — the school names are capped so a long sweep's toast stays one line.
+     *
+     * @param  array<int, string>  $schools
+     */
+    private function certifiedSkipNote(array $schools): string
+    {
+        $count = count($schools);
+        $names = implode(', ', array_slice($schools, 0, 3));
+
+        if ($count > 3) {
+            $names .= ' and '.($count - 3).' more';
+        }
+
+        return 'Skipped '.$count.' certified '.($count === 1 ? 'allotment' : 'allotments')
+            .' — read-only: '.$names;
     }
 
     /**
@@ -479,7 +531,7 @@ class SchoolAllotmentManager extends Component
      * disagree about rounding, certification or the audit trail. The caller
      * has already validated the raw value.
      *
-     * @return array{status: 'created'|'updated'|'cleared'|'unchanged', amount: ?float, cleared_certification: bool}
+     * @return array{status: 'created'|'updated'|'cleared'|'unchanged'|'locked', amount: ?float}
      */
     private function persistAmount(
         User $user,
@@ -489,13 +541,19 @@ class SchoolAllotmentManager extends Component
         ?SchoolAllotment $existing,
         ?string $raw,
     ): array {
+        // A certified allotment is locked: the certificate covers the figure
+        // on the row, so no write — not even a clear — is allowed. The stored
+        // amount is returned so the caller can echo it back to the field.
+        if ($existing?->isCertified() ?? false) {
+            return ['status' => 'locked', 'amount' => (float) $existing->amount];
+        }
+
         if ($raw === null || trim($raw) === '') {
             if ($existing === null) {
-                return ['status' => 'unchanged', 'amount' => null, 'cleared_certification' => false];
+                return ['status' => 'unchanged', 'amount' => null];
             }
 
             $previousAmount = (float) $existing->amount;
-            $wasCertified = $existing->isCertified();
 
             $existing->delete();
 
@@ -510,25 +568,13 @@ class SchoolAllotmentManager extends Component
                 $division,
             );
 
-            return ['status' => 'cleared', 'amount' => null, 'cleared_certification' => $wasCertified];
+            return ['status' => 'cleared', 'amount' => null];
         }
 
         $amount = round((float) $raw, 2);
 
-        // A certification is about one amount: changing the amount makes the
-        // old certification untrue, so it is cleared and must be given again.
-        // Re-saving the same figure keeps it, so a typo fix elsewhere does not
-        // silently strip a valid certification.
         $previousAmount = $existing !== null ? (float) $existing->amount : null;
         $amountChanged = $existing === null || $previousAmount !== $amount;
-        $wasCertified = $existing?->isCertified() ?? false;
-
-        $attributes = ['amount' => $amount, 'set_by' => $user->id];
-
-        if ($amountChanged) {
-            $attributes['certified_by'] = null;
-            $attributes['certified_at'] = null;
-        }
 
         SchoolAllotment::query()->updateOrCreate(
             [
@@ -536,7 +582,15 @@ class SchoolAllotmentManager extends Component
                 'school_division' => $division,
                 'year' => $year,
             ],
-            $attributes,
+            [
+                'amount' => $amount,
+                'set_by' => $user->id,
+                // The row is not certified (a certified row never reaches a
+                // write); clearing both fields also heals a row whose
+                // certifier account was deleted, leaving a dangling date.
+                'certified_by' => null,
+                'certified_at' => null,
+            ],
         );
 
         // Only a change is a change to record: re-stating the same figure
@@ -559,7 +613,6 @@ class SchoolAllotmentManager extends Component
                 ? ($previousAmount === null ? 'created' : 'updated')
                 : 'unchanged',
             'amount' => $amount,
-            'cleared_certification' => $amountChanged && $wasCertified,
         ];
     }
 
@@ -623,6 +676,16 @@ class SchoolAllotmentManager extends Component
             abort(404);
         }
 
+        // The row is read-only once certified — re-certifying it would only
+        // replace the signature already on record.
+        if ($this->certifiedAllotment($school) !== null) {
+            $this->certifyingSchoolId = null;
+            $this->errorMessage = $school->name.'’s CY '.$this->year
+                .' allotment is already certified — no further action is needed.';
+
+            return;
+        }
+
         $this->certifyingSchoolId = $school->id;
         $this->errorMessage = null;
         $this->resetValidation();
@@ -631,6 +694,22 @@ class SchoolAllotmentManager extends Component
     public function closeCertifyModal(): void
     {
         $this->certifyingSchoolId = null;
+    }
+
+    /**
+     * The school's allotment for the selected year, when it is certified —
+     * the one row the lock protects. Null when nothing is on record or the
+     * record is not certified.
+     */
+    private function certifiedAllotment(School $school): ?SchoolAllotment
+    {
+        $allotment = SchoolAllotment::query()
+            ->where('school_id', $school->id)
+            ->where('school_division', $this->division())
+            ->where('year', (int) $this->year)
+            ->first();
+
+        return $allotment?->isCertified() === true ? $allotment : null;
     }
 
     /**
@@ -668,6 +747,16 @@ class SchoolAllotmentManager extends Component
             $this->certifyingSchoolId = null;
             $this->errorMessage = 'Set the '.$school->name.' allotment for CY '
                 .$this->year.' before certifying it as available.';
+
+            return;
+        }
+
+        // A certified allotment is locked, and re-certifying would replace the
+        // signature already on record — the certificate stands as given.
+        if ($allotment->isCertified()) {
+            $this->certifyingSchoolId = null;
+            $this->errorMessage = $school->name.'’s CY '.$this->year
+                .' allotment is already certified — no further action is needed.';
 
             return;
         }
@@ -790,14 +879,16 @@ class SchoolAllotmentManager extends Component
         $counts = SchoolAllotmentImporter::selectionCounts($analysis['rows'], $this->bulkExcludedLines());
 
         if ($counts['selected'] === 0) {
-            $this->bulkError = 'Every valid row is unchecked — there is nothing to apply.';
+            $this->bulkError = $counts['locked'] > 0
+                ? 'Every remaining row targets a certified allotment — read-only, so there is nothing to apply.'
+                : 'Every valid row is unchecked — there is nothing to apply.';
 
             return;
         }
 
         $this->bulkApplyCount = $counts['selected'];
         $this->bulkApplyDivisions = $counts['divisions'];
-        $this->bulkApplyClearCertificationCount = $counts['clears_certification'];
+        $this->bulkApplyLockedCount = $counts['locked'];
         $this->bulkConfirming = true;
     }
 
@@ -898,10 +989,10 @@ class SchoolAllotmentManager extends Component
         $this->bulkReadyCount = 0;
         $this->bulkInvalidCount = 0;
         $this->bulkSupersededCount = 0;
-        $this->bulkClearCertificationCount = 0;
+        $this->bulkLockedCount = 0;
         $this->bulkApplyCount = 0;
         $this->bulkApplyDivisions = [];
-        $this->bulkApplyClearCertificationCount = 0;
+        $this->bulkApplyLockedCount = 0;
 
         $this->loadAmounts();
         unset($this->overview);
@@ -1018,7 +1109,7 @@ class SchoolAllotmentManager extends Component
      * The current source, analyzed. Null (with the error set) when the source
      * itself is missing or unreadable.
      *
-     * @return array{rows: array<int, array<string, mixed>>, readyCount: int, invalidCount: int, supersededCount: int, clearsCertificationCount: int}|null
+     * @return array{rows: array<int, array<string, mixed>>, readyCount: int, invalidCount: int, supersededCount: int, lockedCount: int}|null
      */
     private function analyzeBulkSource(): ?array
     {
@@ -1066,7 +1157,7 @@ class SchoolAllotmentManager extends Component
     }
 
     /**
-     * @param  array{rows: array<int, array<string, mixed>>, readyCount: int, invalidCount: int, supersededCount: int, clearsCertificationCount: int}  $analysis
+     * @param  array{rows: array<int, array<string, mixed>>, readyCount: int, invalidCount: int, supersededCount: int, lockedCount: int}  $analysis
      */
     private function applyBulkAnalysis(array $analysis): void
     {
@@ -1075,7 +1166,7 @@ class SchoolAllotmentManager extends Component
         $this->bulkReadyCount = $analysis['readyCount'];
         $this->bulkInvalidCount = $analysis['invalidCount'];
         $this->bulkSupersededCount = $analysis['supersededCount'];
-        $this->bulkClearCertificationCount = $analysis['clearsCertificationCount'];
+        $this->bulkLockedCount = $analysis['lockedCount'];
 
         // Every row starts checked; a row whose key is absent (one beyond the
         // preview) stays checked by the same default.
@@ -1125,18 +1216,18 @@ class SchoolAllotmentManager extends Component
         $this->bulkReadyCount = 0;
         $this->bulkInvalidCount = 0;
         $this->bulkSupersededCount = 0;
-        $this->bulkClearCertificationCount = 0;
+        $this->bulkLockedCount = 0;
         $this->bulkError = null;
         $this->bulkConfirming = false;
         $this->bulkApplyCount = 0;
         $this->bulkApplyDivisions = [];
-        $this->bulkApplyClearCertificationCount = 0;
+        $this->bulkApplyLockedCount = 0;
     }
 
     /**
      * The one-line account of a finished apply, for the toast.
      *
-     * @param  array{processed: int, created: int, updated: int, cleared: int, unchanged: int, cleared_certification: int, skipped: int, errors: array<int, array{line: int, school_id: string, error: string}>}  $report
+     * @param  array{processed: int, created: int, updated: int, cleared: int, unchanged: int, skipped: int, errors: array<int, array{line: int, school_id: string, error: string}>}  $report
      */
     private function bulkSummary(array $report): string
     {
@@ -1168,13 +1259,7 @@ class SchoolAllotmentManager extends Component
             $summary = 'Applied — '.implode(', ', $parts);
         }
 
-        if ($report['cleared_certification'] > 0) {
-            $summary .= '. '.$report['cleared_certification']
-                .($report['cleared_certification'] === 1 ? ' certification was' : ' certifications were')
-                .' cleared and must be given again.';
-        } else {
-            $summary .= '.';
-        }
+        $summary .= '.';
 
         if ($report['errors'] !== []) {
             $summary .= ' '.count($report['errors']).' row(s) could not be applied — see the report.';
@@ -1306,6 +1391,7 @@ class SchoolAllotmentManager extends Component
             ->with([
                 'district',
                 'users' => fn ($query) => $query
+                    ->with('school.divisionSettings')
                     ->where('role', 'user')
                     ->orderBy('name')
                     ->orderBy('username'),
@@ -1386,6 +1472,7 @@ class SchoolAllotmentManager extends Component
         return User::query()
             ->where('role', 'user')
             ->whereNotNull('school_id')
+            ->with('school.divisionSettings')
             ->get(['id', 'school_id', 'role', 'is_superadmin', 'school_level', 'school_sublevel', 'division_access'])
             ->filter(fn (User $user): bool => $user->canAccessDivision($division))
             ->pluck('school_id')

@@ -8,6 +8,7 @@ use App\Models\School;
 use App\Models\SchoolAllotment;
 use App\Models\SchoolAllotmentAudit;
 use App\Models\User;
+use App\Support\SchoolAllotmentImporter;
 use App\Support\SchoolDivision;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -96,7 +97,7 @@ class SchoolAllotmentBulkTest extends TestCase
         $this->assertSame(0, SchoolAllotmentAudit::query()->count());
     }
 
-    public function test_the_preview_flags_an_amount_change_that_ends_a_certification(): void
+    public function test_the_preview_refuses_a_change_to_a_certified_allotment(): void
     {
         $school = $this->school('school1', '12345');
         $budget = $this->budgetOfficer();
@@ -109,19 +110,83 @@ class SchoolAllotmentBulkTest extends TestCase
             'certified_at' => now(),
         ]);
 
-        Livewire::actingAs($budget)
+        $component = Livewire::actingAs($budget)
             ->test(SchoolAllotmentManager::class)
             ->set('year', '2026')
             ->call('openBulk')
             ->set('bulkText', '12345, 2000')
-            ->call('reviewBulk')
-            ->assertSee('Will update')
-            ->assertSee('Clears its certification')
-            ->assertSee('1 will lose certification')
-            // The confirmation restates the consequence before it is applied.
+            ->call('reviewBulk');
+
+        // The row is sound but read-only: it is neither ready nor an error.
+        $component
+            ->assertSet('bulkReadyCount', 0)
+            ->assertSet('bulkInvalidCount', 0)
+            ->assertSet('bulkLockedCount', 1)
+            ->assertSee('Certified — read-only')
+            ->assertSee('1 certified — read-only, will be skipped');
+
+        // With every remaining row locked there is nothing to confirm.
+        $component
             ->call('confirmBulk')
-            ->assertSee('You are about to set or clear the')
-            ->assertSee('will lose the current certification and must');
+            ->assertSet('bulkConfirming', false);
+
+        $this->assertStringContainsString(
+            'certified allotment',
+            (string) $component->get('bulkError')
+        );
+
+        // Nothing was written.
+        $this->assertSame(1000.0, (float) SchoolAllotment::query()->firstOrFail()->amount);
+    }
+
+    public function test_an_apply_writes_the_open_rows_and_skips_the_certified_ones(): void
+    {
+        $certified = $this->school('Certified School', '12345');
+        $open = $this->school('Open School', '117833');
+        $budget = $this->budgetOfficer();
+
+        SchoolAllotment::create([
+            'school_id' => $certified->id,
+            'year' => 2026,
+            'amount' => 1000,
+            'certified_by' => $budget->id,
+            'certified_at' => now(),
+        ]);
+
+        $component = Livewire::actingAs($budget)
+            ->test(SchoolAllotmentManager::class)
+            ->set('year', '2026')
+            ->call('openBulk')
+            ->set('bulkText', "12345, 2000\n117833, 500")
+            ->call('reviewBulk')
+            ->assertSet('bulkReadyCount', 1)
+            ->assertSet('bulkLockedCount', 1)
+            // The confirmation restates the skip before anything is applied.
+            ->call('confirmBulk')
+            ->assertSet('bulkApplyCount', 1)
+            ->assertSet('bulkApplyLockedCount', 1)
+            ->assertSee('certified row(s) will be skipped');
+
+        $component->call('commitBulk');
+
+        // The open school was written; the certified one was not.
+        $this->assertSame(
+            500.0,
+            (float) SchoolAllotment::query()->where('school_id', $open->id)->value('amount')
+        );
+
+        $certifiedRow = SchoolAllotment::query()->where('school_id', $certified->id)->firstOrFail();
+
+        $this->assertSame(1000.0, (float) $certifiedRow->amount);
+        $this->assertTrue($certifiedRow->isCertified());
+
+        // The certified row is reported with its reason, never silently
+        // dropped from the apply.
+        $result = $component->get('bulkResult');
+
+        $this->assertSame(1, $result['processed']);
+        $this->assertSame(1, $result['skipped']);
+        $this->assertSame(SchoolAllotmentImporter::LOCKED_MESSAGE, $result['errors'][0]['error']);
     }
 
     public function test_the_preview_reports_a_school_that_does_not_exist(): void

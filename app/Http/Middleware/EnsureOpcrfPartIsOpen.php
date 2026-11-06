@@ -24,7 +24,7 @@ use Symfony\Component\HttpFoundation\Response;
  *
  * An administrator has no Parts of their own to fill in, so they are refused
  * here too rather than being quietly given a staff page — the same goes for
- * the Bookkeeper, whose module is the division-wide checking pages alone
+ * the Bookkeeper, whose module is the checking pages alone
  * (see User::canAccessStaffPages()).
  */
 class EnsureOpcrfPartIsOpen

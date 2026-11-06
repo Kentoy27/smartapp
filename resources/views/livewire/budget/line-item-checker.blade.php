@@ -21,9 +21,15 @@
         <div class="page-header">
             <h1>Monthly Expenditure</h1>
             <p>
-                Every school’s monthly expenditure lines — choose a school to
-                check the lines its School Head encoded in the Monthly
-                Expenditure Matrices.
+                @if ($this->scopedToAssignedSchools())
+                    The monthly expenditure lines of your assigned schools —
+                    choose a school to check the lines its School Head encoded
+                    in the Monthly Expenditure Matrices.
+                @else
+                    Every school’s monthly expenditure lines — choose a school
+                    to check the lines its School Head encoded in the Monthly
+                    Expenditure Matrices.
+                @endif
                 <span class="mem-chip">
                     {{ number_format($schools->total()) }} {{ $schools->total() === 1 ? 'school' : 'schools' }}
                 </span>
@@ -130,7 +136,12 @@
                         @empty
                             <tr>
                                 <td colspan="7" class="table-empty">
-                                    @if (trim($search) !== '')
+                                    @if ($this->hasNoAssignedSchools())
+                                        Your account is not assigned to any school yet, so there is
+                                        nothing to check here. Add the schools you are responsible for
+                                        in <strong>Update My Profile</strong> (the account menu), or ask
+                                        an administrator to assign them.
+                                    @elseif (trim($search) !== '')
                                         No schools match “{{ $search }}”.
                                     @else
                                         No schools to display yet.
@@ -411,9 +422,6 @@
                             <td>
                                 <span class="cell-strong">{{ $period }}</span>
                                 <span class="cell-sub">CY {{ $row->matrix_year }} · {{ $section }}</span>
-                                <span class="mem-status mem-status--{{ $row->matrix_status }}">
-                                    {{ ucfirst((string) $row->matrix_status) }}
-                                </span>
                             </td>
 
                             <td>

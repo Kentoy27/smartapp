@@ -9,6 +9,7 @@ use App\Models\MovRequirement;
 use App\Models\OpcrfSubmission;
 use App\Models\User;
 use App\Models\UserMov;
+use App\Models\WfpPlan;
 use App\Support\SchoolDivision;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
@@ -186,6 +187,12 @@ class Sidebar extends Component
     public ?int $aipCount = null;
 
     /**
+     * Number of WFPs submitted and still awaiting the Superadmin's final
+     * decision, shown as a live badge on the WFP Final Approvals item.
+     */
+    public ?int $wfpApprovalCount = null;
+
+    /**
      * The navigation items, in the order they are listed.
      *
      * Role checks decide which items exist. Each item's section and order
@@ -268,6 +275,22 @@ class Sidebar extends Component
                 'order' => 15,
             ];
 
+            // WFP Final Approvals: the Superadmin's queue of Budget-certified
+            // plans submitted by the School Heads. Only the Superadmin may
+            // decide one, so the item is absent for administrators.
+            if (Auth::user()?->canApproveWfp()) {
+                $items[] = [
+                    'label' => 'WFP Final Approvals',
+                    'route' => 'wfp.approvals.index',
+                    'path' => 'wfp-approvals',
+                    'icon' => 'check-circle',
+                    'badge' => $this->wfpApprovalCount,
+                    'badge_title' => '%d WFPs awaiting final approval',
+                    'section' => 'Files',
+                    'order' => 16,
+                ];
+            }
+
             if (Auth::user()?->canManageUsersAndSchools()) {
                 $items[] = [
                     'label' => 'Users',
@@ -328,16 +351,11 @@ class Sidebar extends Component
                 ];
             }
         } elseif (Auth::user()?->isBudgetRole()) {
-            $items[] = [
-                'label' => 'Review AIP',
-                'route' => 'aip.review',
-                'path' => 'aip-review',
-                'icon' => 'eye',
-                'badge' => $this->aipCount,
-                'badge_title' => '%d plans awaiting your review',
-                'section' => 'Files',
-                'order' => 13,
-            ];
+            // No "Review AIP" entry here: the Budget office's navigation is
+            // its financial workspace alone. The queue stays open to the role
+            // (User::canReviewAip()) and its dashboard card links to it, so
+            // this is navigation, not a boundary.
+            //
             // The budget side of the WFP workflow is one group, like the
             // School Head's: the plans the schools uploaded, the ceiling the
             // Budget office sets, the per-line detail checked against both,
@@ -389,14 +407,14 @@ class Sidebar extends Component
                 ],
             ];
         } elseif (Auth::user()?->isBookkeeperRole()) {
-            // The Bookkeeper works the same division-wide checking pages the
-            // Budget office does — the Monthly Expenditure lines and the
-            // annual Per Line Item Expenditure report, where the check is
-            // signed — so the group mirrors the Budget office's, without the
-            // Budget-only destinations (uploaded-plan review, allotment
-            // setting and certification). No OPCRF, MOV or AIP destination
-            // exists for the role; the pages it lacks are refused by their
-            // own guards, not by this absence.
+            // The Bookkeeper works the same checking pages the Budget office
+            // does — the Monthly Expenditure lines and the annual Per Line
+            // Item Expenditure report, where the check is signed — narrowed
+            // to the schools on its assignment list, so the group mirrors the
+            // Budget office's without the Budget-only destinations
+            // (uploaded-plan review, allotment setting and certification).
+            // No OPCRF, MOV or AIP destination exists for the role; the pages
+            // it lacks are refused by their own guards, not by this absence.
             $items[] = [
                 'label' => 'WFP',
                 'route' => 'budget.lineitems.index',
@@ -925,6 +943,24 @@ class Sidebar extends Component
     }
 
     /**
+     * WFPs submitted and still waiting for the Superadmin's decision.
+     */
+    private function pendingWfpApprovals(): int
+    {
+        return Auth::user()?->canApproveWfp()
+            ? WfpPlan::query()->where('status', WfpPlan::STATUS_PENDING_APPROVAL)->count()
+            : 0;
+    }
+
+    /** A submission or decision happened — refresh the live badge. */
+    #[On('wfp-plan-submitted')]
+    #[On('wfp-plan-reviewed')]
+    public function refreshWfpApprovalCount(): void
+    {
+        $this->wfpApprovalCount = $this->pendingWfpApprovals();
+    }
+
+    /**
      * AIP submissions still awaiting the signed-in reviewer's own action.
      */
     private function pendingAipPlans(): int
@@ -964,6 +1000,12 @@ class Sidebar extends Component
             $this->aipCount = $this->pendingAipPlans();
         } else {
             $this->aipCount = null;
+        }
+
+        if (Auth::user()?->canApproveWfp()) {
+            $this->wfpApprovalCount = $this->pendingWfpApprovals();
+        } else {
+            $this->wfpApprovalCount = null;
         }
 
         return view('livewire.sidebar');

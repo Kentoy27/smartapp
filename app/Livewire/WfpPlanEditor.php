@@ -2,6 +2,8 @@
 
 namespace App\Livewire;
 
+use App\Models\User;
+use App\Models\WfpApproval;
 use App\Models\WfpItem;
 use App\Models\WfpPlan;
 use App\Support\WfpGenerator;
@@ -13,6 +15,7 @@ use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\Title;
 use Livewire\Component;
+use RuntimeException;
 
 /**
  * The generated-WFP editor: a grouped preview of the plan's lines, with the
@@ -62,7 +65,8 @@ class WfpPlanEditor extends Component
      */
     public function canEdit(): bool
     {
-        return Auth::user()?->canManageWfp() === true;
+        return Auth::user()?->canManageWfp() === true
+            && $this->plan->isEditable();
     }
 
     private function loadItems(WfpPlan $plan): void
@@ -101,6 +105,7 @@ class WfpPlanEditor extends Component
     public function save(): void
     {
         $plan = $this->guard();
+        abort_unless($plan->isEditable(), 403);
 
         $validated = $this->validate()['items'] ?? [];
 
@@ -130,6 +135,7 @@ class WfpPlanEditor extends Component
     public function regenerate(): void
     {
         $plan = $this->guard();
+        abort_unless($plan->isEditable(), 403);
 
         $result = WfpGenerator::generate($plan);
 
@@ -143,16 +149,29 @@ class WfpPlanEditor extends Component
         );
     }
 
-    public function approve(): void
+    /**
+     * File the plan with the Superadmin. This is deliberately NOT an approval:
+     * only the Superadmin may set the final sign-off (see WfpPlan::markApproved).
+     */
+    public function submitForApproval(): void
     {
         $plan = $this->guard();
 
-        $plan->status = WfpPlan::STATUS_FINALIZED;
-        $plan->approved_by = Auth::id();
-        $plan->approved_at = now();
-        $plan->save();
+        $user = Auth::user();
+        abort_unless($user instanceof User, 404);
 
-        $this->successMessage = 'Plan approved and finalized.';
+        try {
+            $plan->submitForApproval($user);
+        } catch (RuntimeException $e) {
+            $this->errorMessage = $e->getMessage();
+
+            return;
+        }
+
+        $this->loadItems($plan->fresh());
+
+        $this->successMessage = 'Submitted for the Schools Division Superintendent\'s final approval.';
+        $this->dispatch('wfp-plan-submitted');
     }
 
     public function clearSuccess(): void
@@ -200,6 +219,48 @@ class WfpPlanEditor extends Component
         return $this->plan->flaggedCount();
     }
 
+    /** Budget's allotment certification, or null when it is still missing. */
+    #[Computed]
+    public function budgetCertification(): ?array
+    {
+        return $this->plan->budgetCertification();
+    }
+
+    /** The Bookkeeper's account-title/code check, or null when missing. */
+    #[Computed]
+    public function budgetChecking(): ?array
+    {
+        return $this->plan->budgetChecking();
+    }
+
+    #[Computed]
+    public function hasBudgetReview(): bool
+    {
+        return $this->plan->hasBudgetReview();
+    }
+
+    #[Computed]
+    public function finalApproval(): ?WfpApproval
+    {
+        return $this->plan->finalApproval;
+    }
+
+    #[Computed]
+    public function latestReturn(): ?WfpApproval
+    {
+        return $this->plan->latestReturn;
+    }
+
+    /** Whether the submit-for-approval control should be offered. */
+    #[Computed]
+    public function canSubmitForApproval(): bool
+    {
+        return $this->canEdit()
+            && $this->plan->items()->exists()
+            && ! $this->plan->isOutOfDate()
+            && $this->plan->hasBudgetReview();
+    }
+
     /**
      * The validation report — month/grand totals against the MEM, unknown
      * account codes, rows still missing their enrichment, near-duplicates —
@@ -222,28 +283,7 @@ class WfpPlanEditor extends Component
     #[Computed]
     public function groups(): array
     {
-        $groups = [];
-
-        foreach ($this->plan->items()->with('sourceMatrix')->get() as $item) {
-            /** @var WfpItem $item */
-            $key = (string) $item->group_key;
-
-            if (! isset($groups[$key])) {
-                $groups[$key] = [
-                    'key' => $key,
-                    'section' => $item->section,
-                    'objective' => $item->objective,
-                    'program_activity' => $item->program_activity,
-                    'account_title' => $item->account_title,
-                    'account_code' => $item->account_code,
-                    'items' => [],
-                ];
-            }
-
-            $groups[$key]['items'][] = $item;
-        }
-
-        return array_values($groups);
+        return $this->plan->groupedItems();
     }
 
     private static function nullIfBlank(mixed $value): ?string

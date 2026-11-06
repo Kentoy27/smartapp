@@ -74,9 +74,14 @@ class AipPageTest extends TestCase
         $this->assertNull($adminItems->firstWhere('label', 'AIP'));
         $this->assertSame('aip.review', $adminItems->firstWhere('label', 'Review AIP')['route']);
 
+        // The Budget office reviews AIPs too, but the queue is not one of its
+        // sidebar destinations — its dashboard card is the way in.
         $budget = User::factory()->create(['role' => 'budget', 'is_superadmin' => false]);
-        $budgetItems = collect(Livewire::actingAs($budget)->test(Sidebar::class)->instance()->items());
-        $this->assertSame('aip.review', $budgetItems->firstWhere('label', 'Review AIP')['route']);
+        $budgetSidebar = Livewire::actingAs($budget)->test(Sidebar::class);
+        $budgetItems = collect($budgetSidebar->instance()->items());
+        $this->assertNull($budgetItems->firstWhere('label', 'Review AIP'));
+        // Nor does the rendered navigation carry a link to the queue.
+        $budgetSidebar->assertDontSee(route('aip.review'), false);
 
         // The Budget office's WFP pages are one group, opened by default.
         $wfp = $budgetItems->firstWhere('label', 'WFP');
@@ -119,7 +124,9 @@ class AipPageTest extends TestCase
             ->get(route('home'))
             ->assertOk()
             ->assertSee('BUDGET REVIEW WORKSPACE')
-            ->assertSee('Review AIP')
+            // The AIP queue has no sidebar entry for this role: this card is
+            // the Budget office's way into it.
+            ->assertSee('Review submitted AIP plans')
             ->assertSee('WFP Uploads')
             ->assertDontSee('Performance plan')
             ->assertDontSee('Open MOV checklist');

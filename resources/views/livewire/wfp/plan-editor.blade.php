@@ -16,14 +16,18 @@
 
     <div class="page-header">
         <div class="memory-breadcrumb">
-            <a href="{{ route('wfp.matrices.index') }}" wire:navigate.hover>Monthly Expenditure Matrix</a>
+            @if (auth()->user()?->canApproveWfp())
+                <a href="{{ route('wfp.approvals.index') }}" wire:navigate.hover>WFP Final Approvals</a>
+            @else
+                <a href="{{ route('wfp.matrices.index') }}" wire:navigate.hover>Monthly Expenditure Matrix</a>
+            @endif
             <span aria-hidden="true">›</span>
             <span>WFP {{ $plan->fiscalYearLabel() }}</span>
         </div>
         <h1>Work and Financial Plan — {{ $plan->fiscalYearLabel() }}</h1>
         <p>
             {{ $plan->school?->name ?? 'Your school' }} ·
-            <span class="mem-status mem-status--{{ $plan->status }}">{{ ucfirst($plan->status) }}</span>
+            <span class="mem-status mem-status--{{ $plan->status }}">{{ $plan->statusLabel() }}</span>
             · {{ $plan->items()->count() }} line(s) · {{ $this->flaggedCount }} to review
         </p>
     </div>
@@ -49,6 +53,88 @@
             </ul>
         </div>
     @endif
+
+    {{-- FINAL APPROVAL — Budget's certification and check are the gate; the
+         Superadmin's decision is the final, read-only state. The panel shows
+         only recorded facts: an approved plan without a stored actor is
+         described as legacy, never given a fabricated signature. --}}
+    <section class="card wfp-approval-panel">
+        <div class="card-head">
+            <div class="card-title">Final approval</div>
+            <span class="mem-status mem-status--{{ $plan->status }}">{{ $plan->statusLabel() }}</span>
+        </div>
+
+        @if ($plan->isPendingApproval())
+            <p class="card-text">
+                Submitted by <strong>{{ $plan->submittedBy?->name ?? 'the School Head' }}</strong>
+                @if ($plan->submitted_at)
+                    on {{ $plan->submitted_at->format('M j, Y g:i A') }}
+                @endif
+                — waiting for the Schools Division Superintendent's decision.
+            </p>
+        @elseif ($plan->isApproved())
+            @if ($this->finalApproval?->decidedBy)
+                <p class="card-text">
+                    Approved by <strong>{{ $this->finalApproval->decidedBy->name }}</strong>
+                    on {{ $this->finalApproval->decided_at->format('M j, Y g:i A') }}.
+                </p>
+                @if (trim((string) $this->finalApproval->remarks) !== '')
+                    <p class="card-text"><strong>Remarks:</strong> {{ $this->finalApproval->remarks }}</p>
+                @endif
+            @else
+                <p class="card-text">
+                    This WFP was finalized before final-approval records were kept.
+                    No Schools Division Superintendent signature will be printed on its export.
+                </p>
+            @endif
+        @elseif ($this->latestReturn)
+            <p class="card-text">
+                <strong>Returned for revision</strong> by
+                {{ $this->latestReturn->decidedBy?->name ?? 'the Superadmin' }}
+                on {{ $this->latestReturn->decided_at->format('M j, Y g:i A') }}.
+            </p>
+            <p class="card-text"><strong>Remarks:</strong> {{ $this->latestReturn->remarks }}</p>
+        @else
+            <p class="card-text">
+                Budget must certify the allotment and check the account titles and codes.
+                Once both are recorded, the School Head can submit this WFP for the
+                Schools Division Superintendent's final approval.
+            </p>
+        @endif
+
+        <ul class="wfp-approval-checklist">
+            <li>
+                <span>Allotment certification</span>
+                @if ($this->budgetCertification)
+                    <strong>Certified</strong> — {{ $this->budgetCertification['name'] }}
+                    on {{ $this->budgetCertification['certified_at']->format('M j, Y') }}
+                @else
+                    <strong>Pending</strong>
+                @endif
+            </li>
+            <li>
+                <span>Account titles &amp; codes</span>
+                @if ($this->budgetChecking)
+                    <strong>Checked</strong> — {{ $this->budgetChecking['name'] }}
+                    on {{ $this->budgetChecking['checked_at']->format('M j, Y') }}
+                @else
+                    <strong>Pending</strong>
+                @endif
+            </li>
+        </ul>
+
+        @if ($plan->isEditable() && ! $this->canSubmitForApproval)
+            <p class="mem-actions__hint">
+                @if (! $this->hasBudgetReview)
+                    Submission is unavailable until Budget records both sign-offs.
+                @elseif ($this->isOutOfDate)
+                    Regenerate the plan from the current MEM before submitting.
+                @else
+                    Add at least one line before submitting.
+                @endif
+            </p>
+        @endif
+    </section>
 
     {{-- VALIDATION — the same report `php artisan wfp:validate` prints, so the
          SH sees the totals reconcile (and any unknown codes) without the CLI. --}}
@@ -110,15 +196,29 @@
                     <span wire:loading.remove wire:target="regenerate">Regenerate from MEM</span>
                     <span wire:loading wire:target="regenerate">Regenerating…</span>
                 </button>
-                <button type="button" class="ac-import-btn" wire:click="approve" wire:loading.attr="disabled" wire:target="approve">
-                    Approve
+                <button
+                    type="button"
+                    class="btn-primary"
+                    wire:click="submitForApproval"
+                    wire:confirm="Submit this WFP for the Schools Division Superintendent's final approval? It becomes read-only while it is pending."
+                    wire:loading.attr="disabled"
+                    wire:target="submitForApproval"
+                    @disabled(! $this->canSubmitForApproval)
+                >
+                    <span wire:loading.remove wire:target="submitForApproval">Submit for final approval</span>
+                    <span wire:loading wire:target="submitForApproval">Submitting…</span>
                 </button>
             @else
-                {{-- Read-only (the school's Bookkeeper): saving, regenerating
-                     and approving are the School Head's; the download follows
-                     the same view gate as this page. --}}
+                {{-- Read-only: the Bookkeeper, the Superadmin previewing a
+                     plan, and the SH after submission all read the same page.
+                     Saving, regenerating and submitting are the owning School
+                     Head's, and only while the plan is editable. --}}
                 <span class="mem-actions__hint">
-                    Read-only — the enrichment fields are the School Head’s to fill in.
+                    @if (! $plan->isEditable())
+                        Read-only — this WFP is {{ strtolower($plan->statusLabel()) }} and can no longer be edited.
+                    @else
+                        Read-only — the enrichment fields are the School Head’s to fill in.
+                    @endif
                 </span>
             @endif
         </div>

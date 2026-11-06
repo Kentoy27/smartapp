@@ -12,6 +12,7 @@ use App\Models\MonthlyExpenditureMatrix;
 use App\Models\School;
 use App\Models\SchoolAllotment;
 use App\Models\SchoolAllotmentAudit;
+use App\Models\SchoolDivisionSetting;
 use App\Models\User;
 use App\Models\WfpPlan;
 use App\Support\WfpAllotment;
@@ -38,6 +39,22 @@ class SchoolDivisionSeparationTest extends TestCase
             'name' => $name,
             'school_id' => $schoolId,
         ]);
+    }
+
+    /**
+     * Configure the divisions a school operates.
+     *
+     * @param  array<int, string>  $divisions
+     */
+    private function offer(School $school, array $divisions): void
+    {
+        foreach ($divisions as $division) {
+            SchoolDivisionSetting::create([
+                'school_id' => $school->id,
+                'division_code' => $division,
+                'is_active' => true,
+            ]);
+        }
     }
 
     /**
@@ -95,6 +112,7 @@ class SchoolDivisionSeparationTest extends TestCase
         $admin = User::factory()->create(['role' => 'administrator', 'is_superadmin' => false]);
         $district = District::create(['name' => 'Division A']);
         $school = School::create(['district_id' => $district->id, 'name' => 'A School', 'school_id' => '111111']);
+        $this->offer($school, ['JUNIOR_HIGH', 'SENIOR_HIGH']);
 
         Livewire::actingAs($admin)
             ->test(UsersTable::class)
@@ -102,8 +120,6 @@ class SchoolDivisionSeparationTest extends TestCase
             ->set('role', 'user')
             ->set('school_division', (string) $district->id)
             ->set('school_id_choice', (string) $school->id)
-            ->set('school_level', 'HIGH_SCHOOL')
-            ->set('school_sublevel', 'JUNIOR_HIGH')
             ->set('division_access', ['JUNIOR_HIGH', 'SENIOR_HIGH'])
             ->set('name', 'High School Head')
             ->set('username', 'highschoolhead')
@@ -121,11 +137,12 @@ class SchoolDivisionSeparationTest extends TestCase
         $this->assertSame('JUNIOR_HIGH', $head->defaultDivision());
     }
 
-    public function test_an_elementary_account_cannot_carry_a_high_school_sublevel(): void
+    public function test_an_elementary_school_account_stores_elementary_access(): void
     {
         $admin = User::factory()->create(['role' => 'administrator', 'is_superadmin' => false]);
         $district = District::create(['name' => 'Division A']);
         $school = School::create(['district_id' => $district->id, 'name' => 'A School', 'school_id' => '111111']);
+        $this->offer($school, ['ELEMENTARY']);
 
         Livewire::actingAs($admin)
             ->test(UsersTable::class)
@@ -133,24 +150,101 @@ class SchoolDivisionSeparationTest extends TestCase
             ->set('role', 'user')
             ->set('school_division', (string) $district->id)
             ->set('school_id_choice', (string) $school->id)
-            ->set('school_level', 'ELEMENTARY')
-            ->set('school_sublevel', 'JUNIOR_HIGH') // crafted
-            ->set('division_access', ['JUNIOR_HIGH'])
+            ->set('division_access', ['ELEMENTARY'])
             ->set('name', 'Elementary Head')
             ->set('username', 'elementaryhead')
             ->set('email', 'elementary@example.com')
             ->set('password', 'password123')
             ->call('saveUser')
-            ->assertHasErrors(['school_sublevel']);
+            ->assertHasNoErrors();
 
-        $this->assertNull(User::where('username', 'elementaryhead')->first());
+        $head = User::where('username', 'elementaryhead')->firstOrFail();
+
+        $this->assertSame('ELEMENTARY', $head->school_level);
+        $this->assertSame('NONE', $head->school_sublevel);
+        $this->assertSame(['ELEMENTARY'], $head->division_access);
+        $this->assertSame(['ELEMENTARY'], $head->authorizedDivisions());
+        $this->assertSame('ELEMENTARY', $head->defaultDivision());
     }
 
-    public function test_a_high_school_account_must_select_a_sublevel(): void
+    public function test_an_integrated_school_can_assign_all_three_divisions(): void
     {
         $admin = User::factory()->create(['role' => 'administrator', 'is_superadmin' => false]);
         $district = District::create(['name' => 'Division A']);
-        $school = School::create(['district_id' => $district->id, 'name' => 'A School', 'school_id' => '111111']);
+        $school = School::create(['district_id' => $district->id, 'name' => 'Integrated School', 'school_id' => '222222']);
+        $this->offer($school, ['ELEMENTARY', 'JUNIOR_HIGH', 'SENIOR_HIGH']);
+
+        $component = Livewire::actingAs($admin)->test(UsersTable::class)
+            ->call('openCreateModal')
+            ->set('role', 'user')
+            ->set('school_division', (string) $district->id)
+            ->set('school_id_choice', (string) $school->id);
+
+        // The form offers every division the school operates.
+        $this->assertSame(
+            ['ELEMENTARY', 'JUNIOR_HIGH', 'SENIOR_HIGH'],
+            array_column($component->instance()->divisionAccessOptions(), 'value'),
+        );
+
+        $component
+            ->set('division_access', ['ELEMENTARY', 'JUNIOR_HIGH', 'SENIOR_HIGH'])
+            ->set('name', 'Integrated School Head')
+            ->set('username', 'integratedhead')
+            ->set('email', 'integrated@example.com')
+            ->set('password', 'password123')
+            ->call('saveUser')
+            ->assertHasNoErrors();
+
+        $head = User::where('username', 'integratedhead')->firstOrFail();
+
+        $this->assertSame(['ELEMENTARY', 'JUNIOR_HIGH', 'SENIOR_HIGH'], $head->division_access);
+        $this->assertSame(['ELEMENTARY', 'JUNIOR_HIGH', 'SENIOR_HIGH'], $head->authorizedDivisions());
+        $this->assertTrue($head->canSwitchDivision());
+        $this->assertSame('JUNIOR_HIGH', $head->defaultDivision());
+    }
+
+    public function test_a_user_receives_only_the_divisions_assigned_to_them(): void
+    {
+        $school = $this->school('Integrated School');
+        $this->offer($school, ['ELEMENTARY', 'JUNIOR_HIGH', 'SENIOR_HIGH']);
+
+        $head = $this->schoolHead($school, 'JUNIOR_HIGH');
+
+        $this->assertSame(['JUNIOR_HIGH'], $head->authorizedDivisions());
+        $this->assertFalse($head->canSwitchDivision());
+        $this->assertFalse($head->canAccessDivision('ELEMENTARY'));
+        $this->assertFalse($head->canAccessDivision('SENIOR_HIGH'));
+    }
+
+    public function test_the_top_navigation_lists_every_assigned_division(): void
+    {
+        $school = $this->school('Integrated School');
+        $this->offer($school, ['ELEMENTARY', 'JUNIOR_HIGH', 'SENIOR_HIGH']);
+
+        $head = $this->schoolHead($school, 'JUNIOR_HIGH', ['ELEMENTARY', 'JUNIOR_HIGH', 'SENIOR_HIGH']);
+
+        $this->actingAs($head)->get(route('home'))
+            ->assertOk()
+            ->assertSee('id="divisionSwitcher"', false)
+            ->assertSee('value="ELEMENTARY"', false)
+            ->assertSee('value="JUNIOR_HIGH"', false)
+            ->assertSee('value="SENIOR_HIGH"', false);
+
+        // A single-division account gets no switcher, so no other division
+        // can be reached from the header either.
+        $jhsOnly = $this->schoolHead($school, 'JUNIOR_HIGH', ['JUNIOR_HIGH']);
+
+        $this->actingAs($jhsOnly)->get(route('home'))
+            ->assertOk()
+            ->assertDontSee('id="divisionSwitcher"', false);
+    }
+
+    public function test_a_division_the_school_does_not_offer_is_rejected(): void
+    {
+        $admin = User::factory()->create(['role' => 'administrator', 'is_superadmin' => false]);
+        $district = District::create(['name' => 'Division A']);
+        $school = School::create(['district_id' => $district->id, 'name' => 'Elementary School', 'school_id' => '111111']);
+        $this->offer($school, ['ELEMENTARY']);
 
         Livewire::actingAs($admin)
             ->test(UsersTable::class)
@@ -158,16 +252,62 @@ class SchoolDivisionSeparationTest extends TestCase
             ->set('role', 'user')
             ->set('school_division', (string) $district->id)
             ->set('school_id_choice', (string) $school->id)
-            ->set('school_level', 'HIGH_SCHOOL')
-            ->set('school_sublevel', 'NONE') // crafted
-            ->set('name', 'High School Head')
-            ->set('username', 'highschoolhead2')
-            ->set('email', 'high2@example.com')
+            ->set('division_access', ['ELEMENTARY', 'JUNIOR_HIGH']) // crafted
+            ->set('name', 'Crafted Head')
+            ->set('username', 'craftedhead')
+            ->set('email', 'crafted@example.com')
             ->set('password', 'password123')
             ->call('saveUser')
-            ->assertHasErrors(['school_sublevel']);
+            ->assertHasErrors(['division_access.1']);
 
-        $this->assertNull(User::where('username', 'highschoolhead2')->first());
+        $this->assertNull(User::where('username', 'craftedhead')->first());
+    }
+
+    public function test_a_school_account_must_choose_at_least_one_division(): void
+    {
+        $admin = User::factory()->create(['role' => 'administrator', 'is_superadmin' => false]);
+        $district = District::create(['name' => 'Division A']);
+        $school = School::create(['district_id' => $district->id, 'name' => 'A School', 'school_id' => '111111']);
+        $this->offer($school, ['ELEMENTARY']);
+
+        Livewire::actingAs($admin)
+            ->test(UsersTable::class)
+            ->call('openCreateModal')
+            ->set('role', 'user')
+            ->set('school_division', (string) $district->id)
+            ->set('school_id_choice', (string) $school->id)
+            ->set('division_access', [])
+            ->set('name', 'No Division Head')
+            ->set('username', 'nodivisionhead')
+            ->set('email', 'nodivision@example.com')
+            ->set('password', 'password123')
+            ->call('saveUser')
+            ->assertHasErrors(['division_access']);
+
+        $this->assertNull(User::where('username', 'nodivisionhead')->first());
+    }
+
+    public function test_editing_an_account_does_not_erase_its_division_access(): void
+    {
+        $admin = User::factory()->create(['role' => 'administrator', 'is_superadmin' => false]);
+        $school = $this->school('Integrated School');
+        $this->offer($school, ['ELEMENTARY', 'JUNIOR_HIGH', 'SENIOR_HIGH']);
+
+        $head = $this->schoolHead($school, 'JUNIOR_HIGH', ['ELEMENTARY', 'JUNIOR_HIGH', 'SENIOR_HIGH']);
+
+        Livewire::actingAs($admin)
+            ->test(UsersTable::class)
+            ->call('openEditModal', $head->id)
+            ->set('name', 'Renamed Head')
+            ->set('email', 'renamed@example.com')
+            ->call('saveUser')
+            ->assertHasNoErrors();
+
+        $head->refresh();
+
+        $this->assertSame('Renamed Head', $head->name);
+        $this->assertSame(['ELEMENTARY', 'JUNIOR_HIGH', 'SENIOR_HIGH'], $head->division_access);
+        $this->assertSame(['ELEMENTARY', 'JUNIOR_HIGH', 'SENIOR_HIGH'], $head->authorizedDivisions());
     }
 
     public function test_a_non_school_role_cannot_carry_a_classification(): void
@@ -178,8 +318,7 @@ class SchoolDivisionSeparationTest extends TestCase
             ->test(UsersTable::class)
             ->call('openCreateModal')
             ->set('role', 'budget')
-            ->set('school_level', 'HIGH_SCHOOL') // crafted
-            ->set('school_sublevel', 'SENIOR_HIGH')
+            ->set('division_access', ['SENIOR_HIGH']) // crafted
             ->set('name', 'Budget User')
             ->set('username', 'budgetuser')
             ->set('email', 'budget@example.com')
@@ -193,6 +332,87 @@ class SchoolDivisionSeparationTest extends TestCase
         $this->assertSame('NONE', $budget->school_sublevel);
         $this->assertNull($budget->division_access);
         $this->assertSame('budget', $budget->role);
+    }
+
+    public function test_the_legacy_high_backfill_adds_high_school_divisions(): void
+    {
+        $school = $this->school('Legacy NHS');
+
+        SchoolDivisionSetting::create([
+            'school_id' => $school->id,
+            'division_code' => 'ELEMENTARY',
+            'is_active' => true,
+        ]);
+
+        $head = User::factory()->create([
+            'role' => 'user',
+            'is_superadmin' => false,
+            'school_id' => $school->id,
+            'school_level' => 'HIGH',
+            'school_sublevel' => 'NONE',
+            'division_access' => null,
+        ]);
+
+        $migration = require database_path('migrations/2026_11_05_000001_backfill_legacy_high_school_divisions.php');
+        $migration->up();
+
+        $this->assertSame('HIGH_SCHOOL', $head->fresh()->school_level);
+        $this->assertSame(
+            ['ELEMENTARY', 'JUNIOR_HIGH', 'SENIOR_HIGH'],
+            $school->fresh()->availableDivisions(),
+        );
+
+        // The backfill is idempotent.
+        $migration->up();
+        $this->assertSame(3, $school->fresh()->divisionSettings()->count());
+    }
+
+    public function test_the_integrated_school_backfill_adds_elementary(): void
+    {
+        $integrated = $this->school('Hinapunan IS');
+        $this->offer($integrated, ['JUNIOR_HIGH', 'SENIOR_HIGH']);
+
+        $highSchool = $this->school('Bula NHS');
+        $this->offer($highSchool, ['JUNIOR_HIGH', 'SENIOR_HIGH']);
+
+        $migration = require database_path('migrations/2026_11_05_000002_add_elementary_to_integrated_schools.php');
+        $migration->up();
+
+        $this->assertSame(
+            ['ELEMENTARY', 'JUNIOR_HIGH', 'SENIOR_HIGH'],
+            $integrated->fresh()->availableDivisions(),
+        );
+        $this->assertSame(
+            ['JUNIOR_HIGH', 'SENIOR_HIGH'],
+            $highSchool->fresh()->availableDivisions(),
+        );
+
+        // The backfill is idempotent.
+        $migration->up();
+        $this->assertSame(3, $integrated->fresh()->divisionSettings()->count());
+    }
+
+    public function test_checking_a_division_clears_the_missing_division_error(): void
+    {
+        $admin = User::factory()->create(['role' => 'administrator', 'is_superadmin' => false]);
+        $school = $this->school('A School');
+        $this->offer($school, ['ELEMENTARY', 'JUNIOR_HIGH']);
+
+        Livewire::actingAs($admin)
+            ->test(UsersTable::class)
+            ->call('openCreateModal')
+            ->set('role', 'user')
+            ->set('school_division', (string) $school->district_id)
+            ->set('school_id_choice', (string) $school->id)
+            ->set('division_access', [])
+            ->set('name', 'No Division Head')
+            ->set('username', 'nodivisionhead')
+            ->set('email', 'nodivision@example.com')
+            ->set('password', 'password123')
+            ->call('saveUser')
+            ->assertHasErrors(['division_access'])
+            ->set('division_access', ['ELEMENTARY'])
+            ->assertHasNoErrors(['division_access']);
     }
 
     /* ------------------------------------------------------- sidebar labels */

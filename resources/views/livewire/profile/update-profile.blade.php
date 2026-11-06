@@ -113,7 +113,17 @@
                         <div class="field-hint">Your role is assigned by an administrator.</div>
                     </div>
 
-                    @if ($account->school)
+                    @if ($account->isBookkeeperRole())
+                        {{-- THE BOOKKEEPER'S OWN ROSTER: the schools whose
+                             checking pages this account may open. It is the
+                             one school decision the account makes itself; the
+                             base school below stays the administrator's. --}}
+                        @include('livewire.partials.assigned-schools-field', [
+                            'label' => 'Assigned Schools',
+                            'hint' => 'The schools whose WFP and expenditure records you check. Pick every school you are responsible for; removing one revokes your access to its records.',
+                            'inputId' => 'profileAssignedSchools',
+                        ])
+                    @elseif ($account->school)
                         <div class="field">
                             <label for="profileSchool">School</label>
                             <input

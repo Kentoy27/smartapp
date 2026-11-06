@@ -25,12 +25,13 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Tests\TestCase;
 
 /**
- * The Bookkeeper role: a division-wide account that works the Budget
- * office-style, read-only checking pages — Monthly Expenditure (every
- * school's lines) and Per Line Item Expenditure (each school's annual
- * report) — and signs the report's "Checked as to the Correctness of
- * Account Titles and Codes" block. It never writes a school's plan, and it
- * carries no OPCRF, MOV or AIP destination.
+ * The Bookkeeper role: an account that works the Budget office-style,
+ * read-only checking pages — Monthly Expenditure (the lines of the schools
+ * it is assigned to) and Per Line Item Expenditure (those schools' annual
+ * reports) — and signs the report's "Checked as to the Correctness of
+ * Account Titles and Codes" block. Its reach is the schools on its
+ * assignment list (user_school_assignments); it never writes a school's
+ * plan, and it carries no OPCRF, MOV or AIP destination.
  */
 class BookkeeperRoleTest extends TestCase
 {
@@ -155,6 +156,7 @@ class BookkeeperRoleTest extends TestCase
         $component
             ->set('school_division', (string) $school->district_id)
             ->set('school_id_choice', (string) $school->id)
+            ->set('division_access', ['ELEMENTARY'])
             // The School-ID-as-login default stays an SH convenience: the
             // Bookkeeper's login is not touched by picking a school.
             ->assertSet('username', '')
@@ -173,6 +175,9 @@ class BookkeeperRoleTest extends TestCase
         // The typed password stands; the school ID is never minted as one.
         $this->assertTrue(Hash::check('supersecret1', $bookkeeper->password));
         $this->assertFalse(Hash::check((string) $school->school_id, $bookkeeper->password));
+        // The picked base school is also the account's first assignment, so
+        // the roster is never empty for an account that just got a school.
+        $this->assertSame([$school->id], $bookkeeper->assignedSchoolIds());
     }
 
     public function test_a_bookkeeper_cannot_be_created_without_a_school(): void
@@ -205,6 +210,9 @@ class BookkeeperRoleTest extends TestCase
             ->assertSet('role', 'bookkeeper')
             ->assertSet('school_division', (string) $bookkeeper->school->district_id)
             ->assertSet('school_id_choice', (string) $bookkeeper->school_id)
+            // The roster opens on what is stored, so a save that never
+            // touched the picker leaves the assignments exactly as they were.
+            ->assertSet('assigned_schools', [$bookkeeper->school_id])
             ->set('name', 'Bella B. Bookkeeper')
             ->call('saveUser')
             ->assertHasNoErrors();
@@ -214,6 +222,7 @@ class BookkeeperRoleTest extends TestCase
         $this->assertSame('Bella B. Bookkeeper', $bookkeeper->name);
         $this->assertSame('bookkeeper', $bookkeeper->role);
         $this->assertSame($schoolId, $bookkeeper->school_id);
+        $this->assertSame([$schoolId], $bookkeeper->assignedSchoolIds());
     }
 
     public function test_the_role_modal_can_assign_the_bookkeeper_role(): void
@@ -268,42 +277,60 @@ class BookkeeperRoleTest extends TestCase
         $this->actingAs($bookkeeper)->get(route('budget.allotments.index'))->assertNotFound();
     }
 
-    public function test_a_bookkeeper_reads_every_schools_lines_on_the_monthly_expenditure_page(): void
+    public function test_a_bookkeeper_reads_the_lines_of_assigned_schools_only(): void
     {
-        $bookkeeper = $this->bookkeeper();
-        $first = $this->schoolHead($this->school());
-        $second = $this->schoolHead($this->school());
-        $this->line($first, 3, 'Electricity Expense', '5020402000');
-        $this->line($second, 4, 'Water Expense', '5020403000');
+        $home = $this->school();
+        $bookkeeper = $this->bookkeeper($home);
+        $assigned = $this->schoolHead($this->school());
+        $outside = $this->schoolHead($this->school());
+        $bookkeeper->syncAssignedSchools([$home->id, $assigned->school_id]);
+        $this->line($assigned, 3, 'Electricity Expense', '5020402000');
+        $this->line($outside, 4, 'Water Expense', '5020403000');
 
-        // The index: every school, like the Budget office reads it.
+        // The index: the assigned roster — including the school with nothing
+        // encoded — and never a school outside it.
         $this->actingAs($bookkeeper)
             ->get(route('budget.lineitems.index'))
             ->assertOk()
             ->assertSee('Monthly Expenditure')
-            ->assertSee($first->school->name)
-            ->assertSee($second->school->name);
+            ->assertSee($home->name)
+            ->assertSee($assigned->school->name)
+            ->assertDontSee($outside->school->name);
 
-        // One school's month-by-month lines, read-only.
+        // One assigned school's month-by-month lines, read-only.
         $this->actingAs($bookkeeper)
-            ->get(route('budget.lineitems.index', ['school' => $first->school_id]))
+            ->get(route('budget.lineitems.index', ['school' => $assigned->school_id]))
             ->assertOk()
             ->assertSee('Electricity Expense')
             ->assertSee('5020402000');
 
+        // An unassigned school is refused — by URL…
+        $this->actingAs($bookkeeper)
+            ->get(route('budget.lineitems.index', ['school' => $outside->school_id]))
+            ->assertNotFound();
+
+        // …and by a crafted Livewire call, refused with the same 404.
         Livewire::actingAs($bookkeeper)
             ->test(BudgetLineItemChecker::class)
-            ->call('openSchool', $second->school_id)
-            ->assertSee('Water Expense')
-            ->assertSee('5020403000');
+            ->call('openSchool', $outside->school_id)
+            ->assertNotFound();
+
+        // The same action opens an assigned school's detail.
+        Livewire::actingAs($bookkeeper)
+            ->test(BudgetLineItemChecker::class)
+            ->call('openSchool', $assigned->school_id)
+            ->assertSee('Electricity Expense')
+            ->assertSee('5020402000');
     }
 
-    public function test_a_bookkeeper_reads_and_exports_any_schools_report(): void
+    public function test_a_bookkeeper_reads_and_exports_assigned_schools_reports_only(): void
     {
         $bookkeeper = $this->bookkeeper();
         $head = $this->schoolHead($this->school());
+        $bookkeeper->syncAssignedSchools([$bookkeeper->school_id, $head->school_id]);
         $this->line($head, 3);
 
+        // The assigned school's report opens…
         $this->actingAs($bookkeeper)
             ->get(route('budget.per-line-item.index', ['school' => $head->school_id]))
             ->assertOk()
@@ -311,10 +338,24 @@ class BookkeeperRoleTest extends TestCase
             ->assertSee($head->school->name)
             ->assertSee('Office Supplies Expenses');
 
-        $response = $this->actingAs($bookkeeper)
-            ->get(route('budget.per-line-item.export', ['school' => $head->school_id, 'year' => 2026]));
+        // …and exports.
+        $this->actingAs($bookkeeper)
+            ->get(route('budget.per-line-item.export', ['school' => $head->school_id, 'year' => 2026]))
+            ->assertOk()
+            ->assertDownload();
 
-        $response->assertOk()->assertDownload();
+        // An unassigned school's report and export are refused: the export
+        // is the report's figures leaving the server.
+        $outside = $this->schoolHead($this->school());
+        $this->line($outside, 3);
+
+        $this->actingAs($bookkeeper)
+            ->get(route('budget.per-line-item.index', ['school' => $outside->school_id]))
+            ->assertNotFound();
+
+        $this->actingAs($bookkeeper)
+            ->get(route('budget.per-line-item.export', ['school' => $outside->school_id, 'year' => 2026]))
+            ->assertNotFound();
     }
 
     public function test_the_school_head_wfp_pages_are_refused_for_a_bookkeeper(): void
@@ -358,7 +399,9 @@ class BookkeeperRoleTest extends TestCase
     {
         $bookkeeper = $this->bookkeeper();
         $budget = $this->budgetOfficer();
-        $head = $this->schoolHead($this->school());
+        // The head works the bookkeeper's base school, so all three copies
+        // below read the same report.
+        $head = $this->schoolHead($bookkeeper->school);
         $this->line($head, 3);
 
         // The Bookkeeper's copy carries the action and the signatory block.
@@ -381,12 +424,14 @@ class BookkeeperRoleTest extends TestCase
             ->assertDontSee('Check report');
     }
 
-    public function test_a_bookkeeper_signs_any_schools_check_and_the_report_names_them(): void
+    public function test_a_bookkeeper_signs_an_assigned_schools_check_and_the_report_names_them(): void
     {
         $bookkeeper = $this->bookkeeper();
-        // The checked school is not the one the bookkeeper account is based
-        // at: the check belongs to the report on screen, division-wide.
+        // The checked school is another of the schools on the bookkeeper's
+        // roster, not the one the account is based at: the check belongs to
+        // the report on screen.
         $head = $this->schoolHead($this->school());
+        $bookkeeper->syncAssignedSchools([$bookkeeper->school_id, $head->school_id]);
         $this->line($head, 3);
 
         $component = Livewire::actingAs($bookkeeper)
@@ -428,6 +473,7 @@ class BookkeeperRoleTest extends TestCase
     {
         $bookkeeper = $this->bookkeeper();
         $head = $this->schoolHead($this->school());
+        $bookkeeper->syncAssignedSchools([$bookkeeper->school_id, $head->school_id]);
         $this->line($head, 3);
 
         Livewire::actingAs($bookkeeper)
@@ -486,7 +532,8 @@ class BookkeeperRoleTest extends TestCase
     public function test_a_year_with_no_lines_has_nothing_to_check(): void
     {
         $bookkeeper = $this->bookkeeper();
-        $head = $this->schoolHead($this->school());
+        // The head works the bookkeeper's base school — on its roster.
+        $head = $this->schoolHead($bookkeeper->school);
 
         Livewire::actingAs($bookkeeper)
             ->test(BudgetLineItemAllotment::class, ['schoolId' => (string) $head->school_id])
@@ -501,7 +548,8 @@ class BookkeeperRoleTest extends TestCase
     public function test_writing_the_lines_clears_the_check(): void
     {
         $bookkeeper = $this->bookkeeper();
-        $head = $this->schoolHead($this->school());
+        // The head works the bookkeeper's base school — on its roster.
+        $head = $this->schoolHead($bookkeeper->school);
         $matrix = $this->line($head, 3)->matrix;
 
         Livewire::actingAs($bookkeeper)
@@ -522,7 +570,8 @@ class BookkeeperRoleTest extends TestCase
     public function test_deleting_a_matrix_clears_the_check(): void
     {
         $bookkeeper = $this->bookkeeper();
-        $head = $this->schoolHead($this->school());
+        // The head works the bookkeeper's base school — on its roster.
+        $head = $this->schoolHead($bookkeeper->school);
         $matrix = $this->line($head, 3)->matrix;
 
         Livewire::actingAs($bookkeeper)

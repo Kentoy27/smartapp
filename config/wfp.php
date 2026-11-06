@@ -86,6 +86,18 @@ return [
         'school_name_cell' => env('WFP_TEMPLATE_SCHOOL_CELL', 'A6'),
 
         /*
+         * The final-approval block's own wording, matched tolerantly (case,
+         * punctuation and whitespace ignored) when the filled workbook is
+         * searched for the cells that carry the sign-off. The label locates
+         * the block; the title locates the signature line, and the approver's
+         * name is written two rows above it. Change these when the office
+         * renames the block; a workbook whose block cannot be found is left
+         * unsigned rather than stamped in the wrong place.
+         */
+        'approval_label' => env('WFP_TEMPLATE_APPROVAL_LABEL', 'Approved:'),
+        'approval_title' => env('WFP_TEMPLATE_APPROVAL_TITLE', 'Schools Division Superintendent'),
+
+        /*
          * The static letterhead lines stamped above the school's name. The
          * shipped template leaves these two rows blank (but styled) so the
          * generated form can name its own region and division; an installation

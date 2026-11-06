@@ -22,7 +22,9 @@ use Livewire\Component;
  * MONTH / BUDGET column beside the year's lines rolled up per account code,
  * with each line's share of the grand total. The difference is scope. A School
  * Head is fixed to their own school; the Budget office oversees every school,
- * so the report is read one school at a time through `schoolId`.
+ * so the report is read one school at a time through `schoolId` — chosen from
+ * a searchable picker (chooseSchool() over the `schoolSearch` box), because a
+ * division's roster is longer than a select shows comfortably.
  *
  * The figures are not computed here. They come from WfpAllotment, which is
  * also what the .xlsx export reads, so what is downloaded is what was read on
@@ -35,6 +37,13 @@ use Livewire\Component;
  * Scope is the Budget role and the school Bookkeeper (canCheckLineItems()):
  * the route guard and this component both refuse any other account with a
  * 404.
+ *
+ * WHICH schools the report can reach is a second, independent boundary: the
+ * Budget office reads every school, but a Bookkeeper reads only the schools
+ * on its assignment list (User::visibleSchoolIds()). The picker's roster, the
+ * opening school and every figure are narrowed through it, and a school id
+ * that names a real school outside the list is refused with a 404 — a crafted
+ * URL is not a permission.
  *
  * On the Bookkeeper's copy the report also carries its one action: the
  * "Checked as to the Correctness of Account Titles and Codes" sign-off (see
@@ -60,6 +69,14 @@ class BudgetLineItemAllotment extends Component
     #[Url]
     public string $year = '';
 
+    /**
+     * The school picker's search box. It reads as the school on screen and
+     * narrows the roster while typing — a division has more schools than a
+     * plain select shows comfortably. The text is a search term, never the
+     * report's scope: only chooseSchool() moves the report.
+     */
+    public string $schoolSearch = '';
+
     /** The check-confirmation modal's open state (Bookkeepers only). */
     public bool $showCheckModal = false;
 
@@ -73,12 +90,20 @@ class BudgetLineItemAllotment extends Component
     {
         $this->user();
 
-        // No school in the URL: open on the first school so the page lands on
-        // a report rather than on an empty picker. A stale or malformed id
-        // falls back the same way.
+        // A URL naming a school outside the account's roster is refused
+        // before anything else happens — the page is about to read that
+        // school's figures, so the id is a request, not a filter.
+        $this->guardRequestedSchool();
+
+        // No school in the URL: open on the first school of the account's own
+        // roster so the page lands on a report rather than on an empty
+        // picker. A stale or malformed id falls back the same way.
         if (! $this->validSchoolId()) {
-            $this->schoolId = (string) School::query()->orderBy('name')->value('id');
+            $this->schoolId = (string) ($this->schools->first()?->id ?? '');
         }
+
+        // The picker's box opens reading as the school on screen.
+        $this->schoolSearch = (string) ($this->school?->name ?? '');
 
         $this->year = (string) WfpAllotment::resolveYear(
             $this->school?->id,
@@ -103,12 +128,99 @@ class BudgetLineItemAllotment extends Component
         return $this->user()->activeDivision();
     }
 
+    /**
+     * Refuse an explicitly named school the account may not read. A malformed
+     * or nonexistent id names no school, so it falls through to the caller's
+     * own fallback; a real school outside the account's roster is a request
+     * for its figures and gets the same 404 as an uninvited role. Only the
+     * Bookkeeper is roster-bound (User::canAccessSchool()); for the Budget
+     * office this never fires.
+     */
+    private function guardRequestedSchool(): void
+    {
+        if (ctype_digit($this->schoolId)
+            && School::query()->whereKey((int) $this->schoolId)->exists()) {
+            abort_unless($this->user()->canAccessSchool((int) $this->schoolId), 404);
+        }
+    }
+
+    /**
+     * Whether the report is narrowed to the account's assigned schools (the
+     * Bookkeeper) rather than the whole division. The view reads it to say
+     * whose roster the picker is.
+     */
+    public function scopedToAssignedSchools(): bool
+    {
+        return $this->user()->visibleSchoolIds() !== null;
+    }
+
+    /**
+     * Whether the page is roster-scoped AND the roster is empty — the one
+     * case the view says so instead of standing empty, because the fix is an
+     * assignment, not a search.
+     */
+    public function hasNoAssignedSchools(): bool
+    {
+        return $this->user()->visibleSchoolIds() === [];
+    }
+
     /* --------------------------------------------------------------- state */
 
     public function updatedSchoolId(): void
     {
         $this->user();
 
+        // A crafted $wire.set() to another school's id is refused the same
+        // way the URL is — the picker chooses among the account's own
+        // roster, it never reaches outside it.
+        $this->guardRequestedSchool();
+
+        $this->syncSchool();
+    }
+
+    /**
+     * Pick a school from the searchable picker. This is the picker's only
+     * way to move the report: the box's text is a search term, not a value,
+     * so a typed name that was never picked changes nothing.
+     */
+    public function chooseSchool(int $schoolId): void
+    {
+        $this->user();
+
+        if (! School::query()->whereKey($schoolId)->exists()) {
+            return;
+        }
+
+        // The menu only draws rows from the account's own roster, but the
+        // action is callable on its own: a school outside it is refused,
+        // never opened.
+        abort_unless($this->user()->canAccessSchool($schoolId), 404);
+
+        $this->schoolId = (string) $schoolId;
+
+        $this->syncSchool();
+    }
+
+    /**
+     * The picker's menu was closed without a pick (clicked away, Escape):
+     * put the box back to reading as the school on screen, so it can never
+     * look like a school that was never chosen.
+     */
+    public function resetSchoolSearch(): void
+    {
+        $this->user();
+
+        $this->schoolSearch = (string) ($this->school?->name ?? '');
+    }
+
+    /**
+     * Re-point the report at whatever `schoolId` now says: resolve the model,
+     * fall back to the first school when the id is not one, keep the reader's
+     * year when the new school has it, and re-read every figure. The picker's
+     * box is left reading as the school on screen.
+     */
+    private function syncSchool(): void
+    {
         // The picker chooses the report's scope, not a row to trust: an id
         // that is not a real school falls back to the first one rather than
         // reaching a query.
@@ -119,6 +231,8 @@ class BudgetLineItemAllotment extends Component
         }
 
         unset($this->school);
+
+        $this->schoolSearch = (string) ($this->school?->name ?? '');
 
         // Keep the reader's year when the newly picked school has it;
         // otherwise open on the newest year that school actually has.
@@ -223,6 +337,11 @@ class BudgetLineItemAllotment extends Component
             return;
         }
 
+        // The check is a signature over the open school's figures, so the
+        // roster boundary is re-verified at the write itself: a crafted call
+        // cannot sign for a school the Bookkeeper was never assigned.
+        abort_unless($user->canAccessSchool($school->id), 404);
+
         $division = $this->division();
         $year = (int) WfpAllotment::resolveYear($school->id, (int) $this->year, $division);
 
@@ -265,17 +384,57 @@ class BudgetLineItemAllotment extends Component
     /* ----------------------------------------------------------- computed */
 
     /**
-     * Every school the Budget office can report on, by name. The report is
-     * read one school at a time, so this is the picker's whole list.
+     * The schools the account can report on, by name. The report is read one
+     * school at a time, so this is the picker's whole list — the fallback
+     * source when a crafted id resolves to nothing, and the roster
+     * schoolOptions() narrows while the reader types. The Budget office's
+     * list is every school; the Bookkeeper's is its assignment list alone,
+     * so a school outside it is not even offered, let alone opened.
      *
      * @return Collection<int, School>
      */
     #[Computed]
     public function schools(): Collection
     {
+        $visible = $this->user()->visibleSchoolIds();
+
         return School::query()
+            ->when($visible !== null, fn ($query) => $query->whereIn('id', $visible))
+            ->with('district')
             ->orderBy('name')
-            ->get(['id', 'name']);
+            ->get(['id', 'name', 'school_id', 'district_id']);
+    }
+
+    /**
+     * The picker's menu: the roster narrowed by what the search box currently
+     * reads. While the box just displays the school on screen (its state
+     * after opening or picking), the whole roster is offered — the list
+     * narrows only once a term is actually typed.
+     *
+     * The term matches the name, the DepEd school ID and the district, so a
+     * reader who knows the school by its ID number finds it the same way the
+     * Monthly Expenditure index search does.
+     *
+     * @return Collection<int, School>
+     */
+    #[Computed]
+    public function schoolOptions(): Collection
+    {
+        $term = trim($this->schoolSearch);
+
+        // The box reading as the selected school is a display, not a search:
+        // offer the whole roster so re-opening the menu is useful.
+        if ($term === '' || $this->isSelectedSchoolName($term)) {
+            return $this->schools;
+        }
+
+        $needle = mb_strtolower($term);
+
+        return $this->schools
+            ->filter(fn (School $school): bool => str_contains(mb_strtolower((string) $school->name), $needle)
+                || str_contains(mb_strtolower((string) $school->school_id), $needle)
+                || str_contains(mb_strtolower((string) $school->district?->name), $needle))
+            ->values();
     }
 
     /**
@@ -432,9 +591,25 @@ class BudgetLineItemAllotment extends Component
 
     /* -------------------------------------------------------------- helpers */
 
+    /**
+     * Whether `schoolId` names a school this account may report on. The
+     * roster check is part of validity — not a separate step a caller might
+     * forget — so every reader of the resolved `school` (the figures, the
+     * years, the check's own preconditions) is scope-safe by construction.
+     */
     private function validSchoolId(): bool
     {
         return ctype_digit($this->schoolId)
-            && School::query()->whereKey((int) $this->schoolId)->exists();
+            && School::query()->whereKey((int) $this->schoolId)->exists()
+            && $this->user()->canAccessSchool((int) $this->schoolId);
+    }
+
+    /** Whether the picker's box is just displaying the selected school. */
+    private function isSelectedSchoolName(string $term): bool
+    {
+        $school = $this->school;
+
+        return $school !== null
+            && mb_strtolower(trim($school->name)) === mb_strtolower($term);
     }
 }

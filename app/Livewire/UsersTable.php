@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Concerns\ManagesAssignedSchools;
 use App\Models\District;
 use App\Models\School;
 use App\Models\User;
@@ -17,6 +18,7 @@ use Livewire\WithPagination;
 #[Title('Users — SmartApp')]
 class UsersTable extends Component
 {
+    use ManagesAssignedSchools;
     use WithPagination;
 
     public function mount(): void
@@ -80,20 +82,10 @@ class UsersTable extends Component
     public string $school_id_choice = '';
 
     /**
-     * The financial classification of a school-side account (SH,
-     * Bookkeeper): what kind of school it belongs to (ELEMENTARY /
-     * HIGH_SCHOOL), and for a High School which sublevel (JUNIOR_HIGH /
-     * SENIOR_HIGH). Only an administrator ever sets these; the values are
-     * re-validated server-side on save and never trusted from the payload.
-     */
-    public string $school_level = SchoolDivision::LEVEL_ELEMENTARY;
-
-    public string $school_sublevel = SchoolDivision::SUBLEVEL_NONE;
-
-    /**
-     * The divisions a High School account may work in. One division by
-     * default (the sublevel); an account that works in both high-school
-     * divisions carries both here and switches between them from the header.
+     * The divisions this school-side account may work in — one, two, or all
+     * three of the divisions its selected school operates. Only an
+     * administrator sets this; the payload is re-validated against the
+     * school's own divisions on save and never trusted.
      *
      * @var array<int, string>
      */
@@ -154,7 +146,7 @@ class UsersTable extends Component
         $belongsToSchool = $this->belongsToSchool();
         $autoPassword = $this->hasAutoPassword();
 
-        return [
+        $rules = [
             // Only the school-side roles (SH and Bookkeeper) belong to a
             // school. For the other roles the cascade is not even rendered,
             // so it must not be required here either — and a crafted request
@@ -171,24 +163,16 @@ class UsersTable extends Component
                     ->push('')
                     ->all()),
             ] : ['nullable', 'string'],
-            // The financial classification, for the school-side roles alone.
-            // An Elementary school has no sublevel; a High School must name
-            // one of its two divisions. A crafted payload that pairs the
-            // wrong level and sublevel is rejected here, not silently stored.
-            'school_level' => $belongsToSchool
-                ? ['required', Rule::in(SchoolDivision::levels())]
-                : ['nullable', Rule::in(SchoolDivision::levels())],
-            'school_sublevel' => $belongsToSchool
-                ? ['required', Rule::in($this->isHighSchool() ? SchoolDivision::highSchoolDivisions() : [SchoolDivision::SUBLEVEL_NONE])]
-                : ['nullable', Rule::in(SchoolDivision::sublevels())],
-            // The explicit division list may only name divisions the level
-            // can work in; an Elementary account has none.
+            // Division Access is the authoritative list. A school-side
+            // account must work in at least one division, and every named
+            // division must be one the selected school actually operates —
+            // an integrated school may therefore carry all three.
             'division_access' => $belongsToSchool
-                ? ['array']
+                ? ['required', 'array', 'min:1']
                 : ['nullable', 'array'],
-            'division_access.*' => [
-                Rule::in($this->isHighSchool() ? SchoolDivision::highSchoolDivisions() : []),
-            ],
+            'division_access.*' => $belongsToSchool
+                ? [Rule::in($this->availableDivisions())]
+                : ['nullable'],
             'name' => ['required', 'string', 'max:255'],
             'username' => [
                 'required', 'string', 'max:255', 'alpha_dash',
@@ -205,6 +189,15 @@ class UsersTable extends Component
                 : ['required', 'string', 'min:8'],
             'role' => ['required', Rule::in(['user', 'viewer', 'bookkeeper', 'budget', 'administrator', 'superadmin'])],
         ];
+
+        // The Bookkeeper's roster is edited in this same modal, so its rules
+        // are part of the form exactly while the form IS a Bookkeeper's — for
+        // the other roles a crafted list is ignored rather than saved.
+        if ($this->role === 'bookkeeper') {
+            $rules = array_merge($rules, $this->assignedSchoolRules());
+        }
+
+        return $rules;
     }
 
     /**
@@ -217,14 +210,12 @@ class UsersTable extends Component
         return [
             'school_division' => 'school division',
             'school_id_choice' => 'school',
-            'school_level' => 'school level',
-            'school_sublevel' => 'school sublevel',
             'division_access' => 'division access',
             'name' => 'name',
             'username' => 'username',
             'email' => 'email',
             'password' => 'password',
-        ];
+        ] + $this->assignedSchoolAttributes();
     }
 
     public function openCreateModal(): void
@@ -248,9 +239,25 @@ class UsersTable extends Component
         $this->editingUserId = $user->id;
         $this->school_division = (string) ($user->school?->district_id ?? '');
         $this->school_id_choice = (string) ($user->school_id ?? '');
-        $this->school_level = $user->schoolLevel();
-        $this->school_sublevel = $user->schoolSublevel();
-        $this->division_access = $user->division_access ?? [];
+
+        // The Bookkeeper's roster, read from the account's own assignment
+        // rows. For every other role the picker is left empty — it is not
+        // rendered for them, and an empty list is what their save ignores.
+        $this->loadAssignedSchools($user);
+
+        // Show what the account can actually work in. A row written before
+        // the explicit list existed is displayed through its classification;
+        // anything the school no longer offers is not offered back.
+        $assigned = SchoolDivision::validAccessList($user->division_access);
+
+        if ($assigned === []) {
+            $assigned = $user->authorizedDivisions();
+        }
+
+        $this->division_access = array_values(array_intersect(
+            $assigned,
+            $user->school?->availableDivisions() ?? [],
+        ));
         $this->name = (string) $user->name;
         $this->username = (string) $user->username;
         $this->usernamePrefill = ''; // the stored login is theirs, not our default
@@ -357,9 +364,8 @@ class UsersTable extends Component
     {
         $this->school_division = '';
         $this->school_id_choice = '';
-        $this->school_level = SchoolDivision::LEVEL_ELEMENTARY;
-        $this->school_sublevel = SchoolDivision::SUBLEVEL_NONE;
         $this->division_access = [];
+        $this->resetAssignedSchools();
         $this->name = '';
         $this->username = '';
         $this->usernamePrefill = '';
@@ -411,49 +417,41 @@ class UsersTable extends Component
         return in_array($this->role, ['user', 'bookkeeper'], true);
     }
 
-    /** Is the form building a High School account? */
-    public function isHighSchool(): bool
-    {
-        return $this->school_level === SchoolDivision::LEVEL_HIGH_SCHOOL;
-    }
-
     /**
-     * The School Level options — the two kinds of school an account may be
-     * classified under.
+     * The divisions the selected school operates — the only choices the
+     * Division Access section may offer.
      *
-     * @return array<int, array{value: string, label: string}>
+     * @return array<int, string>
      */
-    public function schoolLevelOptions(): array
+    public function availableDivisions(): array
     {
-        return [
-            ['value' => SchoolDivision::LEVEL_ELEMENTARY, 'label' => 'Elementary'],
-            ['value' => SchoolDivision::LEVEL_HIGH_SCHOOL, 'label' => 'High School'],
-        ];
+        return $this->selectedSchool?->availableDivisions() ?? [];
     }
 
     /**
-     * The School Sublevel options — a High School's two divisions. Only
-     * rendered (and required) for a High School.
-     *
-     * @return array<int, array{value: string, label: string}>
-     */
-    public function schoolSublevelOptions(): array
-    {
-        return [
-            ['value' => SchoolDivision::JUNIOR_HIGH, 'label' => 'Junior High School'],
-            ['value' => SchoolDivision::SENIOR_HIGH, 'label' => 'Senior High School'],
-        ];
-    }
-
-    /**
-     * The Division Access options: the divisions a High School account may
-     * work in. Both may be checked for an account that works in both.
+     * The Division Access options: exactly the divisions the selected school
+     * operates, so an integrated school offers all three.
      *
      * @return array<int, array{value: string, label: string}>
      */
     public function divisionAccessOptions(): array
     {
-        return $this->schoolSublevelOptions();
+        return array_map(
+            fn (string $division): array => [
+                'value' => $division,
+                'label' => SchoolDivision::label($division),
+            ],
+            $this->availableDivisions(),
+        );
+    }
+
+    /**
+     * Checking a division fixes a missing-selection error immediately, so the
+     * old message does not sit under a field the administrator just filled.
+     */
+    public function updatedDivisionAccess(): void
+    {
+        $this->resetValidation(['division_access', 'division_access.*']);
     }
 
     public function updatedRole(string $role): void
@@ -462,77 +460,30 @@ class UsersTable extends Component
 
         // Switching to a role that carries no school hides the cascade, so
         // drop whatever it held — otherwise a hidden selection would silently
-        // attach the account to a school on save.
+        // attach the account to a school on save. The assignment picker is
+        // dropped with it: a role with no roster must not carry one into a
+        // save from behind a hidden field.
         if (! in_array($role, ['user', 'bookkeeper'], true)) {
             $this->school_division = '';
             $this->school_id_choice = '';
             $this->usernamePrefill = '';
-            $this->school_level = SchoolDivision::LEVEL_ELEMENTARY;
-            $this->school_sublevel = SchoolDivision::SUBLEVEL_NONE;
             $this->division_access = [];
+            $this->resetAssignedSchools();
         }
     }
 
     /**
-     * Level changed: an Elementary account has no sublevel and no explicit
-     * access list, and a High School always needs one of its two divisions.
-     */
-    public function updatedSchoolLevel(): void
-    {
-        $this->resetValidation(['school_sublevel', 'division_access']);
-
-        if (! $this->isHighSchool()) {
-            $this->school_sublevel = SchoolDivision::SUBLEVEL_NONE;
-            $this->division_access = [];
-
-            return;
-        }
-
-        if (! in_array($this->school_sublevel, SchoolDivision::highSchoolDivisions(), true)) {
-            $this->school_sublevel = SchoolDivision::JUNIOR_HIGH;
-        }
-
-        $this->division_access = $this->accessListForSublevel($this->school_sublevel);
-    }
-
-    /** Sublevel changed: the sublevel division is always in the access list. */
-    public function updatedSchoolSublevel(): void
-    {
-        if (! $this->isHighSchool() || ! in_array($this->school_sublevel, SchoolDivision::highSchoolDivisions(), true)) {
-            return;
-        }
-
-        $this->division_access = $this->accessListForSublevel($this->school_sublevel);
-    }
-
-    /**
-     * The server-side classification written on save: the level, the
-     * sublevel and the explicit access list. Values the level cannot carry
-     * are dropped here — the form's rules and this method are two guards on
-     * the same boundary, and only this one is trusted.
+     * The server-side classification written on save: the explicit access
+     * list, plus the broad level and default sublevel derived from it for
+     * the parts of the app that still read the classification.
      *
-     * @return array<int, string>
-     */
-    private function accessListForSublevel(string $sublevel): array
-    {
-        $access = SchoolDivision::validAccessList(
-            array_values(array_unique(array_merge($this->division_access, [$sublevel]))),
-        );
-
-        $access = array_values(array_intersect($access, SchoolDivision::highSchoolDivisions()));
-
-        // Canonical order, for a stable stored value.
-        return array_values(array_intersect(SchoolDivision::all(), $access));
-    }
-
-    /**
-     * The classification attributes for an account: only the school-side
-     * roles may carry one, and an Elementary account always reads as
-     * Elementary with no explicit access list.
+     * Only divisions the selected school operates survive this method. The
+     * form's rules and this method guard the same boundary, and only this
+     * one is trusted.
      *
      * @return array{school_level: string, school_sublevel: string, division_access: ?array<int, string>}
      */
-    private function classificationFor(string $role): array
+    private function classificationFor(string $role, ?string $preferredSublevel = null): array
     {
         if (! in_array($role, ['user', 'bookkeeper'], true) || ! $this->canAssignRoles()) {
             return [
@@ -542,7 +493,12 @@ class UsersTable extends Component
             ];
         }
 
-        if (! $this->isHighSchool()) {
+        $access = array_values(array_intersect(
+            SchoolDivision::validAccessList($this->division_access),
+            $this->availableDivisions(),
+        ));
+
+        if ($access === []) {
             return [
                 'school_level' => SchoolDivision::LEVEL_ELEMENTARY,
                 'school_sublevel' => SchoolDivision::SUBLEVEL_NONE,
@@ -550,14 +506,18 @@ class UsersTable extends Component
             ];
         }
 
-        $sublevel = in_array($this->school_sublevel, SchoolDivision::highSchoolDivisions(), true)
-            ? $this->school_sublevel
-            : SchoolDivision::JUNIOR_HIGH;
+        $high = array_values(array_intersect($access, SchoolDivision::highSchoolDivisions()));
 
-        $access = $this->accessListForSublevel($sublevel);
+        // The default division: keep the account's existing high-school
+        // sublevel when it is still assigned, otherwise the first one.
+        $sublevel = in_array($preferredSublevel, $high, true)
+            ? $preferredSublevel
+            : ($high[0] ?? SchoolDivision::SUBLEVEL_NONE);
 
         return [
-            'school_level' => SchoolDivision::LEVEL_HIGH_SCHOOL,
+            'school_level' => $high !== []
+                ? SchoolDivision::LEVEL_HIGH_SCHOOL
+                : SchoolDivision::LEVEL_ELEMENTARY,
             'school_sublevel' => $sublevel,
             'division_access' => $access,
         ];
@@ -620,6 +580,20 @@ class UsersTable extends Component
             'is_superadmin' => $selectedRole === 'superadmin',
         ]);
 
+        // The model seeds the account's base school into its roster at
+        // creation; the administrator's own list — which already holds the
+        // picked base school, because updatedSchoolIdChoice() puts it there —
+        // replaces that seed when a list was actually chosen. Only schools
+        // that exist survive the sync (the model re-checks), so a crafted
+        // payload cannot reach the pivot.
+        if ($selectedRole === 'bookkeeper') {
+            $chosen = array_map(intval(...), $validated['assigned_schools'] ?? []);
+
+            if ($chosen !== []) {
+                $user->syncAssignedSchools($chosen);
+            }
+        }
+
         $this->showCreateModal = false;
         $this->editingUserId = null;
         $this->resetForm();
@@ -657,7 +631,7 @@ class UsersTable extends Component
             ? $validated['role']
             : 'user';
 
-        $classification = $this->classificationFor($selectedRole);
+        $classification = $this->classificationFor($selectedRole, $user->schoolSublevel());
 
         $user->school_id = in_array($selectedRole, ['user', 'bookkeeper'], true) && $validated['school_id_choice'] !== ''
             ? (int) $validated['school_id_choice']
@@ -678,6 +652,19 @@ class UsersTable extends Component
         }
 
         $user->save();
+
+        // The school-side roster follows the save. A School Head works
+        // nowhere but their own school, so their roster is exactly that; a
+        // Bookkeeper's roster is exactly the modal's list — the base school
+        // is added to it the moment it is picked, so an empty list is a
+        // deliberate revocation, not a field the administrator never saw.
+        // Roles that carry no school keep whatever they had: nothing reads
+        // their roster.
+        if ($selectedRole === 'user') {
+            $user->syncAssignedSchools($user->school_id !== null ? [(int) $user->school_id] : []);
+        } elseif ($selectedRole === 'bookkeeper') {
+            $user->syncAssignedSchools(array_map(intval(...), $validated['assigned_schools'] ?? []));
+        }
 
         $this->showCreateModal = false;
         $this->editingUserId = null;
@@ -789,7 +776,29 @@ class UsersTable extends Component
      */
     public function updatedSchoolIdChoice(): void
     {
-        $this->resetValidation(['username']);
+        $this->resetValidation(['username', 'division_access', 'division_access.*']);
+
+        // The new school's menu is the boundary: keep only choices it still
+        // offers. A single-division school preselects its only division; a
+        // multi-division school leaves the choice explicit.
+        $available = $this->availableDivisions();
+
+        $this->division_access = array_values(array_intersect(
+            SchoolDivision::validAccessList($this->division_access),
+            $available,
+        ));
+
+        if ($this->division_access === [] && count($available) === 1) {
+            $this->division_access = $available;
+        }
+
+        // A Bookkeeper's picked school is where they are stationed, so it
+        // joins the assignment list the moment it is picked: the list on
+        // screen is then exactly what a save writes. The administrator can
+        // still take it off the list like any other school.
+        if ($this->role === 'bookkeeper' && $this->school_id_choice !== '') {
+            $this->addAssignedSchool((int) $this->school_id_choice);
+        }
 
         $schoolId = $this->selectedSchoolId;
 

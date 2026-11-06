@@ -29,9 +29,9 @@ use Livewire\Component;
  * `school_id`, so no other school's expenditure can be read here. The page is
  * reachable by the School Head alone: the route guard and this component both
  * refuse every other account with a 404. (The Bookkeeper reads and signs the
- * report on its division-wide copy instead —
- * {@see BudgetLineItemAllotment} — and the check prints here like the
- * certification does.)
+ * report on the Budget office-style copy instead —
+ * {@see BudgetLineItemAllotment}, narrowed to its assigned schools — and the
+ * check prints here like the certification does.)
  */
 #[Title('Per Line Item Expenditure — SmartApp')]
 class WfpLineItemAllotment extends Component

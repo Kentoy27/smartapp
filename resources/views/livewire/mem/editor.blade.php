@@ -555,6 +555,21 @@
             </div>
         @endif
 
+        {{-- The export sits just below the monthly total, aligned to its
+             right edge: after reading a long month the form is one click
+             away without scrolling back to the toolbar. --}}
+        <div class="mem-summary__foot">
+            <a
+                href="{{ route('wfp.matrices.export', ['matrix' => $matrix->id]) }}"
+                class="ac-import-btn mem-summary__export"
+                download
+                title="Export the matrix as the printed DepEd form (Excel)"
+            >
+                <x-icon name="file-spreadsheet" :size="17" />
+                <span>Export XLSX</span>
+            </a>
+        </div>
+
     </div>
 
     {{-- The writing modals exist for a writing account only: a read-only
@@ -593,6 +608,54 @@
                     <div class="field mem-line-span wfp-template-applied">
                         <span class="wfp-template-applied__label">Filled from template <strong>{{ $appliedTemplateName }}</strong></span>
                         <button type="button" class="wfp-template-applied__clear" wire:click="clearTemplate" title="Clear template">Clear template</button>
+                    </div>
+                @endif
+
+                {{-- The save gate refused an exact description match: show the
+                     existing entry and the one explicit choice that lets the
+                     separate entry through. The saved line is not touched. --}}
+                @if ($duplicateWarning !== null)
+                    <div class="field mem-line-span mem-dup-warning" role="alert">
+                        <div class="mem-dup-warning__head">
+                            <span class="mem-dup-warning__icon" aria-hidden="true"><x-icon name="alert-triangle" :size="16" /></span>
+                            <span>
+                                An entry with this exact description already exists in
+                                <strong>{{ $matrix->periodLabel() }}</strong>. Check the existing entry before adding another one.
+                            </span>
+                        </div>
+
+                        <div class="mem-dup-warning__entry">
+                            <span class="mem-dup__badge is-exact">Exact match</span>
+                            <span class="mem-dup-warning__title">{{ $duplicateWarning['description'] }}</span>
+                            @php($dupFacts = array_filter([
+                                trim((string) ($duplicateWarning['objective'] ?? '')) !== '' ? 'Objective: '.$duplicateWarning['objective'] : '',
+                                trim((string) ($duplicateWarning['account_title'] ?? '')) !== ''
+                                    ? 'Account: '.$duplicateWarning['account_title'].(trim((string) ($duplicateWarning['account_code'] ?? '')) !== '' ? ' ['.$duplicateWarning['account_code'].']' : '')
+                                    : (trim((string) ($duplicateWarning['account_code'] ?? '')) !== '' ? 'Account code: '.$duplicateWarning['account_code'] : ''),
+                                trim((string) ($duplicateWarning['funding_source'] ?? '')) !== '' ? 'Funding source: '.$duplicateWarning['funding_source'] : '',
+                            ]))
+                            @if ($dupFacts !== [])
+                                <span class="mem-dup-warning__meta">{{ implode(' · ', $dupFacts) }}</span>
+                            @endif
+                        </div>
+
+                        <div class="mem-dup-warning__actions">
+                            <button type="button" class="btn-primary" wire:click="confirmDuplicateAndSave">Add separately anyway</button>
+                            <button type="button" class="btn-ghost" wire:click="dismissDuplicateWarning">Keep editing</button>
+                        </div>
+                    </div>
+                @endif
+
+                {{-- "Use existing activity" filled the form from an entry that
+                     already stands in this matrix. Only the activity details
+                     were copied — the entry itself is untouched. --}}
+                @if ($reusedFromItemId !== null)
+                    <div class="field mem-line-span mem-dup-reuse">
+                        <span class="mem-dup-reuse__label">
+                            <span class="mem-dup-reuse__icon" aria-hidden="true"><x-icon name="copy" :size="14" /></span>
+                            <span>Reusing the existing activity’s details — the saved entry is not changed. Fill in the new resource below.</span>
+                        </span>
+                        <button type="button" class="wfp-template-applied__clear" wire:click="clearReusedActivity" title="Dismiss">Dismiss</button>
                     </div>
                 @endif
 
@@ -681,50 +744,6 @@
                         @endforeach
                     </div>
 
-                    {{-- Apply one encoded line to several months at once.
-                         Adding copies the line into each checked month;
-                         editing keeps it only in the months checked — each
-                         checked month's copy is updated (or added when it has
-                         none) and an unchecked month holding a copy loses it.
-                         Reopening an edit checks the months already holding
-                         the line. --}}
-                    <div class="mem-line-months mem-line-span" role="group" aria-labelledby="memLineMonthsLabel">
-                        <span id="memLineMonthsLabel" class="mem-line-months__label">
-                            Apply to months
-                            <span class="mem-line-months__hint">
-                                {{ $editingKey === null
-                                    ? 'The line is added to every month checked.'
-                                    : 'Checked months keep the line — unchecking one removes it there.' }}
-                            </span>
-                        </span>
-
-                        <div class="mem-line-months__grid">
-                            @foreach ($this->months as $tab)
-                                <label
-                                    wire:key="mem-line-month-{{ $tab['month'] }}"
-                                    @class(['mem-line-month', 'is-current' => $tab['current'], 'is-empty' => $tab['id'] === null])
-                                    title="{{ $tab['id'] === null ? 'No matrix yet — add the year first' : $tab['label'] }}"
-                                >
-                                    <input
-                                        type="checkbox"
-                                        wire:model="lineMonths"
-                                        value="{{ $tab['month'] }}"
-                                        aria-label="{{ $tab['label'] }}"
-                                        @disabled($tab['id'] === null)
-                                    >
-                                    <span>{{ $tab['abbr'] }}</span>
-                                </label>
-                            @endforeach
-                        </div>
-
-                        @php($monthError = $errors->first('lineMonths') ?: $errors->first('lineMonths.*'))
-                        @if ($monthError !== '')
-                            <div class="error-text">{{ $monthError }}</div>
-                        @else
-                            <div class="field-hint">Months without a matrix are not selectable — add the year first.</div>
-                        @endif
-                    </div>
-
                     <div class="field">
                         <label for="memLineObjective">
                             Objectives
@@ -748,22 +767,260 @@
                                 <span class="field-template-tag">from template</span>
                             @endif
                         </label>
-                        <input
-                            id="memLineActivity"
-                            type="text"
-                            wire:model="lineForm.activity_description"
-                            placeholder="e.g. Procure office supplies"
-                            @class(['error' => $errors->has('lineForm.activity_description')])
-                            autofocus
+
+                        {{-- The input plus its duplicate-suggestion panel. The
+                             panel checks THIS matrix only (the URL carries its
+                             id) and its results are advisory — the save gate
+                             re-checks server-side. Alpine owns the panel
+                             (wire:ignore) so a Livewire morph never fights
+                             x-for; open/close state is a class, not x-show. --}}
+                        <div
+                            class="mem-dup"
+                            data-exclude="{{ (int) ($lineForm['id'] ?? 0) }}"
+                            x-data="{
+                                url: @js(route('wfp.matrices.duplicate-check', ['matrix' => $matrix->id])),
+                                minLength: {{ \App\Support\MemDuplicateChecker::minQueryLength() }},
+                                open: false,
+                                loading: false,
+                                failed: false,
+                                checked: false,
+                                query: '',
+                                matches: [],
+                                active: -1,
+                                expanded: null,
+                                timer: null,
+                                controller: null,
+                                onInput(event) {
+                                    const term = event.target.value.trim();
+                                    this.query = term;
+                                    this.expanded = null;
+                                    this.active = -1;
+
+                                    if (this.timer) clearTimeout(this.timer);
+                                    if (this.controller) this.controller.abort();
+
+                                    if (this.minLength > term.length) {
+                                        this.matches = [];
+                                        this.open = false;
+                                        this.loading = false;
+                                        this.failed = false;
+                                        this.checked = false;
+                                        return;
+                                    }
+
+                                    this.timer = setTimeout(() => this.search(term), 400);
+                                },
+                                recheck() {
+                                    if (this.query.length >= this.minLength) {
+                                        if (this.timer) clearTimeout(this.timer);
+                                        this.search(this.query);
+                                    }
+                                },
+                                search(term) {
+                                    if (this.controller) this.controller.abort();
+                                    this.controller = new AbortController();
+                                    this.loading = true;
+                                    this.failed = false;
+
+                                    const params = new URLSearchParams({ q: term });
+                                    const exclude = (this.$root.dataset.exclude || '').trim();
+                                    if (exclude !== '' && exclude !== '0') params.set('exclude', exclude);
+
+                                    fetch(this.url + '?' + params.toString(), {
+                                        headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                                        credentials: 'same-origin',
+                                        signal: this.controller.signal,
+                                    })
+                                        .then((response) => {
+                                            if (! response.ok) throw new Error('duplicate-check failed: ' + response.status);
+                                            return response.json();
+                                        })
+                                        .then((data) => {
+                                            if (term !== this.query) return;
+                                            this.matches = Array.isArray(data.matches) ? data.matches : [];
+                                            this.checked = true;
+                                            this.loading = false;
+                                            this.open = this.matches.length > 0;
+                                        })
+                                        .catch((error) => {
+                                            if (error && error.name === 'AbortError') return;
+                                            if (term !== this.query) return;
+                                            this.loading = false;
+                                            this.failed = true;
+                                            this.checked = false;
+                                            this.matches = [];
+                                            this.open = false;
+                                        });
+                                },
+                                retry() {
+                                    if (this.query.length >= this.minLength) this.search(this.query);
+                                },
+                                reset() {
+                                    if (this.controller) this.controller.abort();
+                                    if (this.timer) clearTimeout(this.timer);
+                                    this.timer = null;
+                                    this.query = '';
+                                    this.matches = [];
+                                    this.open = false;
+                                    this.loading = false;
+                                    this.failed = false;
+                                    this.checked = false;
+                                    this.active = -1;
+                                    this.expanded = null;
+                                },
+                                statusVisible() {
+                                    if (this.open) return false;
+                                    return this.loading || this.failed || (this.checked && this.matches.length === 0);
+                                },
+                                onFocus() {
+                                    if (this.checked && this.matches.length > 0) this.open = true;
+                                },
+                                onKeydown(event) {
+                                    if (event.key === 'Escape') {
+                                        if (this.open) { event.stopPropagation(); this.open = false; this.active = -1; }
+                                        return;
+                                    }
+
+                                    if (! this.open || this.matches.length === 0) return;
+
+                                    if (event.key === 'ArrowDown') {
+                                        event.preventDefault();
+                                        this.active = (this.active + 1) % this.matches.length;
+                                    } else if (event.key === 'ArrowUp') {
+                                        event.preventDefault();
+                                        this.active = this.active <= 0 ? this.matches.length - 1 : this.active - 1;
+                                    } else if (event.key === 'Enter' && this.active >= 0) {
+                                        event.preventDefault();
+                                        this.toggle(this.matches[this.active].id);
+                                    }
+                                },
+                                toggle(id) {
+                                    this.expanded = this.expanded === id ? null : id;
+                                },
+                                useExisting(match) {
+                                    const id = match.id;
+                                    this.$wire.useExistingActivity(id);
+                                    this.reset();
+                                },
+                                addSeparate() {
+                                    const term = this.query;
+                                    this.$wire.confirmAddSeparate(term);
+                                    this.reset();
+                                },
+                                resourceLine(match) {
+                                    const quantity = match.quantity ? match.quantity + (match.unit ? ' ' + match.unit : '') : (match.unit || '');
+                                    const parts = [match.resource_kind || '', quantity, match.unit_cost ? '@ ' + match.unit_cost : ''];
+                                    return parts.filter((part) => part !== '').join(' ');
+                                },
+                                summary(match) {
+                                    const parts = [];
+                                    const account = match.account_title
+                                        ? (match.account_code ? match.account_title + ' [' + match.account_code + ']' : match.account_title)
+                                        : (match.account_code ? '[' + match.account_code + ']' : '');
+                                    if (account) parts.push(account);
+                                    if (match.funding_source) parts.push(match.funding_source);
+                                    const resource = this.resourceLine(match);
+                                    if (resource) parts.push(resource);
+                                    return parts.join(' · ');
+                                },
+                            }"
+                            x-on:mem-line-modal-reset.window="reset()"
+                            x-on:mem-duplicate-recheck.window="recheck()"
                         >
+                            <input
+                                id="memLineActivity"
+                                type="text"
+                                wire:model="lineForm.activity_description"
+                                placeholder="e.g. Procure office supplies"
+                                @class(['error' => $errors->has('lineForm.activity_description')])
+                                autocomplete="off"
+                                aria-autocomplete="list"
+                                aria-controls="memDupPanel"
+                                :aria-expanded="String(open)"
+                                @input="onInput($event)"
+                                @keydown="onKeydown($event)"
+                                @focus="onFocus()"
+                                autofocus
+                            >
+
+                            <div class="mem-dup__assist" wire:ignore>
+                                <div class="mem-dup__status" x-show="statusVisible()" x-cloak aria-live="polite">
+                                    <template x-if="loading">
+                                        <span class="mem-dup__status-text">
+                                            <span class="mem-dup__spinner" aria-hidden="true"></span>
+                                            Checking this month’s entries…
+                                        </span>
+                                    </template>
+                                    <template x-if="! loading && failed">
+                                        <span class="mem-dup__status-text is-error">
+                                            Couldn’t check for similar entries.
+                                            <button type="button" class="mem-dup__retry" @click="retry()">Retry</button>
+                                        </span>
+                                    </template>
+                                    <template x-if="! loading && ! failed && checked && matches.length === 0">
+                                        <span class="mem-dup__status-text">No similar entry in this monthly matrix.</span>
+                                    </template>
+                                </div>
+
+                                <div id="memDupPanel" class="mem-dup__panel" :class="open ? 'open' : ''">
+                                    <div class="mem-dup__hint">
+                                        <span>Similar activity found in this monthly matrix. Check the existing entry before adding another one.</span>
+                                        <span class="mem-dup__spinner" x-show="loading" aria-hidden="true"></span>
+                                    </div>
+
+                                    <template x-for="(match, index) in matches" :key="match.id">
+                                        <div
+                                            class="mem-dup__item"
+                                            :class="[match.match_type === 'exact' ? 'is-exact' : 'is-similar', active === index ? 'is-active' : '']"
+                                            x-effect="if (active === index) $el.scrollIntoView({ block: 'nearest' })"
+                                        >
+                                            <button
+                                                type="button"
+                                                class="mem-dup__head"
+                                                @click="toggle(match.id)"
+                                                :aria-expanded="expanded === match.id ? 'true' : 'false'"
+                                                title="View existing entry"
+                                            >
+                                                <span class="mem-dup__badge" :class="match.match_type === 'exact' ? 'is-exact' : 'is-similar'" x-text="match.match_type === 'exact' ? 'Exact match' : 'Similar match'"></span>
+                                                <span class="mem-dup__main">
+                                                    <span class="mem-dup__title" x-text="match.description"></span>
+                                                    <span class="mem-dup__meta" x-show="summary(match) !== ''" x-text="summary(match)"></span>
+                                                </span>
+                                                <span class="mem-dup__chevron" :class="expanded === match.id ? 'is-open' : ''" aria-hidden="true"></span>
+                                            </button>
+
+                                            <div class="mem-dup__detail" x-show="expanded === match.id" x-cloak>
+                                                <dl class="mem-dup__facts">
+                                                    <template x-if="match.objective"><div><dt>Objectives</dt><dd x-text="match.objective"></dd></div></template>
+                                                    <template x-if="match.account_title || match.account_code"><div><dt>Account title / code</dt><dd x-text="match.account_title + (match.account_code ? ' [' + match.account_code + ']' : '')"></dd></div></template>
+                                                    <template x-if="match.funding_source"><div><dt>Funding source</dt><dd x-text="match.funding_source"></dd></div></template>
+                                                    <template x-if="match.organizational_classification"><div><dt>Organizational classification</dt><dd x-text="match.organizational_classification"></dd></div></template>
+                                                    <template x-if="resourceLine(match)"><div><dt>Resource</dt><dd x-text="resourceLine(match)"></dd></div></template>
+                                                    <template x-if="match.major_output"><div><dt>Major output</dt><dd x-text="match.major_output"></dd></div></template>
+                                                    <template x-if="match.performance_indicator"><div><dt>Performance indicator</dt><dd x-text="match.performance_indicator"></dd></div></template>
+                                                    <template x-if="match.activity_movs"><div><dt>Activity MOVs</dt><dd x-text="match.activity_movs"></dd></div></template>
+                                                </dl>
+
+                                                <div class="mem-dup__actions">
+                                                    <button type="button" class="ac-import-btn" @click="useExisting(match)">Use existing activity</button>
+                                                    <button type="button" class="btn-ghost" @click="addSeparate()">Add separately anyway</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+
                         @error('lineForm.activity_description') <div class="error-text">{{ $message }}</div> @enderror
                     </div>
 
-                    {{-- What the line buys, in one labeled group: kind, quantity,
-                         unit and unit cost are one thought, and the total is
-                         their product. Quantity and unit cost are live so the
-                         total recalculates while typing instead of waiting for
-                         a blur or a save. --}}
+                    {{-- What the line buys. The printed form puts several
+                         resource rows under one activity, so the modal does
+                         too: each filled row becomes its own line sharing the
+                         activity, account and months encoded here. Quantity
+                         and unit cost are live so each total recalculates
+                         while typing instead of waiting for a save. --}}
                     <div class="mem-line-resource mem-line-span" role="group" aria-labelledby="memLineResourceLabel">
                         <span id="memLineResourceLabel" class="mem-line-resource__label">
                             Resource Needed
@@ -772,45 +1029,112 @@
                             @endif
                         </span>
 
-                        <div class="mem-line-resource__fields">
-                            <div class="field">
-                                <label for="memLineKind">Kind</label>
-                                <input id="memLineKind" type="text" list="memResourceKindOptions" wire:model="lineForm.resource_kind" placeholder="e.g. MOOE">
-                                <datalist id="memResourceKindOptions">
-                                    @foreach ($this->resourceKindOptions as $option)
-                                        <option value="{{ $option->name }}"></option>
-                                    @endforeach
-                                </datalist>
-                                @error('lineForm.resource_kind') <div class="error-text">{{ $message }}</div> @enderror
+                        <div class="mem-resource-table">
+                            <div class="mem-resource-table__head" aria-hidden="true">
+                                <span>Kind</span>
+                                <span>Quantity</span>
+                                <span>Unit</span>
+                                <span>Unit cost</span>
+                                <span class="mem-resource-table__total">Total Estimated Cost</span>
+                                <span></span>
                             </div>
 
-                            <div class="field">
-                                <label for="memLineQty">Quantity</label>
-                                <input id="memLineQty" type="number" step="0.01" min="0" inputmode="decimal" wire:model.live.debounce.300ms="lineForm.quantity" placeholder="0">
-                                @error('lineForm.quantity') <div class="error-text">{{ $message }}</div> @enderror
+                            {{-- The first resource is lineForm's own columns:
+                                 that keeps the original single-resource form,
+                                 its template auto-fill and its validation. --}}
+                            <div class="mem-resource-row">
+                                <div class="mem-resource-cell" data-label="Kind">
+                                    <input id="memLineKind" type="text" list="memResourceKindOptions" wire:model="lineForm.resource_kind" placeholder="e.g. MOOE" aria-label="Kind">
+                                    @error('lineForm.resource_kind') <div class="error-text">{{ $message }}</div> @enderror
+                                </div>
+
+                                <div class="mem-resource-cell" data-label="Quantity">
+                                    <input id="memLineQty" type="number" step="0.01" min="0" inputmode="decimal" wire:model.live.debounce.300ms="lineForm.quantity" placeholder="0" aria-label="Quantity">
+                                    @error('lineForm.quantity') <div class="error-text">{{ $message }}</div> @enderror
+                                </div>
+
+                                <div class="mem-resource-cell" data-label="Unit">
+                                    <input id="memLineUnit" type="text" list="memUnitOptions" wire:model="lineForm.unit" placeholder="e.g. ream" aria-label="Unit">
+                                    @error('lineForm.unit') <div class="error-text">{{ $message }}</div> @enderror
+                                </div>
+
+                                <div class="mem-resource-cell" data-label="Unit cost">
+                                    <input id="memLineCost" type="number" step="0.01" min="0" inputmode="decimal" wire:model.live.debounce.300ms="lineForm.unit_cost" placeholder="0.00" aria-label="Unit cost">
+                                    @error('lineForm.unit_cost') <div class="error-text">{{ $message }}</div> @enderror
+                                </div>
+
+                                <div class="mem-resource-cell mem-resource-cell--total" data-label="Total Estimated Cost">
+                                    <div class="mem-resource-total" aria-live="polite">
+                                        <span class="mem-resource-total__value">{{ number_format(\App\Livewire\MemEditor::lineTotal($lineForm), 2) }}</span>
+                                    </div>
+                                </div>
+
+                                <div class="mem-resource-cell mem-resource-cell--action mem-resource-cell--placeholder" aria-hidden="true"></div>
                             </div>
 
-                            <div class="field">
-                                <label for="memLineUnit">Unit</label>
-                                <input id="memLineUnit" type="text" list="memUnitOptions" wire:model="lineForm.unit" placeholder="e.g. ream">
-                                <datalist id="memUnitOptions">
-                                    @foreach ($this->unitOptions as $option)
-                                        <option value="{{ $option->name }}"></option>
-                                    @endforeach
-                                </datalist>
-                                @error('lineForm.unit') <div class="error-text">{{ $message }}</div> @enderror
-                            </div>
+                            @foreach ($lineResources as $index => $resource)
+                                <div class="mem-resource-row" wire:key="mem-resource-{{ $resource['_key'] ?? $index }}">
+                                    <div class="mem-resource-cell" data-label="Kind">
+                                        <input type="text" list="memResourceKindOptions" wire:model="lineResources.{{ $index }}.resource_kind" placeholder="e.g. MOOE" aria-label="Kind">
+                                        @error("lineResources.{$index}.resource_kind") <div class="error-text">{{ $message }}</div> @enderror
+                                    </div>
 
-                            <div class="field">
-                                <label for="memLineCost">Unit cost</label>
-                                <input id="memLineCost" type="number" step="0.01" min="0" inputmode="decimal" wire:model.live.debounce.300ms="lineForm.unit_cost" placeholder="0.00">
-                                @error('lineForm.unit_cost') <div class="error-text">{{ $message }}</div> @enderror
-                            </div>
+                                    <div class="mem-resource-cell" data-label="Quantity">
+                                        <input type="number" step="0.01" min="0" inputmode="decimal" wire:model.live.debounce.300ms="lineResources.{{ $index }}.quantity" placeholder="0" aria-label="Quantity">
+                                        @error("lineResources.{$index}.quantity") <div class="error-text">{{ $message }}</div> @enderror
+                                    </div>
 
-                            <div class="mem-line-total" aria-live="polite">
-                                <span class="mem-line-total__label">Total Estimated Cost</span>
-                                <span class="mem-line-total__value">{{ number_format(\App\Livewire\MemEditor::lineTotal($lineForm), 2) }}</span>
-                            </div>
+                                    <div class="mem-resource-cell" data-label="Unit">
+                                        <input type="text" list="memUnitOptions" wire:model="lineResources.{{ $index }}.unit" placeholder="e.g. ream" aria-label="Unit">
+                                        @error("lineResources.{$index}.unit") <div class="error-text">{{ $message }}</div> @enderror
+                                    </div>
+
+                                    <div class="mem-resource-cell" data-label="Unit cost">
+                                        <input type="number" step="0.01" min="0" inputmode="decimal" wire:model.live.debounce.300ms="lineResources.{{ $index }}.unit_cost" placeholder="0.00" aria-label="Unit cost">
+                                        @error("lineResources.{$index}.unit_cost") <div class="error-text">{{ $message }}</div> @enderror
+                                    </div>
+
+                                    <div class="mem-resource-cell mem-resource-cell--total" data-label="Total Estimated Cost">
+                                        <div class="mem-resource-total" aria-live="polite">
+                                            <span class="mem-resource-total__value">{{ number_format(\App\Livewire\MemEditor::lineTotal($resource), 2) }}</span>
+                                        </div>
+                                    </div>
+
+                                    <div class="mem-resource-cell mem-resource-cell--action">
+                                        <button
+                                            type="button"
+                                            class="mem-resource-remove"
+                                            wire:click="removeLineResource({{ $index }})"
+                                            title="Remove this resource"
+                                            aria-label="Remove this resource"
+                                        >
+                                            <x-icon name="trash" :size="15" />
+                                        </button>
+                                    </div>
+                                </div>
+                            @endforeach
+                        </div>
+
+                        <datalist id="memResourceKindOptions">
+                            @foreach ($this->resourceKindOptions as $option)
+                                <option value="{{ $option->name }}"></option>
+                            @endforeach
+                        </datalist>
+
+                        <datalist id="memUnitOptions">
+                            @foreach ($this->unitOptions as $option)
+                                <option value="{{ $option->name }}"></option>
+                            @endforeach
+                        </datalist>
+
+                        <div class="mem-resource-actions">
+                            <button type="button" class="ac-import-btn" wire:click="addLineResource">
+                                <x-icon name="plus" :size="15" />
+                                <span>Add resource</span>
+                            </button>
+                            <span class="field-hint">
+                                One line is added for each filled resource — they share this activity’s details.
+                            </span>
                         </div>
                     </div>
 
@@ -975,6 +1299,78 @@
                         ></textarea>
                         @error('lineForm.activity_movs') <div class="error-text">{{ $message }}</div> @enderror
                     </div>
+
+                    {{-- Repeated item: "No" (the default) writes the line into
+                         the month being edited only. "Yes" reveals the month
+                         picker — adding copies the line into each checked
+                         month; editing keeps it only in the months checked,
+                         each checked month's copy is updated (or added when
+                         it has none) and an unchecked month holding a copy
+                         loses it. Reopening an edit checks the months already
+                         holding the line. --}}
+                    <div class="mem-line-span" role="group" aria-labelledby="memLineRepeatedLabel">
+                        <span id="memLineRepeatedLabel" class="mem-line-months__label">
+                            Is this repeated item?
+                            <span class="mem-line-months__hint">No keeps it in this month only.</span>
+                        </span>
+
+                        <div class="mem-line-sections">
+                            <label class="mem-line-section">
+                                <input type="radio" wire:model.live="lineRepeated" value="no">
+                                <span>No</span>
+                            </label>
+                            <label class="mem-line-section">
+                                <input type="radio" wire:model.live="lineRepeated" value="yes">
+                                <span>Yes</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    @if ($lineRepeated === 'yes')
+                        <div class="mem-line-months mem-line-span" role="group" aria-labelledby="memLineMonthsLabel">
+                            <span id="memLineMonthsLabel" class="mem-line-months__label">
+                                Apply to months
+                                <span class="mem-line-months__hint">
+                                    {{ $editingKey === null
+                                        ? 'The line is added to every month checked.'
+                                        : 'Checked months keep the line — unchecking one removes it there.' }}
+                                </span>
+                            </span>
+
+                            <div class="mem-line-months__grid">
+                                @foreach ($this->months as $tab)
+                                    <label
+                                        wire:key="mem-line-month-{{ $tab['month'] }}"
+                                        @class(['mem-line-month', 'is-current' => $tab['current'], 'is-empty' => $tab['id'] === null])
+                                        title="{{ $tab['id'] === null ? 'No matrix yet — add the year first' : $tab['label'] }}"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            wire:model="lineMonths"
+                                            value="{{ $tab['month'] }}"
+                                            aria-label="{{ $tab['label'] }}"
+                                            @disabled($tab['id'] === null)
+                                        >
+                                        <span>{{ $tab['abbr'] }}</span>
+                                    </label>
+                                @endforeach
+                            </div>
+
+                            @php($monthError = $errors->first('lineMonths') ?: $errors->first('lineMonths.*'))
+                            @if ($monthError !== '')
+                                <div class="error-text">{{ $monthError }}</div>
+                            @else
+                                <div class="field-hint">Months without a matrix are not selectable — add the year first.</div>
+                            @endif
+
+                            <div class="mem-line-months__actions">
+                                <button type="button" class="ac-import-btn" wire:click="applyLineToAllMonths">
+                                    <x-icon name="check" :size="15" />
+                                    <span>Apply to all</span>
+                                </button>
+                            </div>
+                        </div>
+                    @endif
                 </div>
 
                 <div class="modal-actions">

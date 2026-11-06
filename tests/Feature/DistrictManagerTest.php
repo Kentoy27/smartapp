@@ -320,6 +320,62 @@ class DistrictManagerTest extends TestCase
             ->assertSee('Save Changes', false);
     }
 
+    public function test_administrator_configures_the_divisions_a_school_operates(): void
+    {
+        $admin = $this->administrator();
+        $district = District::create(['name' => 'District 1']);
+
+        Livewire::actingAs($admin)
+            ->test(DistrictManager::class)
+            ->call('openSchoolForm', $district->id)
+            ->set('schoolName', 'Integrated School')
+            ->set('schoolId', '123456')
+            ->set('schoolDivisions', ['ELEMENTARY', 'JUNIOR_HIGH', 'SENIOR_HIGH'])
+            ->call('addSchool')
+            ->assertHasNoErrors();
+
+        $school = School::where('name', 'Integrated School')->firstOrFail();
+
+        $this->assertSame(
+            ['ELEMENTARY', 'JUNIOR_HIGH', 'SENIOR_HIGH'],
+            $school->availableDivisions(),
+        );
+        $this->assertDatabaseCount('school_divisions', 3);
+    }
+
+    public function test_a_school_must_operate_at_least_one_division(): void
+    {
+        $admin = $this->administrator();
+        $district = District::create(['name' => 'District 1']);
+
+        Livewire::actingAs($admin)
+            ->test(DistrictManager::class)
+            ->call('openSchoolForm', $district->id)
+            ->set('schoolName', 'No Division School')
+            ->set('schoolId', '123456')
+            ->set('schoolDivisions', [])
+            ->call('addSchool')
+            ->assertHasErrors(['schoolDivisions']);
+
+        $this->assertSame(0, School::count());
+    }
+
+    public function test_editing_a_school_updates_its_divisions(): void
+    {
+        $admin = $this->administrator();
+        $district = District::create(['name' => 'District 1']);
+        $school = School::create(['district_id' => $district->id, 'name' => 'A School', 'school_id' => '123456']);
+
+        Livewire::actingAs($admin)
+            ->test(DistrictManager::class)
+            ->call('startEditSchool', $school->id)
+            ->set('editSchoolDivisions', ['JUNIOR_HIGH', 'SENIOR_HIGH'])
+            ->call('saveEditSchool')
+            ->assertHasNoErrors();
+
+        $this->assertSame(['JUNIOR_HIGH', 'SENIOR_HIGH'], $school->fresh()->availableDivisions());
+    }
+
     public function test_non_administrators_cannot_use_the_district_manager(): void
     {
         $staff = $this->staffUser();

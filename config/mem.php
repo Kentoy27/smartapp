@@ -102,4 +102,17 @@ return [
         'header_band_rows' => (int) env('MEM_WORKBOOK_HEADER_BAND_ROWS', 2),
     ],
 
+    /*
+     * The Add-a-line duplicate checker (MemDuplicateChecker): how much typing
+     * starts a check, how alike two descriptions must be to be suggested as
+     * a "similar match", and how many matches the suggestion panel shows.
+     * The exact-match confirmation is deliberately not configurable — an
+     * exact match always asks before it saves.
+     */
+    'duplicates' => [
+        'min_query_length' => (int) env('MEM_DUPLICATE_MIN_CHARS', 3),
+        'similarity_threshold' => (float) env('MEM_DUPLICATE_SIMILARITY', 0.7),
+        'limit' => (int) env('MEM_DUPLICATE_LIMIT', 5),
+    ],
+
 ];

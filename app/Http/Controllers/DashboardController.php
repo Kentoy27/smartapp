@@ -25,7 +25,7 @@ class DashboardController extends Controller
             'isBookkeeper' => $user?->isBookkeeperRole() ?? false,
             // The WFP Template card (generate + upload) is for the School
             // Head (SH) role only — no card for superadmins, SDS viewers, the
-            // Bookkeeper (who works the division-wide checking pages), or
+            // Bookkeeper (who works the school-scoped checking pages), or
             // anyone else.
             'wfpTemplate' => $user?->canManageWfp()
                 ? ['name' => WfpTemplate::fileName(), 'description' => WfpTemplate::description()]
