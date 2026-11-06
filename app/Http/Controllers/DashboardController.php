@@ -10,10 +10,9 @@ class DashboardController extends Controller
     /**
      * Show the dashboard for the signed-in user.
      *
-     * The page shell (greeting) is static; everything data-driven — the
-     * superadmin's District List, the staff member's OPCRF Template card —
-     * lives in the DashboardSummary Livewire component, which refreshes
-     * itself so the dashboard stays live without a reload.
+     * Dashboard content is role-scoped: staff plan cards are shown only to
+     * their intended roles, and the OPCRF status card refreshes without a
+     * reload through DashboardSummary.
      */
     public function index(Request $request)
     {
@@ -23,6 +22,7 @@ class DashboardController extends Controller
             'user' => $user,
             'isBudgetReviewer' => $user?->isBudgetRole() ?? false,
             'isBookkeeper' => $user?->isBookkeeperRole() ?? false,
+            'canUploadAip' => $user?->canAccessAip() ?? false,
             // The WFP Template card (generate + upload) is for the School
             // Head (SH) role only — no card for superadmins, SDS viewers, the
             // Bookkeeper (who works the division-wide checking pages), or

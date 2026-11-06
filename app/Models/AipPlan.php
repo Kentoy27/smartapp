@@ -17,12 +17,11 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * are two levels — School Improvement Projects, each with its activities —
  * matching the official form (Annex 10, DepEd Order No. 44, s. 2015).
  *
- * The review workflow mirrors the OPCRF one, deliberately, so the two modules
- * read the same to the superadmin who reviews both:
+ * The review workflow starts with the assigned Viewer, then moves through
+ * the configured superadmin chain:
  *
- *   draft → (submit) → pending → (compliance) → approved
+ *   draft → (submit) → pending → (approve) → forwarded → (final approve) → approved
  *                             ↘ (return) → returned → (resubmit) → resubmitted
- *                                                                      ↘ …
  *
  * Every submission archives an immutable snapshot of the plan as a version
  * (Version 1 = the first submission), so a revision never overwrites what was
@@ -44,6 +43,9 @@ class AipPlan extends Model
     /** Revised by the owner and waiting for review again. */
     public const STATUS_RESUBMITTED = 'resubmitted';
 
+    /** Approved by one reviewer and routed to the next reviewer. */
+    public const STATUS_FORWARDED = 'forwarded';
+
     /** Approved by the reviewer — the official AIP. */
     public const STATUS_APPROVED = 'approved';
 
@@ -52,6 +54,8 @@ class AipPlan extends Model
         'year',
         'title',
         'form_data',
+        'source_file_path',
+        'original_file_name',
         'status',
         'version',
         'wfp_plan_id',
@@ -101,7 +105,7 @@ class AipPlan extends Model
         return $this->belongsTo(User::class, 'updated_by');
     }
 
-    /** The superadmin the plan was routed to (the reviewer of record). */
+    /** The first reviewer the plan was routed to. */
     public function reviewer(): BelongsTo
     {
         return $this->belongsTo(User::class, 'reviewer_id');
@@ -185,6 +189,7 @@ class AipPlan extends Model
             self::STATUS_PENDING => 'Pending Review',
             self::STATUS_RETURNED => 'Returned for Revision',
             self::STATUS_RESUBMITTED => 'Resubmitted for Review',
+            self::STATUS_FORWARDED => 'Forwarded',
             self::STATUS_APPROVED => 'Approved',
             default => ucfirst($status),
         };
@@ -192,6 +197,14 @@ class AipPlan extends Model
 
     public function statusLabelFor(?User $viewer = null): string
     {
+        if ($this->status === self::STATUS_FORWARDED) {
+            if ($viewer !== null && (int) $this->assigned_to === (int) $viewer->id) {
+                return 'Pending Review';
+            }
+
+            return 'Forwarded to '.($this->assignedTo?->name ?? 'the next reviewer');
+        }
+
         return self::statusLabel((string) $this->status);
     }
 
@@ -200,7 +213,7 @@ class AipPlan extends Model
         return match ($this->status) {
             self::STATUS_APPROVED => 'badge--ok',
             self::STATUS_RETURNED => 'badge--warn',
-            self::STATUS_RESUBMITTED, self::STATUS_PENDING => 'badge--info',
+            self::STATUS_RESUBMITTED, self::STATUS_PENDING, self::STATUS_FORWARDED => 'badge--info',
             default => 'badge-muted',
         };
     }
@@ -235,7 +248,7 @@ class AipPlan extends Model
     /** Is the plan waiting on the reviewer (so they have work to do)? */
     public function isAwaitingReview(): bool
     {
-        return in_array($this->status, [self::STATUS_PENDING, self::STATUS_RESUBMITTED], true);
+        return in_array($this->status, [self::STATUS_PENDING, self::STATUS_RESUBMITTED, self::STATUS_FORWARDED], true);
     }
 
     /* ------------------------------------------------------------ authority */
@@ -251,17 +264,13 @@ class AipPlan extends Model
 
     /**
      * Is this plan currently sitting in the given reviewer's queue — i.e.
-     * may they act on it? An unassigned plan is actionable by every
-     * administrative account.
+     * may they act on it? An assigned plan is actionable only by its current
+     * holder; an unassigned legacy plan remains recoverable by any reviewer.
      */
     public function isAssignedTo(?User $user): bool
     {
         if ($user === null || ! $user->canReviewAip()) {
             return false;
-        }
-
-        if (! $user->is_superadmin) {
-            return true;
         }
 
         $current = $this->assigned_to ?? $this->reviewer_id;
@@ -288,13 +297,24 @@ class AipPlan extends Model
         return $user !== null && $user->canReviewAip() && $this->isAssignedTo($user);
     }
 
+    /** Admins may manage any visible plan; a Viewer may delete only their assigned submission. */
+    public function canBeDeletedBy(?User $user): bool
+    {
+        return $user !== null && (
+            $user->hasAdminAccess()
+            || ($user->role === 'viewer'
+                && $this->assigned_to !== null
+                && (int) $this->assigned_to === (int) $user->id
+                && $this->canBeReviewedBy($user))
+        );
+    }
+
     /**
      * May this user open the plan at all — its contents, its PDF and its
      * Excel export?
      *
-     * The owning School Head always may. An administrative account may once
-     * the plan has been submitted (a draft is the school's own working copy,
-     * so it is not shown to reviewers before it is filed).
+     * The owning School Head always may. A reviewer may once the plan has
+     * been submitted (a draft is the school's own working copy).
      */
     public function canBeViewedBy(?User $user): bool
     {
@@ -342,7 +362,14 @@ class AipPlan extends Model
     {
         $query = $query->visibleTo($reviewer);
 
-        if (! ($reviewer->canReviewAip() && ! $reviewer->is_superadmin)) {
+        if ($reviewer->role === 'viewer') {
+            $query->where(function (Builder $held) use ($reviewer): void {
+                $held->where('assigned_to', $reviewer->id)
+                    ->orWhere(function (Builder $legacy) use ($reviewer): void {
+                        $legacy->whereNull('assigned_to')->where('reviewer_id', $reviewer->id);
+                    });
+            });
+        } elseif (! ($reviewer->canReviewAip() && ! $reviewer->is_superadmin)) {
             $query->where(function (Builder $held) use ($reviewer): void {
                 $held->whereNull('assigned_to')->orWhere('assigned_to', $reviewer->id);
             });
@@ -350,7 +377,7 @@ class AipPlan extends Model
 
         return $query
             ->whereNull('approved_at')
-            ->whereIn('status', [self::STATUS_PENDING, self::STATUS_RESUBMITTED]);
+            ->whereIn('status', [self::STATUS_PENDING, self::STATUS_RESUBMITTED, self::STATUS_FORWARDED]);
     }
 
     public function scopeApproved(Builder $query): Builder
@@ -443,8 +470,7 @@ class AipPlan extends Model
 
     /**
      * The owner submits the plan. Archives the current contents as a version,
-     * routes it to the configured reviewer (or leaves it unassigned so every
-     * superadmin sees it) and records the submission in the trail.
+     * routes it to the first configured reviewer, and records the submission.
      */
     public function submit(User $owner, ?string $remarks = null): void
     {
@@ -454,8 +480,8 @@ class AipPlan extends Model
 
         $this->status = self::STATUS_PENDING;
         $this->submitted_at = now();
-        $this->reviewer_id = $this->reviewer_id ?? self::configuredReviewerId();
-        $this->assigned_to = $this->assigned_to ?? $this->reviewer_id;
+        $this->reviewer_id = self::configuredReviewerId() ?? $this->reviewer_id;
+        $this->assigned_to = $this->reviewer_id;
         $this->review_remarks = null;
         $this->save();
 
@@ -499,13 +525,18 @@ class AipPlan extends Model
      * The reviewer approves the submitted plan — this is the only path that
      * sets 'approved'; nothing marks a plan approved implicitly.
      */
-    public function markApproved(User $reviewer, ?string $remarks = null): void
+    public function markApproved(User $reviewer, ?string $remarks = null): ?User
     {
         $previous = (string) $this->status;
+        $nextReviewer = self::nextConfiguredReviewer($reviewer);
+        $finalApproval = $nextReviewer === null;
 
-        $this->status = self::STATUS_APPROVED;
-        $this->approved_at = now();
-        $this->approved_by = $reviewer->id;
+        $this->status = $finalApproval ? self::STATUS_APPROVED : self::STATUS_FORWARDED;
+        $this->approved_at = $finalApproval ? now() : null;
+        $this->approved_by = $finalApproval ? $reviewer->id : null;
+        if ($nextReviewer !== null) {
+            $this->assigned_to = $nextReviewer->id;
+        }
         $this->reviewed_at = now();
         $this->review_remarks = $remarks;
         $this->save();
@@ -518,6 +549,8 @@ class AipPlan extends Model
             'new_status' => self::STATUS_APPROVED,
             'reviewed_at' => now(),
         ]);
+
+        return $nextReviewer;
     }
 
     /**
@@ -556,24 +589,64 @@ class AipPlan extends Model
     }
 
     /**
-     * The configured first reviewer (by username) — the same convention the
-     * OPCRF workflow uses. Null when unset or the account is gone, in which
-     * case the plan is unassigned and visible to every superadmin.
+     * The first configured AIP reviewer (by username). The chain allows a
+     * Viewer at its first step and administrative accounts at later steps.
      */
     public static function configuredReviewerId(): ?int
     {
-        $username = trim((string) config('opcrf.review_route', ''));
+        return static::configuredReviewers()->first()?->id;
+    }
 
-        if ($username === '') {
-            return null;
+    /** The next configured reviewer after the person taking this step. */
+    public static function nextConfiguredReviewer(User $reviewer): ?User
+    {
+        $reviewers = static::configuredReviewers();
+        $currentIndex = $reviewers->search(
+            static fn (User $candidate): bool => (int) $candidate->id === (int) $reviewer->id,
+        );
+
+        return $currentIndex === false ? null : $reviewers->get($currentIndex + 1);
+    }
+
+    /**
+     * Resolve configured usernames fresh so user IDs may differ by environment.
+     *
+     * @return \Illuminate\Support\Collection<int, User>
+     */
+    private static function configuredReviewers(): \Illuminate\Support\Collection
+    {
+        $usernames = array_values(array_unique(array_filter(array_map(
+            static fn (mixed $username): string => trim((string) $username),
+            [
+                config('aip.review_route'),
+                config('aip.next_reviewer'),
+                config('aip.final_reviewer'),
+            ],
+        ), static fn (string $username): bool => $username !== '')));
+
+        $reviewers = collect();
+
+        foreach ($usernames as $index => $username) {
+            $reviewer = User::query()
+                ->where('username', $username)
+                ->where(function (Builder $role) use ($index): void {
+                    if ($index === 0) {
+                        $role->where('role', 'viewer')
+                            ->orWhere('is_superadmin', true)
+                            ->orWhere('role', 'administrator');
+                    } else {
+                        $role->where('is_superadmin', true)
+                            ->orWhere('role', 'administrator');
+                    }
+                })
+                ->first();
+
+            if ($reviewer !== null) {
+                $reviewers->push($reviewer);
+            }
         }
 
-        return User::query()
-            ->where(function (Builder $admin): void {
-                $admin->where('is_superadmin', true)->orWhere('role', 'administrator');
-            })
-            ->where('username', $username)
-            ->value('id');
+        return $reviewers;
     }
 
     /* ------------------------------------------------------------ versions */

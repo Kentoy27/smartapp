@@ -14,18 +14,16 @@ use Livewire\Component;
 use Livewire\WithPagination;
 
 /**
- * "Review AIP" — the superadmin's window into every school's Annual
- * Implementation Plan.
+ * "Review AIP" — reviewers' window into submitted Annual Implementation Plans.
  *
  * Lists submitted plans (newest first) with the school and the year, and
  * opens a review modal per row: the plan's projects and activities, the
  * archived submission versions, and the review trail. The modal's write
- * actions are approve and return-for-revision with remarks; approving is the
- * only path that marks a plan approved.
+ * actions are approve and return-for-revision with remarks; approvals move
+ * the plan through the configured chain before the final approval.
  *
- * The page is live: it listens for `aip-plan-submitted` (fired the moment an
- * owner submits) and also polls every 15s, so a new submission appears
- * without a reload. The archived versions are never overwritten by a review.
+ * The page polls every 15s, so a new submission appears without a reload.
+ * The archived versions are never overwritten by a review.
  */
 #[Title('Review AIP — SmartApp')]
 class AipReview extends Component
@@ -53,17 +51,13 @@ class AipReview extends Component
 
     /* ------------------------------------------------------------ computed */
 
-    /**
-     * Submitted plans the signed-in reviewer may see — routed to them,
-     * assigned to them, or unassigned. Drafts are excluded: they are the
-     * school's own working copy until they are submitted.
-     */
+    /** Submitted plans, including incomplete ones, visible to this reviewer. */
     #[Computed]
     public function plans()
     {
         return AipPlan::query()
             ->visibleTo(Auth::user())
-            ->where('status', '!=', AipPlan::STATUS_DRAFT)
+            ->whereNotNull('submitted_at')
             ->with(['school', 'approvedBy', 'reviewer', 'assignedTo', 'latestReview.reviewer'])
             ->withCount('projects', 'activities')
             ->orderByDesc('submitted_at')
@@ -197,16 +191,20 @@ class AipReview extends Component
 
         $remarks = trim($this->reviewRemarks) !== '' ? trim($this->reviewRemarks) : null;
 
-        $plan->markApproved(Auth::user(), $remarks);
+        $nextReviewer = $plan->markApproved(Auth::user(), $remarks);
 
-        $this->afterDecision('AIP approved.');
+        $this->afterDecision(
+            $nextReviewer
+                ? 'AIP approved and forwarded to '.$nextReviewer->name.'.'
+                : 'AIP fully approved.',
+        );
 
         $this->dispatch('aip-plan-reviewed');
     }
 
     public function returnForRevision(): void
     {
-        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+        abort_unless(Auth::user()?->canReviewAip(), 404);
 
         $plan = $this->reviewPlan;
 
@@ -253,16 +251,14 @@ class AipReview extends Component
         $this->successMessage = $message;
     }
 
-    /** Fired when an owner submits a plan — the table re-renders live. */
-    #[On('aip-plan-submitted')]
+    /** Delete a plan only when an authorized reviewer explicitly requests it. */
     public function deletePlan(int $planId): void
     {
-        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+        $user = Auth::user();
+        abort_unless($user?->canReviewAip(), 404);
 
-        $plan = AipPlan::query()->visibleTo(Auth::user())->find($planId);
-        if ($plan === null) {
-            return;
-        }
+        $plan = AipPlan::query()->visibleTo($user)->findOrFail($planId);
+        abort_unless($plan->canBeDeletedBy($user), 403);
 
         $plan->delete();
 

@@ -61,7 +61,7 @@ final class AipXlsxExporter
     public static function bytes(AipPlan $plan, ?User $exporter = null): string
     {
         if ($plan->form_data !== null) {
-            return self::formDataBytes($plan);
+            return self::formDataBytes($plan, $exporter);
         }
 
         $school = $plan->school;
@@ -311,7 +311,7 @@ final class AipXlsxExporter
         ]);
     }
 
-    private static function formDataBytes(AipPlan $plan): string
+    private static function formDataBytes(AipPlan $plan, ?User $exporter = null): string
     {
         $rows = [];
         $merges = [];
@@ -421,13 +421,14 @@ final class AipXlsxExporter
             .$mergeRow($number, 'D', 'G', self::S_LABEL, 'Reviewed by:')
         );
         $number = $rowNumber + 1;
+        $preparedBy = $exporter ?? $plan->creator;
         $addRow(
-            $mergeRow($number, 'A', 'C', self::S_PLAIN, (string) ($plan->creator?->name ?? ''))
+            $mergeRow($number, 'A', 'C', self::S_PLAIN, (string) ($preparedBy?->name ?? ''))
             .$mergeRow($number, 'D', 'G', self::S_PLAIN, (string) config('aip.template.reviewed_by.name'))
         );
         $number = $rowNumber + 1;
         $addRow(
-            $mergeRow($number, 'A', 'C', self::S_PLAIN, (string) ($plan->creator?->position ?: 'Position/Designation'))
+            $mergeRow($number, 'A', 'C', self::S_PLAIN, (string) ($preparedBy?->position ?: 'Position/Designation'))
             .$mergeRow($number, 'D', 'G', self::S_PLAIN, (string) config('aip.template.reviewed_by.role'))
         );
 

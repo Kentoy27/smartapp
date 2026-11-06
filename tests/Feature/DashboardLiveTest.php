@@ -168,12 +168,16 @@ class DashboardLiveTest extends TestCase
             ->get(route('home'))
             ->assertOk()
             ->assertSee('staff-dashboard-grid', false)
-            ->assertSee('Performance plan')
+            ->assertSee('Office Performance Commitment and Review Form (OPCRF)')
             ->assertSee('upload your commitment')
             ->assertSee('Financial plan')
             ->assertSee('Download OPCRF Template')
             ->assertSee('Upload Commitment')
-            ->assertSee('Generate and Download WFP')
+            ->assertSee('Generate and Download Work and Financial Plan')
+            ->assertSee('Upload AIP')
+            ->assertSee('wire:name="aip-submission-upload"', false)
+            ->assertDontSee('id="aip-upload-file"', false)
+            ->assertSee('Download blank AIP')
             ->assertSee(route('wfp.index'), false);
     }
 

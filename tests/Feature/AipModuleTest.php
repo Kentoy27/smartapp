@@ -434,7 +434,7 @@ class AipModuleTest extends TestCase
             ->assertHasNoErrors();
 
         $this->assertSame(AipPlan::STATUS_APPROVED, $plan->fresh()->status);
-        $review->call('deletePlan', $plan->id)->assertNotFound();
+        $review->call('deletePlan', $plan->id)->assertForbidden();
         $this->assertDatabaseHas('aip_plans', ['id' => $plan->id]);
 
         $this->actingAs($budget)

@@ -413,6 +413,29 @@ class SchoolDivisionSeparationTest extends TestCase
         $this->assertSame('SENIOR_HIGH', $head->activeDivision());
     }
 
+    public function test_the_division_switcher_is_only_shown_to_school_heads(): void
+    {
+        $school = $this->school();
+        $head = $this->schoolHead($school, 'JUNIOR_HIGH', ['JUNIOR_HIGH', 'SENIOR_HIGH']);
+
+        $this->actingAs($head)
+            ->get(route('home'))
+            ->assertOk()
+            ->assertSee('id="divisionSwitcher"', false);
+
+        foreach ([
+            User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]),
+            User::factory()->create(['role' => 'budget', 'is_superadmin' => false]),
+            User::factory()->create(['role' => 'administrator', 'is_superadmin' => false]),
+            User::factory()->create(['role' => 'superadmin', 'is_superadmin' => true]),
+        ] as $nonSchoolHead) {
+            $this->actingAs($nonSchoolHead)
+                ->get(route('home'))
+                ->assertOk()
+                ->assertDontSee('id="divisionSwitcher"', false);
+        }
+    }
+
     public function test_a_division_switch_cannot_reach_an_unauthorized_division(): void
     {
         $school = $this->school();

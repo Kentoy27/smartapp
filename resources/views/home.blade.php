@@ -19,13 +19,15 @@
                 {{ $user->hasAdminAccess()
                     ? 'Review submissions and keep your school data moving.'
                     : ($isBudgetReviewer
-                        ? 'Review submitted WFP and AIP plans.'
+                        ? 'Review submitted WFP plans.'
                         : ($user->canAccessOpcrfTemplate()
                             ? 'Your performance plan and financial plan, together in one place.'
-                            : 'View OPCRF part schedules and status.')) }}
+                        : ($user->canReviewAllOpcrfSubmissions()
+                            ? 'Review School Head AIP, OPCRF, and WFP submissions.'
+                            : 'View OPCRF part schedules and status.'))) }}
             </p>
         </div>
-        @if (! $user->hasAdminAccess() && ! $isBudgetReviewer && ! $isBookkeeper)
+        @if ($user->canAccessAip())
             <a href="{{ route('mov.index') }}" class="dashboard-welcome__link" wire:navigate>
                 <x-icon name="upload" :size="16" />
                 <span>Open MOV checklist</span>
@@ -59,11 +61,6 @@
                     </div>
                 </div>
                 <livewire:wfp-uploads-list />
-                <a href="{{ route('aip.review') }}" class="dashboard-plan-card__link" wire:navigate.hover>
-                    <x-icon name="eye" :size="14" />
-                    Review submitted AIP plans <span aria-hidden="true">→</span>
-                </a>
-
                 {{-- The per-line list the budget is checked against: every
                      school's expenditure lines, read-only. It lives beside the
                      plans the Budget office already reviews because it is the
@@ -116,6 +113,8 @@
                 </a>
             </section>
         </div>
+    @elseif ($user->canReviewAllOpcrfSubmissions())
+        <livewire:viewer-submission-stats />
     @elseif ($user->canAccessOpcrfTemplate())
         <div class="staff-dashboard-grid{{ $wfpTemplate !== null ? ' has-wfp' : '' }}">
             <section class="staff-dashboard-panel" aria-labelledby="dashboard-opcrf-heading">
@@ -162,6 +161,38 @@
                         <a href="{{ route('wfp.matrices.index') }}" class="dashboard-plan-card__link" wire:navigate.hover>
                             <x-icon name="file-spreadsheet" :size="14" />
                             Monthly Expenditure Matrix <span aria-hidden="true">→</span>
+                        </a>
+                    </article>
+                </section>
+            @endif
+
+            @if ($canUploadAip)
+                <section class="staff-dashboard-panel staff-dashboard-panel--aip" aria-labelledby="dashboard-aip-heading">
+                    <div class="staff-dashboard-panel__intro">
+                        <span class="staff-dashboard-panel__step">03</span>
+                        <div>
+                            <h2 id="dashboard-aip-heading">Annual Implementation Plan (AIP)</h2>
+                            <p>Analyze and preview your completed AIP before submitting it for review.</p>
+                        </div>
+                    </div>
+
+                    <article class="card dashboard-plan-card aip-dashboard-card">
+                        <div class="aip-dashboard-card__intro">
+                            <span class="opcr-file-badge" aria-hidden="true">
+                                <x-icon name="file-spreadsheet" :size="22" />
+                            </span>
+                            <div>
+                                <h3>Upload completed AIP</h3>
+                                <p>DOCX Word document · preview the extracted rows before you submit.</p>
+                            </div>
+                        </div>
+
+                        <div class="aip-dashboard-card__actions">
+                            <livewire:aip-submission-upload :key="'aip-upload-dashboard'" />
+                            <a href="{{ route('aip.template.download') }}" class="btn-ghost btn-ghost--small">Download blank AIP</a>
+                        </div>
+                        <a href="{{ route('aip.index') }}" class="dashboard-plan-card__link" wire:navigate.hover>
+                            View AIP records <span aria-hidden="true">→</span>
                         </a>
                     </article>
                 </section>

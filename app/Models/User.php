@@ -192,7 +192,9 @@ class User extends Authenticatable
     /** Whether this account may review submitted AIP plans. */
     public function canReviewAip(): bool
     {
-        return $this->hasAdminAccess() || $this->isBudgetRole();
+        return $this->hasAdminAccess()
+            || $this->isBudgetRole()
+            || $this->canReviewAllOpcrfSubmissions();
     }
 
     /** Whether this account may read and download submitted WFP workbooks. */

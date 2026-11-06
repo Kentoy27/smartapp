@@ -50,6 +50,11 @@ class AipReview extends Model
 
     public function actionLabel(): string
     {
+        if ($this->action === self::ACTION_COMPLIANCE
+            && $this->new_status === AipPlan::STATUS_FORWARDED) {
+            return 'Approved and forwarded';
+        }
+
         return match ($this->action) {
             self::ACTION_SUBMIT => 'Submitted for Review',
             self::ACTION_COMPLIANCE => 'Approved',

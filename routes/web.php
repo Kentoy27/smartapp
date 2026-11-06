@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AipUploadController;
 use App\Http\Controllers\Auth\GoogleAuthController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\DashboardController;
@@ -15,7 +16,6 @@ use App\Models\UserMov;
 use App\Models\WfpImportLog;
 use App\Models\WfpPlan;
 use App\Models\WfpSubmission;
-use App\Support\AipXlsxExporter;
 use App\Support\MemXlsxExporter;
 use App\Support\MovEvidencePreview;
 use App\Support\OpcrfAccess;
@@ -111,31 +111,40 @@ Route::middleware('auth')->group(function () {
     })->name('procurement.app.index');
 
     /* ------------------------------------------------------------------
-     * AIP (Annual Implementation Plan) — School Head authoring, Superadmin
-     * review.
-     *
-     * Every AIP route re-checks the role AND, for a plan's own pages, that
-     * the caller may see it (the owning School Head always; a reviewer once
-     * it is submitted). The Livewire components re-check the same gates on
-     * every action, so hiding a menu item is never the boundary.
+     * AIP uploads are analyzed and submitted by School Heads. The records
+     * and previews below are scoped to the signed-in School Head's school.
      * ----------------------------------------------------------------- */
 
     Route::get('/aip', function () {
         $user = Auth::user();
         abort_unless($user instanceof User && $user->canAccessAip(), 404);
 
-        return view('aip.index');
+        $plans = $user->school_id === null
+            ? collect()
+            : AipPlan::query()
+                ->where('school_id', $user->school_id)
+                ->with(['latestReview.reviewer'])
+                ->orderByDesc('year')
+                ->orderByDesc('id')
+                ->get();
+
+        return view('aip.index', compact('plans'));
     })->name('aip.index');
 
-    Route::get('/aip-template/download', function () {
-        $user = Auth::user();
-        abort_unless($user instanceof User && $user->canAccessAip(), 404);
+    Route::get('/aip-template/download', [AipUploadController::class, 'downloadTemplate'])
+        ->name('aip.template.download');
 
-        $path = storage_path('forms/FY-2026-ANNUAL-IMPLEMENTATION-PLAN-1.docx');
-        abort_unless(is_file($path), 404);
+    Route::post('/aip/{plan}/submit', [AipUploadController::class, 'submitDraft'])
+        ->name('aip.plans.submit')->where('plan', '[0-9]+');
 
-        return response()->download($path, 'FY-2026-ANNUAL-IMPLEMENTATION-PLAN-1.docx');
-    })->name('aip.template.download');
+    Route::get('/aip/{plan}/download', [AipUploadController::class, 'downloadPlan'])
+        ->name('aip.plans.export')->where('plan', '[0-9]+');
+
+    Route::get('/aip/{plan}/preview', [AipUploadController::class, 'preview'])
+        ->name('aip.plans.preview')->where('plan', '[0-9]+');
+
+    Route::get('/aip/{plan}/source', [AipUploadController::class, 'downloadSource'])
+        ->name('aip.plans.source')->where('plan', '[0-9]+');
 
     Route::get('/sip', function () {
         $user = Auth::user();
@@ -144,9 +153,8 @@ Route::middleware('auth')->group(function () {
         return view('sip.index');
     })->name('sip.index');
 
-    // The superadmin's review queue. Declared before /aip/{plan} so the
-    // literal path is never read as a plan id (it would not match [0-9]+
-    // anyway, but the order makes the intent explicit).
+    // Reviewers can read and decide submitted AIPs; the component enforces
+    // the same permission on its actions.
     Route::get('/aip-review', function () {
         $user = Auth::user();
         abort_unless($user instanceof User && $user->canReviewAip(), 404);
@@ -155,36 +163,12 @@ Route::middleware('auth')->group(function () {
     })->name('aip.review');
 
     Route::get('/aip/{plan}', function (AipPlan $plan) {
-        $user = Auth::user();
-        abort_unless($user instanceof User && $plan->managedBy($user), 404);
-
-        return view('aip.edit', ['plan' => $plan]);
+        abort(404);
     })->name('aip.plans.edit')->where('plan', '[0-9]+');
 
-    // The plan as the printed DepEd form, for the browser's Print → Save as
-    // PDF. The owner may print their own at any time; a reviewer may print
-    // one that has been submitted.
     Route::get('/aip/{plan}/print', function (AipPlan $plan) {
-        $user = Auth::user();
-        abort_unless($plan->canBeViewedBy($user), 404);
-
-        return view('aip.print', ['plan' => $plan]);
+        abort(404);
     })->name('aip.plans.print')->where('plan', '[0-9]+');
-
-    // The plan as an .xlsx built from its own contents. Bytes are built
-    // BEFORE the response (a streamed callback's return value is discarded
-    // and would risk a 0-byte download).
-    Route::get('/aip/{plan}/export', function (AipPlan $plan) {
-        $user = Auth::user();
-        abort_unless($plan->canBeViewedBy($user), 404);
-
-        $bytes = AipXlsxExporter::bytes($plan, $user);
-
-        return response($bytes)
-            ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-            ->header('Content-Length', (string) strlen($bytes))
-            ->header('Content-Disposition', 'attachment; filename="' . AipXlsxExporter::downloadName($plan) . '"');
-    })->name('aip.plans.export')->where('plan', '[0-9]+');
 
     Route::get('/users', function () {
         $user = Auth::user();
@@ -627,8 +611,8 @@ Route::middleware('auth')->group(function () {
     })->name('opcrf.submission.signature')->where('submission', '[0-9]+');
 
     // A reviewer signature can only be fetched for a compliance action on
-    // this submission by someone allowed to read its workbook: the owner or
-    // an administrator assigned to review it.
+    // this submission by its owner, an assigned administrator, or an SDS
+    // Viewer reading a School Head submission in the in-app review.
     Route::get('/opcrf-submissions/{submission}/review-signature/{review}', function (OpcrfSubmission $submission, \App\Models\OpcrfReview $review) {
         $viewer = Auth::user();
 
@@ -636,7 +620,10 @@ Route::middleware('auth')->group(function () {
             abort(404);
         }
 
-        abort_unless($submission->canBeDownloadedBy($viewer), 404);
+        abort_unless(
+            $submission->canBeDownloadedBy($viewer) || $submission->canBeViewedBySdsViewer($viewer),
+            404
+        );
         abort_unless((int) $review->opcrf_submission_id === (int) $submission->id, 404);
         abort_unless(in_array($review->action, [
             \App\Models\OpcrfReview::ACTION_COMPLIANCE,

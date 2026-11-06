@@ -1,4 +1,4 @@
-<div class="aip-component" @unless ($showReview) wire:poll.visible.60s @endunless>
+<div class="aip-component" @unless ($showReview) wire:poll.visible.15s @endunless>
     @if ($successMessage)
         <div
             wire:key="aip-review-alert-{{ md5($successMessage) }}"
@@ -65,7 +65,7 @@
                                         <span>Review</span>
                                     </span>
                                 </button>
-                                @if (auth()->user()?->hasAdminAccess())
+                                @if ($plan->canBeDeletedBy(auth()->user()))
                                     <button
                                         type="button"
                                         class="users-action users-action--danger"
@@ -322,7 +322,9 @@
                     @else
                         <p class="field-hint">
                             @if ($reviewPlan->isApproved())
-                                This plan is approved.
+                                This plan has received its final approval.
+                            @elseif ($reviewPlan->status === \App\Models\AipPlan::STATUS_FORWARDED)
+                                This plan has been forwarded to {{ $reviewPlan->assignedTo?->name ?? 'the next reviewer' }}.
                             @elseif ($reviewPlan->isReturned())
                                 This plan is back with the school for revision.
                             @else

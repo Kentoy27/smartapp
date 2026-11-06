@@ -127,7 +127,7 @@
                                     'rating' => (string) $this->viewingSubmission->self_rating,
                                     'full' => false,
                                     'rateeSignature' => $this->viewingSubmission->rateeSignature(),
-                                    'reviewSignatures' => [],
+                                    'reviewSignatures' => $this->viewingSubmission->reviewerSignatures(),
                                     'reviewerRemarks' => $this->viewingSubmission->reviewer_remarks ?? [],
                                     'canEditObjectiveRemarks' => false,
                                     'workbook' => $this->viewingWorkbook ?? ['tabs' => [], 'part_two' => ['sections' => [], 'total_rows' => [], 'signers' => [], 'scale' => ['title' => '', 'levels' => []]], 'part_three' => ['components' => [], 'agreement' => [], 'overall' => null, 'rating' => '', 'rating_table' => [], 'signatures' => []], 'part_four' => ['office_plan' => [], 'office_feedback' => '', 'development_plan' => [], 'development_feedback' => '', 'signers' => [], 'sections' => []], 'extra_sheets' => []],

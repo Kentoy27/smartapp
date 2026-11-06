@@ -24,13 +24,19 @@ return [
     |
     | An AIP belongs to a SCHOOL, so its author is the School Head (SH) of
     | that school — the same gate the WFP module uses (User::canAccessAip()).
-    | The reviewer is an administrative account (superadmin/administrator),
-    | matching the OPCRF review workflow.
+    | The AIP review chain is configured by username, independently of the
+    | OPCRF route: the Viewer reviews first, then the superadmins in order.
     |
     */
 
     // The upload/export ceiling for a submitted AIP document, in kilobytes.
     'max_kb' => (int) env('AIP_MAX_KB', 10240),
+
+    'review_route' => env('AIP_REVIEW_ROUTE', 'Rebonie'),
+
+    'next_reviewer' => env('AIP_NEXT_REVIEWER', 'Eve'),
+
+    'final_reviewer' => env('AIP_FINAL_REVIEWER', 'SY'),
 
     /*
     |----------------------------------------------------------------------

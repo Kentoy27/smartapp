@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Livewire\OpcrfMovs;
 use App\Livewire\OpcrfReview;
 use App\Livewire\OpcrfUpload;
+use App\Livewire\OpcrfViewerSubmissions;
 use App\Models\OpcrfSubmission;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -227,6 +228,7 @@ class OpcrfSignatureStampTest extends TestCase
     public function test_approval_stamps_the_rater_and_final_signoff_stamps_the_approving_authority(): void
     {
         $ratee = $this->signedStaffUser();
+        $this->reviewer->update(['name' => 'Maam Eve']);
         $this->addSignatureTo($this->reviewer);
 
         $ferdinand = User::create([
@@ -257,7 +259,7 @@ class OpcrfSignatureStampTest extends TestCase
             fn (string $contents, string $name): bool => str_starts_with($name, 'xl/drawings/drawing') && str_ends_with($name, '.xml'),
             ARRAY_FILTER_USE_BOTH
         ));
-        $this->assertStringContainsString('Digital signature of Chief', $allDrawingXml);
+        $this->assertStringContainsString('Digital signature of Maam Eve', $allDrawingXml);
 
         $raterReview = $submission->reviews()
             ->where('action', \App\Models\OpcrfReview::ACTION_COMPLIANCE)
@@ -267,7 +269,7 @@ class OpcrfSignatureStampTest extends TestCase
             ->test(OpcrfReview::class)
             ->call('openReview', $submission->id)
             ->assertSee(route('opcrf.review.signature', [$submission, $raterReview]), false)
-            ->assertSee('Digital signature of Chief');
+            ->assertSee('Digital signature of Maam Eve');
 
         $this->actingAs($ferdinand)
             ->get(route('opcrf.review.signature', [$submission, $raterReview]))
@@ -280,6 +282,7 @@ class OpcrfSignatureStampTest extends TestCase
             ->assertHasNoErrors();
 
         $submission->refresh();
+        $ratee->forceFill(['role' => 'user'])->save();
         $finalReview = $submission->reviews()
             ->where('action', \App\Models\OpcrfReview::ACTION_COMPLIANCE)
             ->whereNull('to_id')
@@ -289,12 +292,40 @@ class OpcrfSignatureStampTest extends TestCase
             ->call('openSubmission', $submission->id)
             ->assertSee(route('opcrf.review.signature', [$submission, $raterReview]), false)
             ->assertSee(route('opcrf.review.signature', [$submission, $finalReview]), false)
-            ->assertSee('Digital signature of Chief')
+            ->assertSee('Digital signature of Maam Eve')
             ->assertSee('Digital signature of Ferdinand S. Sy')
             ->assertSee($raterReview->reviewed_at->format('M j, Y g:i A'))
             ->assertSee($finalReview->reviewed_at->format('M j, Y g:i A'))
             ->html();
         $this->assertSame(3, substr_count($rateeView, 'class="opcrf-sheet-signer-date"'));
+
+        $viewer = User::create([
+            'name' => 'Rebonie F. Emboltorio',
+            'username' => 'rebonie',
+            'email' => 'rebonie@example.com',
+            'password' => Hash::make('password123'),
+            'role' => 'viewer',
+            'is_superadmin' => false,
+        ]);
+        Livewire::actingAs($viewer)
+            ->test(OpcrfViewerSubmissions::class)
+            ->call('openSubmission', $submission->id)
+            ->assertSee(route('opcrf.review.signature', [$submission, $raterReview]), false)
+            ->assertSee(route('opcrf.review.signature', [$submission, $finalReview]), false)
+            ->assertSee('Digital signature of Maam Eve')
+            ->assertSee('Digital signature of Ferdinand S. Sy');
+
+        $this->actingAs($viewer)
+            ->get(route('opcrf.review.signature', [$submission, $raterReview]))
+            ->assertOk()
+            ->assertStreamedContent($this->signaturePng());
+        $this->actingAs($viewer)
+            ->get(route('opcrf.review.signature', [$submission, $finalReview]))
+            ->assertOk()
+            ->assertStreamedContent($this->signaturePng());
+        $this->actingAs($viewer)
+            ->get(route('opcrf.submission.download', $submission))
+            ->assertNotFound();
 
         $this->actingAs($ratee)
             ->get(route('opcrf.review.signature', [$submission, $raterReview]))

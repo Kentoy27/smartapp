@@ -2,7 +2,6 @@
 
 namespace App\Livewire;
 
-use App\Models\AipPlan;
 use App\Models\MovCategory;
 use App\Models\MovPart;
 use App\Models\MovRequirement;
@@ -180,12 +179,6 @@ class Sidebar extends Component
     public ?int $opcrfCount = null;
 
     /**
-     * Number of AIP submissions still awaiting the superadmin's approval,
-     * shown as a live badge on the superadmin Review AIP item.
-     */
-    public ?int $aipCount = null;
-
-    /**
      * The navigation items, in the order they are listed.
      *
      * Role checks decide which items exist. Each item's section and order
@@ -227,20 +220,6 @@ class Sidebar extends Component
                 'icon' => 'calendar',
                 'section' => 'Files',
                 'order' => 11,
-            ];
-
-            // Review AIP: the superadmin's queue of submitted Annual
-            // Implementation Plans. The badge counts the ones still awaiting
-            // the signed-in reviewer's own action (see aipCount).
-            $items[] = [
-                'label' => 'Review AIP',
-                'route' => 'aip.review',
-                'path' => 'aip-review',
-                'icon' => 'eye',
-                'badge' => $this->aipCount,
-                'badge_title' => '%d plans awaiting your review',
-                'section' => 'Files',
-                'order' => 13,
             ];
 
             // WFP Uploads: every school's uploaded Work and Financial Plan.
@@ -328,16 +307,6 @@ class Sidebar extends Component
                 ];
             }
         } elseif (Auth::user()?->isBudgetRole()) {
-            $items[] = [
-                'label' => 'Review AIP',
-                'route' => 'aip.review',
-                'path' => 'aip-review',
-                'icon' => 'eye',
-                'badge' => $this->aipCount,
-                'badge_title' => '%d plans awaiting your review',
-                'section' => 'Files',
-                'order' => 13,
-            ];
             // The budget side of the WFP workflow is one group, like the
             // School Head's: the plans the schools uploaded, the ceiling the
             // Budget office sets, the per-line detail checked against both,
@@ -448,14 +417,12 @@ class Sidebar extends Component
                     'path' => 'wfp-submissions',
                     'icon' => 'chart-column',
                     'section' => 'Files',
-                    'order' => 14,
+                    'order' => 11,
                 ];
             }
 
-            // AIP is for the School Head (SH) role only — the school owns
-            // one Annual Implementation Plan per year, and the SH authors it.
-            // Hidden from the SDS Viewer, and unreachable by URL regardless
-            // (route guard).
+            // School Heads author their school's AIP; reviewers use the
+            // separate division-wide AIP Review page below.
             if (Auth::user()?->canAccessAip()) {
                 $items[] = [
                     'label' => 'AIP',
@@ -463,7 +430,18 @@ class Sidebar extends Component
                     'path' => 'aip',
                     'icon' => 'file-spreadsheet',
                     'section' => 'Files',
-                    'order' => 13,
+                    'order' => 9,
+                ];
+            }
+
+            if (Auth::user()?->canReviewAllOpcrfSubmissions()) {
+                $items[] = [
+                    'label' => 'AIP Review',
+                    'route' => 'aip.review',
+                    'path' => 'aip-review',
+                    'icon' => 'file-spreadsheet',
+                    'section' => 'Files',
+                    'order' => 9,
                 ];
             }
 
@@ -478,22 +456,20 @@ class Sidebar extends Component
                 ];
             }
 
-            // The MOV checklist is its own page, deliberately not folded
-            // into the OPCR upload: the checklist is the standing set of
-            // evidence documents, and it is worked on independently of any
-            // one submission's cycle. It carries the whole checklist as a
-            // navigation tree — Part → Category → KRA → MOV — plus progress
-            // of the person reading it.
-            $items[] = [
-                'label' => 'MOV',
-                'route' => 'mov.index',
-                'path' => 'movs',
-                'icon' => 'upload',
-                'section' => 'MOV',
-                'order' => 20,
-                'panel' => 'mov',
-                'children' => $this->movTree(),
-            ];
+            // School Heads upload their own evidence against the standing
+            // MOV checklist; reviewers do not need this upload navigation.
+            if (Auth::user()?->canAccessAip()) {
+                $items[] = [
+                    'label' => 'MOV',
+                    'route' => 'mov.index',
+                    'path' => 'movs',
+                    'icon' => 'upload',
+                    'section' => 'MOV',
+                    'order' => 20,
+                    'panel' => 'mov',
+                    'children' => $this->movTree(),
+                ];
+            }
 
             // Account Classifications is an administrative page (see the
             // hasAdminAccess() branch above), so it is not offered to staff.
@@ -923,31 +899,6 @@ class Sidebar extends Component
     }
 
     /**
-     * Fired the moment an AIP is submitted, and again once a decision lands
-     * — the superadmin's badge follows without a reload.
-     */
-    #[On('aip-plan-submitted')]
-    #[On('aip-plan-reviewed')]
-    public function refreshAipBadge(): void
-    {
-        if (Auth::user()?->canReviewAip()) {
-            $this->aipCount = $this->pendingAipPlans();
-        }
-    }
-
-    /**
-     * AIP submissions still awaiting the signed-in reviewer's own action.
-     */
-    private function pendingAipPlans(): int
-    {
-        $user = Auth::user();
-
-        return $user instanceof User
-            ? AipPlan::awaitingReviewFrom($user)->count()
-            : 0;
-    }
-
-    /**
      * Submissions still awaiting the signed-in superadmin's own action —
      * the current holder of the review step counts a row, not the original
      * reviewer it auto-routed onward from (Eve sees a forwarded submission
@@ -969,12 +920,6 @@ class Sidebar extends Component
         } else {
             $this->usersCount = null;
             $this->opcrfCount = null;
-        }
-
-        if (Auth::user()?->canReviewAip()) {
-            $this->aipCount = $this->pendingAipPlans();
-        } else {
-            $this->aipCount = null;
         }
 
         return view('livewire.sidebar');
