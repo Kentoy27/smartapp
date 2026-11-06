@@ -184,6 +184,68 @@ final class OpcrfSignatureStamper
     }
 
     /**
+     * Stamp an image into a fixed range in the workbook's first worksheet.
+     *
+     * @throws RuntimeException when the range is invalid or the workbook is unreadable
+     */
+    public static function stampAtRange(
+        string $workbookBytes,
+        string $signatureBytes,
+        string $range,
+        string $extension = 'png',
+        ?string $signerName = null
+    ): ?string {
+        if (trim($signatureBytes) === '') {
+            return null;
+        }
+
+        if (preg_match('/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/', $range, $matches) !== 1) {
+            throw new RuntimeException('The signature range is invalid.');
+        }
+
+        $firstColumn = $matches[1];
+        $firstRow = (int) $matches[2];
+        $lastColumn = $matches[3];
+        $lastRow = (int) $matches[4];
+
+        if (self::columnIndex($lastColumn) <= self::columnIndex($firstColumn)
+            || $lastRow <= $firstRow
+            || $firstRow < 1) {
+            throw new RuntimeException('The signature range must cover a positive worksheet area.');
+        }
+
+        $format = self::detectExtension($signatureBytes, $extension);
+        $parts = self::readParts($workbookBytes);
+        $sheetPart = self::worksheetParts($parts)[0] ?? null;
+
+        if ($sheetPart === null) {
+            return null;
+        }
+
+        $anchor = [
+            'from_col' => self::columnIndex($firstColumn) - 1,
+            'from_row' => $firstRow - 1,
+            'to_col' => self::columnIndex($lastColumn),
+            'to_row' => $lastRow - 1,
+            'first_column' => $firstColumn,
+            'last_column' => $lastColumn,
+            'first_row' => $firstRow,
+            'last_row' => $lastRow - 1,
+            'geometry' => self::sheetGeometry($parts[$sheetPart], $firstRow, $lastRow - 1),
+        ];
+        $mediaPart = self::freeMediaPart($parts, $format);
+        $parts[$mediaPart] = $signatureBytes;
+        $parts['[Content_Types].xml'] = self::declareImageType(
+            $parts['[Content_Types].xml'] ?? '',
+            $format
+        );
+
+        $parts = self::stampSheet($parts, $sheetPart, $anchor, $mediaPart, $signerName);
+
+        return PurePhpZipWriter::create($parts);
+    }
+
+    /**
      * Verify that stamped images sit over an actual signer slot, not a
      * same-named role label elsewhere in the worksheet header.
      */

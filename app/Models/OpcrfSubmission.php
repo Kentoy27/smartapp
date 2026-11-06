@@ -1014,7 +1014,8 @@ class OpcrfSubmission extends Model
         ?string $remarks = null,
         ?User $routeTo = null,
         string $action = OpcrfReview::ACTION_COMPLIANCE,
-        ?DateTimeInterface $reviewedAt = null
+        ?DateTimeInterface $reviewedAt = null,
+        array $objectiveRemarks = []
     ): void {
         $reviewedAt ??= now();
         $current = $this->assigned_to ?? $this->reviewer_id;
@@ -1029,6 +1030,7 @@ class OpcrfSubmission extends Model
             'reviewer_id' => $reviewer->id,
             'action' => $action,
             'remarks' => $remarks,
+            'objective_remarks' => $objectiveRemarks === [] ? null : $objectiveRemarks,
             'from_id' => $this->reviewer_id === $reviewer->id ? null : $this->reviewer_id,
             'to_id' => $routeTo?->id,
             'previous_status' => $previousStatus,
@@ -1053,7 +1055,7 @@ class OpcrfSubmission extends Model
      * an "OPCRF Returned" notification. The workbook stays exactly as
      * uploaded — resubmission archives it alongside the revision.
      */
-    public function returnForRevision(User $reviewer, ?string $remarks = null): void
+    public function returnForRevision(User $reviewer, ?string $remarks = null, array $objectiveRemarks = []): void
     {
         $previousStatus = (string) $this->status;
 
@@ -1068,6 +1070,7 @@ class OpcrfSubmission extends Model
             'reviewer_id' => $reviewer->id,
             'action' => OpcrfReview::ACTION_RETURN,
             'remarks' => $remarks,
+            'objective_remarks' => $objectiveRemarks === [] ? null : $objectiveRemarks,
             // The reviewer is the sender: the history table shows the
             // return as "reviewer → staff member".
             'from_id' => $this->reviewer_id,

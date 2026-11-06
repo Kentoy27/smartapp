@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * An Annual Implementation Plan (AIP) for one school and one year — the
@@ -152,6 +153,92 @@ class AipPlan extends Model
     public function latestReview(): HasOne
     {
         return $this->hasOne(AipReview::class, 'aip_plan_id')->latestOfMany();
+    }
+
+    /**
+     * The School Head signature for the latest submitted version, if one is
+     * available on the account that submitted it.
+     *
+     * @return array{url: string, name: string, position: string|null, signed_at: string}|null
+     */
+    public function submitterSignature(): ?array
+    {
+        if ($this->submitted_at === null) {
+            return null;
+        }
+
+        $submission = $this->reviews()
+            ->whereIn('action', [AipReview::ACTION_SUBMIT, AipReview::ACTION_RESUBMIT])
+            ->with('reviewer')
+            ->reorder('id', 'desc')
+            ->first();
+        $submitter = $submission?->reviewer;
+
+        if ($submitter === null || ! $submitter->hasSignature()
+            || ! Storage::disk('local')->exists((string) $submitter->signature_path)) {
+            return null;
+        }
+
+        return [
+            'url' => route('aip.signature', ['plan' => $this, 'signer' => $submitter]),
+            'name' => (string) ($submitter->name ?: $submitter->username),
+            'position' => $submitter->position,
+            'signed_at' => $submission->reviewed_at?->format('M j, Y g:i A') ?? '',
+        ];
+    }
+
+    /**
+     * Signatures from the configured AIP reviewers, keyed by their form slot.
+     * A signature is shown only after that reviewer has approved this plan.
+     *
+     * @return array<string, array{url: string, name: string, signed_at: string}>
+     */
+    public function reviewerSignatures(): array
+    {
+        if ($this->submitted_at === null) {
+            return [];
+        }
+
+        $submission = $this->reviews()
+            ->whereIn('action', [AipReview::ACTION_SUBMIT, AipReview::ACTION_RESUBMIT])
+            ->reorder('id', 'desc')
+            ->first();
+
+        if ($submission === null) {
+            return [];
+        }
+
+        $slots = ['reviewed_by', 'recommending_approval', 'approved_by'];
+        $reviewers = static::configuredReviewers();
+        $signatures = [];
+
+        foreach ($slots as $index => $slot) {
+            $reviewer = $reviewers->get($index);
+
+            if ($reviewer === null || ! $reviewer->hasSignature()
+                || ! Storage::disk('local')->exists((string) $reviewer->signature_path)) {
+                continue;
+            }
+
+            $approval = $this->reviews()
+                ->where('id', '>', $submission->id)
+                ->where('reviewer_id', $reviewer->id)
+                ->where('action', AipReview::ACTION_COMPLIANCE)
+                ->reorder('id', 'desc')
+                ->first();
+
+            if ($approval === null) {
+                continue;
+            }
+
+            $signatures[$slot] = [
+                'url' => route('aip.signature', ['plan' => $this, 'signer' => $reviewer]),
+                'name' => (string) ($reviewer->name ?: $reviewer->username),
+                'signed_at' => $approval->reviewed_at?->format('M j, Y g:i A') ?? '',
+            ];
+        }
+
+        return $signatures;
     }
 
     /* --------------------------------------------------------- presentation */
@@ -336,8 +423,10 @@ class AipPlan extends Model
     /* -------------------------------------------------------- scope helpers */
 
     /**
-     * Plans a reviewer may see: the ones routed to them, the ones currently
-     * assigned to them, plus any unassigned so a record is never stranded.
+     * Plans a reviewer may see: ones routed to them, currently assigned to
+     * them, ones they have already reviewed, or unassigned legacy records.
+     * Prior reviewers retain read access after forwarding, but can no longer
+     * act on the plan.
      */
     public function scopeVisibleTo(Builder $query, User $reviewer): Builder
     {
@@ -348,6 +437,8 @@ class AipPlan extends Model
         return $query->where(function (Builder $routed) use ($reviewer): void {
             $routed->where('reviewer_id', $reviewer->id)
                 ->orWhere('assigned_to', $reviewer->id)
+                ->orWhereHas('reviews', fn (Builder $reviews): Builder => $reviews
+                    ->where('reviewer_id', $reviewer->id))
                 ->orWhere(function (Builder $unassigned): void {
                     $unassigned->whereNull('reviewer_id')->whereNull('assigned_to');
                 });

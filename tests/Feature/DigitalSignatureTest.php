@@ -15,7 +15,7 @@ use Tests\TestCase;
  * The digital signature, on the account it belongs to.
  *
  * A signature belongs to an ACCOUNT, not to a role: the same component —
- * hosted by the account menu's "Digital Signature" dialog on every page —
+ * hosted by the account menu's "Electronic Signature" dialog on every page —
  * serves a user and a superadmin, so the access tests below always walk both.
  * The upload is deliberately two-step —
  * picking a file previews it and writes nothing until Save — and the stored
@@ -79,9 +79,9 @@ class DigitalSignatureTest extends TestCase
             // the page renders no signature block of its own.
             $response->assertSeeLivewire('profile.digital-signature-modal')
                 ->assertSee('data-modal-event="open-signature-modal"', false)
-                ->assertSee('Digital Signature')
+                ->assertSee('Electronic Signature')
                 ->assertDontSeeLivewire('profile.digital-signature')
-                ->assertDontSee('Upload Digital Signature')
+                ->assertDontSee('Upload Electronic Signature')
                 ->assertDontSee('transparent PNG');
 
             // Nothing to change or remove on the page either.
@@ -379,7 +379,7 @@ class DigitalSignatureTest extends TestCase
             ->call('openRemoveModal')
             ->assertSet('showRemoveModal', true)
             ->assertSee('modal-backdrop is-open', false)
-            ->assertSee('Remove Digital Signature')
+            ->assertSee('Remove Electronic Signature')
             ->assertSee('Are you sure you want to remove');
 
         $this->assertTrue($account->refresh()->hasSignature());
@@ -391,7 +391,7 @@ class DigitalSignatureTest extends TestCase
             ->assertSet('showRemoveModal', false)
             ->assertSee('Digital signature removed.')
             ->assertSee('Not uploaded')
-            ->assertSee('Upload Digital Signature');
+            ->assertSee('Upload Electronic Signature');
 
         $account->refresh();
 

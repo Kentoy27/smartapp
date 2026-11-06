@@ -885,6 +885,43 @@ class OpcrfReviewTest extends TestCase
             ->assertSee('Submission received');
     }
 
+    public function test_returned_objective_remarks_are_saved_and_shown_in_review_history(): void
+    {
+        Storage::fake('local');
+
+        $admin = $this->superadmin();
+        $staff = $this->staffUser();
+        $submission = $this->createSubmission($staff, ['reviewer_id' => $admin->id]);
+        $workbookPath = $this->buildThreePartOpcrf();
+        $storedPath = 'opcrf-submissions/'.$staff->id.'/remarks.xlsx';
+        Storage::disk('local')->put($storedPath, file_get_contents($workbookPath));
+        $submission->update([
+            'file_path' => $storedPath,
+            'file_original_name' => 'OPCRF-TEMPLATE.xlsx',
+        ]);
+
+        Livewire::actingAs($admin)
+            ->test(OpcrfReview::class)
+            ->call('openReview', $submission->id)
+            ->set('objectiveRemarks.0.0', 'Clarify the target measurement.')
+            ->call('returnSubmission')
+            ->assertSet('showReview', false);
+
+        $review = $submission->fresh()->latestReview;
+        $this->assertSame(
+            [0 => [0 => 'Clarify the target measurement.']],
+            $review->objective_remarks
+        );
+        // Existing review records kept objective comments only on the current
+        // submission; the history view still shows those legacy remarks.
+        $review->forceFill(['objective_remarks' => null])->save();
+
+        Livewire::actingAs($admin)
+            ->test(OpcrfReview::class)
+            ->call('openReview', $submission->id)
+            ->assertSee('Part 1 — Objective 1: Clarify the target measurement.');
+    }
+
     public function test_returning_for_revision_needs_no_decision_remarks(): void
     {
         $admin = $this->superadmin();

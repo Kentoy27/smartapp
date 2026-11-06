@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\Models\AipActivity;
+use App\Models\AipReview;
 use App\Models\AipPlan;
 use App\Models\AipProject;
 use App\Models\User;
@@ -61,7 +62,15 @@ final class AipXlsxExporter
     public static function bytes(AipPlan $plan, ?User $exporter = null): string
     {
         if ($plan->form_data !== null) {
-            return self::formDataBytes($plan, $exporter);
+            $signatureRow = null;
+            $approvalSignatureRow = null;
+            $bytes = self::formDataBytes($plan, $exporter, $signatureRow, $approvalSignatureRow);
+
+            if ($signatureRow === null) {
+                return $bytes;
+            }
+
+            return self::stampSignatures($bytes, $plan, $exporter, $signatureRow, $approvalSignatureRow);
         }
 
         $school = $plan->school;
@@ -219,6 +228,7 @@ final class AipXlsxExporter
         );
 
         $r = $row + 1;
+        $signatureRow = $r;
         $addRow(
             self::cell($r, 'A', self::S_PLAIN, '')
             .self::cell($r, 'D', self::S_PLAIN, '')
@@ -226,8 +236,9 @@ final class AipXlsxExporter
         );
 
         $r = $row + 1;
+        $preparedBy = self::submitter($plan, $exporter);
         $addRow(
-            self::cell($r, 'A', self::S_PLAIN, $exporter?->name ?? '')
+            self::cell($r, 'A', self::S_PLAIN, $preparedBy?->name ?? '')
             .self::cell($r, 'D', self::S_PLAIN, $plan->approvedBy?->name ?? '')
             .self::cell($r, 'G', self::S_PLAIN, '')
         );
@@ -256,7 +267,8 @@ final class AipXlsxExporter
             .'<sheetData>';
 
         foreach ($rows as $number => $cellsXml) {
-            $sheetXml .= '<row r="'.$number.'">'.$cellsXml.'</row>';
+            $height = $number === $signatureRow ? ' ht="32" customHeight="1"' : '';
+            $sheetXml .= '<row r="'.$number.'"'.$height.'>'.$cellsXml.'</row>';
         }
 
         $sheetXml .= '</sheetData>';
@@ -276,7 +288,7 @@ final class AipXlsxExporter
             .'<pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/>'
             .'</worksheet>';
 
-        return PurePhpZipWriter::create([
+        $bytes = PurePhpZipWriter::create([
             '[Content_Types].xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
                 .'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
                 .'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
@@ -309,10 +321,16 @@ final class AipXlsxExporter
 
             'xl/worksheets/sheet1.xml' => $sheetXml,
         ]);
+
+        return self::stampSignatures($bytes, $plan, $exporter, $signatureRow);
     }
 
-    private static function formDataBytes(AipPlan $plan, ?User $exporter = null): string
-    {
+    private static function formDataBytes(
+        AipPlan $plan,
+        ?User $exporter,
+        ?int &$signatureRow,
+        ?int &$approvalSignatureRow,
+    ): string {
         $rows = [];
         $merges = [];
         $rowNumber = 0;
@@ -421,7 +439,13 @@ final class AipXlsxExporter
             .$mergeRow($number, 'D', 'G', self::S_LABEL, 'Reviewed by:')
         );
         $number = $rowNumber + 1;
-        $preparedBy = $exporter ?? $plan->creator;
+        $signatureRow = $number;
+        $preparedBy = self::submitter($plan, $exporter);
+        $addRow(
+            $mergeRow($number, 'A', 'C', self::S_PLAIN, '')
+            .$mergeRow($number, 'D', 'G', self::S_PLAIN, '')
+        );
+        $number = $rowNumber + 1;
         $addRow(
             $mergeRow($number, 'A', 'C', self::S_PLAIN, (string) ($preparedBy?->name ?? ''))
             .$mergeRow($number, 'D', 'G', self::S_PLAIN, (string) config('aip.template.reviewed_by.name'))
@@ -436,6 +460,12 @@ final class AipXlsxExporter
         $addRow(
             $mergeRow($number, 'A', 'C', self::S_LABEL, 'Recommending Approval')
             .$mergeRow($number, 'D', 'G', self::S_LABEL, 'Approved:')
+        );
+        $number = $rowNumber + 1;
+        $approvalSignatureRow = $number;
+        $addRow(
+            $mergeRow($number, 'A', 'C', self::S_PLAIN, '')
+            .$mergeRow($number, 'D', 'G', self::S_PLAIN, '')
         );
         $number = $rowNumber + 1;
         $addRow(
@@ -461,7 +491,8 @@ final class AipXlsxExporter
             .'</cols><sheetData>';
 
         foreach ($rows as $number => $cells) {
-            $sheetXml .= '<row r="'.$number.'">'.$cells.'</row>';
+            $height = $number === $signatureRow ? ' ht="32" customHeight="1"' : '';
+            $sheetXml .= '<row r="'.$number.'"'.$height.'>'.$cells.'</row>';
         }
 
         $sheetXml .= '</sheetData>';
@@ -499,6 +530,115 @@ final class AipXlsxExporter
             'xl/styles.xml' => self::stylesXml(),
             'xl/worksheets/sheet1.xml' => $sheetXml,
         ]);
+    }
+
+    private static function stampSignatures(
+        string $bytes,
+        AipPlan $plan,
+        ?User $exporter,
+        int $signatureRow,
+        ?int $approvalSignatureRow = null,
+    ): string {
+        $signers = self::signatureSigners($plan, $exporter, $approvalSignatureRow !== null);
+        $slotWidths = [
+            0 => ['start' => 0, 'widths' => [30, 32, 26]],
+            1 => ['start' => 3, 'widths' => [34, 22, 22]],
+            2 => ['start' => 6, 'widths' => [16]],
+        ];
+
+        if ($approvalSignatureRow !== null) {
+            $slotWidths = [
+                0 => ['start' => 0, 'widths' => [34, 25, 36]],
+                1 => ['start' => 3, 'widths' => [28, 30, 24, 30]],
+                2 => ['start' => 0, 'widths' => [34, 25, 36], 'row' => $approvalSignatureRow],
+                3 => ['start' => 3, 'widths' => [28, 30, 24, 30], 'row' => $approvalSignatureRow],
+            ];
+        }
+
+        return AipSignatureStamper::stamp(
+            $bytes,
+            $signers,
+            $signatureRow,
+            $slotWidths,
+        );
+    }
+
+    /**
+     * Only the submitter and reviewers for the latest submitted version are
+     * included, so signatures from an earlier returned version are not reused.
+     *
+     * @return array<int, array{user: User, slot: int}>
+     */
+    private static function signatureSigners(AipPlan $plan, ?User $exporter, bool $fourSlots): array
+    {
+        $submission = $plan->reviews()
+            ->whereIn('action', [AipReview::ACTION_SUBMIT, AipReview::ACTION_RESUBMIT])
+            ->with('reviewer')
+            ->reorder('id', 'desc')
+            ->first();
+        $submitter = $submission?->reviewer;
+        $submitter = $submitter instanceof User ? $submitter : ($exporter ?? $plan->creator);
+        $approvals = $plan->reviews()
+            ->when($submission !== null, fn ($query) => $query->where('id', '>', $submission->id))
+            ->where('action', AipReview::ACTION_COMPLIANCE)
+            ->with('reviewer')
+            ->orderBy('id')
+            ->get()
+            ->pluck('reviewer')
+            ->filter(fn ($reviewer): bool => $reviewer instanceof User)
+            ->unique('id')
+            ->values();
+
+        $approver = $plan->isApproved() ? ($plan->approvedBy ?? $approvals->last()) : null;
+        if ($fourSlots) {
+            $slots = [0 => $submitter];
+            $nextReviewerSlot = 1;
+
+            foreach ($approvals as $reviewer) {
+                if ($approver instanceof User && (int) $reviewer->id === (int) $approver->id) {
+                    $slots[3] = $reviewer;
+                    continue;
+                }
+
+                $lastReviewerSlot = $approver instanceof User ? 2 : 3;
+
+                if ($nextReviewerSlot <= $lastReviewerSlot) {
+                    $slots[$nextReviewerSlot++] = $reviewer;
+                }
+            }
+
+            if ($approver instanceof User && ! $approvals->contains('id', $approver->id)) {
+                $slots[3] = $approver;
+            }
+        } else {
+            $reviewer = $approvals->first(
+                fn (User $candidate): bool => ! ($approver instanceof User)
+                    || (int) $candidate->id !== (int) $approver->id,
+            );
+            $slots = [0 => $submitter, 1 => $reviewer, 2 => $approver];
+        }
+
+        $signers = [];
+
+        foreach ($slots as $slot => $signer) {
+            if ($signer instanceof User) {
+                $signers[$slot] = ['user' => $signer, 'slot' => $slot];
+            }
+        }
+
+        return $signers;
+    }
+
+    private static function submitter(AipPlan $plan, ?User $exporter): ?User
+    {
+        $submitter = $plan->reviews()
+            ->whereIn('action', [AipReview::ACTION_SUBMIT, AipReview::ACTION_RESUBMIT])
+            ->with('reviewer')
+            ->reorder('id', 'desc')
+            ->first();
+        $submitter = $submitter?->reviewer;
+
+        return $submitter instanceof User ? $submitter : ($exporter ?? $plan->creator);
     }
 
     /** The export's file name. */

@@ -162,6 +162,41 @@ Route::middleware('auth')->group(function () {
         return view('aip.review');
     })->name('aip.review');
 
+    Route::get('/aip/{plan}/signature/{signer}', function (AipPlan $plan, User $signer) {
+        $viewer = Auth::user();
+
+        if (! ($viewer instanceof User)) {
+            abort(404);
+        }
+
+        abort_unless($plan->submitted_at !== null, 404);
+        abort_unless(
+            $plan->managedBy($viewer)
+                || AipPlan::query()->visibleTo($viewer)->whereKey($plan->id)->exists(),
+            404
+        );
+
+        $latestSubmission = $plan->reviews()
+            ->whereIn('action', [
+                \App\Models\AipReview::ACTION_SUBMIT,
+                \App\Models\AipReview::ACTION_RESUBMIT,
+            ])
+            ->reorder('id', 'desc')
+            ->first();
+        $isSubmitter = $latestSubmission !== null
+            && (int) $latestSubmission->reviewer_id === (int) $signer->id;
+        $isApprovingReviewer = $latestSubmission !== null && $plan->reviews()
+            ->where('id', '>', $latestSubmission->id)
+            ->where('reviewer_id', $signer->id)
+            ->where('action', \App\Models\AipReview::ACTION_COMPLIANCE)
+            ->exists();
+
+        abort_unless($isSubmitter || $isApprovingReviewer, 404);
+        abort_unless($signer->hasSignature(), 404);
+
+        return $signer->signatureImageResponse();
+    })->name('aip.signature')->where(['plan' => '[0-9]+', 'signer' => '[0-9]+']);
+
     Route::get('/aip/{plan}', function (AipPlan $plan) {
         abort(404);
     })->name('aip.plans.edit')->where('plan', '[0-9]+');

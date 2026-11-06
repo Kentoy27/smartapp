@@ -5,7 +5,7 @@
 @section('content')
     <div class="page-header">
         <h1>Profile</h1>
-        <p>Your account details. One profile serves every role — the signature SmartApp stamps onto the documents it generates for you is managed from <strong>Digital Signature</strong> in the account menu.</p>
+        <p>Your account details. One profile serves every role — the signature SmartApp stamps onto the documents it generates for you is managed from <strong>Electronic Signature</strong> in the account menu.</p>
     </div>
 
     @php($account = Auth::user())
@@ -48,7 +48,7 @@
         </div>
     </div>
 
-    {{-- The digital signature is not repeated here: the account menu's
-         "Digital Signature" dialog hosts that component on every page (see
+    {{-- The electronic signature is not repeated here: the account menu's
+         "Electronic Signature" dialog hosts that component on every page (see
          layouts.dashboard), so this page keeps the account summary alone. --}}
 @endsection

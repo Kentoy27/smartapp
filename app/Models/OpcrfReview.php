@@ -7,8 +7,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * One entry in a submission's review history: a superadmin's action
- * (compliance/approve, forward, return-for-revision) with their remarks and
- * the routing (from → to). Rows are immutable — the trail is the record.
+ * (compliance/approve, forward, return-for-revision) with their general and
+ * objective remarks and the routing (from → to). Rows are immutable — the trail is the record.
  *
  * Actions:
  *   compliance — the reviewer approved the submission (status →
@@ -42,6 +42,7 @@ class OpcrfReview extends Model
         'reviewer_id',
         'action',
         'remarks',
+        'objective_remarks',
         'from_id',
         'to_id',
         'previous_status',
@@ -51,6 +52,7 @@ class OpcrfReview extends Model
 
     protected $casts = [
         'reviewed_at' => 'datetime',
+        'objective_remarks' => 'array',
     ];
 
     public function submission(): BelongsTo

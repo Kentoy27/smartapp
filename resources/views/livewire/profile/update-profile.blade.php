@@ -130,36 +130,84 @@
                     {{-- PASSWORD: optional, and never shown again once saved. --}}
                     <div class="field">
                         <label for="profileCurrentPassword">Current password</label>
-                        <input
-                            id="profileCurrentPassword"
-                            type="password"
-                            autocomplete="current-password"
-                            wire:model="current_password"
-                            @class(['error' => $errors->has('current_password')])
-                        >
+                        <div class="password-wrap" x-data="{ revealed: false }">
+                            <input
+                                id="profileCurrentPassword"
+                                type="password"
+                                x-bind:type="revealed ? 'text' : 'password'"
+                                autocomplete="current-password"
+                                wire:model="current_password"
+                                @class(['error' => $errors->has('current_password')])
+                            >
+                            <button
+                                type="button"
+                                class="password-toggle"
+                                x-on:click="revealed = !revealed"
+                                x-bind:class="{ revealed: revealed }"
+                                x-bind:aria-pressed="revealed.toString()"
+                                x-bind:aria-label="revealed ? 'Hide current password' : 'Show current password'"
+                                x-bind:title="revealed ? 'Hide current password' : 'Show current password'"
+                            >
+                                <x-icon name="eye" :size="18" class="icon-eye" />
+                                <x-icon name="eye-off" :size="18" class="icon-eye-off" />
+                            </button>
+                        </div>
                         <div class="field-hint">Only needed when you are setting a new password.</div>
+                        @error('current_password') <div class="error-text">{{ $message }}</div> @enderror
                     </div>
 
                     <div class="field">
                         <label for="profileNewPassword">New password</label>
-                        <input
-                            id="profileNewPassword"
-                            type="password"
-                            autocomplete="new-password"
-                            wire:model="password"
-                            @class(['error' => $errors->has('password')])
-                        >
+                        <div class="password-wrap" x-data="{ revealed: false }">
+                            <input
+                                id="profileNewPassword"
+                                type="password"
+                                x-bind:type="revealed ? 'text' : 'password'"
+                                autocomplete="new-password"
+                                wire:model="password"
+                                @class(['error' => $errors->has('password')])
+                            >
+                            <button
+                                type="button"
+                                class="password-toggle"
+                                x-on:click="revealed = !revealed"
+                                x-bind:class="{ revealed: revealed }"
+                                x-bind:aria-pressed="revealed.toString()"
+                                x-bind:aria-label="revealed ? 'Hide new password' : 'Show new password'"
+                                x-bind:title="revealed ? 'Hide new password' : 'Show new password'"
+                            >
+                                <x-icon name="eye" :size="18" class="icon-eye" />
+                                <x-icon name="eye-off" :size="18" class="icon-eye-off" />
+                            </button>
+                        </div>
                         <div class="field-hint">At least 8 characters. Leave this blank to keep your current password.</div>
+                        @error('password') <div class="error-text">{{ $message }}</div> @enderror
                     </div>
 
                     <div class="field">
                         <label for="profilePasswordConfirmation">Confirm new password</label>
-                        <input
-                            id="profilePasswordConfirmation"
-                            type="password"
-                            autocomplete="new-password"
-                            wire:model="password_confirmation"
-                        >
+                        <div class="password-wrap" x-data="{ revealed: false }">
+                            <input
+                                id="profilePasswordConfirmation"
+                                type="password"
+                                x-bind:type="revealed ? 'text' : 'password'"
+                                autocomplete="new-password"
+                                wire:model="password_confirmation"
+                            >
+                            <button
+                                type="button"
+                                class="password-toggle"
+                                x-on:click="revealed = !revealed"
+                                x-bind:class="{ revealed: revealed }"
+                                x-bind:aria-pressed="revealed.toString()"
+                                x-bind:aria-label="revealed ? 'Hide password confirmation' : 'Show password confirmation'"
+                                x-bind:title="revealed ? 'Hide password confirmation' : 'Show password confirmation'"
+                            >
+                                <x-icon name="eye" :size="18" class="icon-eye" />
+                                <x-icon name="eye-off" :size="18" class="icon-eye-off" />
+                            </button>
+                        </div>
+                        @error('password_confirmation') <div class="error-text">{{ $message }}</div> @enderror
                     </div>
 
                     <div class="modal-actions">

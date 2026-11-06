@@ -57,7 +57,7 @@ body {
 body.no-scroll { overflow: hidden; }
 
 .layout { display: flex; flex: 1; min-height: 100vh; }
-.content-area { display: flex; flex-direction: column; flex: 1; min-width: 0; overflow: hidden; }
+.content-area { display: flex; flex-direction: column; flex: 1; min-width: 0; overflow: visible; }
 
 .header {
     background: var(--bg-panel);
@@ -70,8 +70,10 @@ body.no-scroll { overflow: hidden; }
     justify-content: flex-start;
     flex-shrink: 0;
     transition: padding 0.25s ease;
-    position: relative;
+    position: sticky;
+    top: 0;
     z-index: 100;
+    box-shadow: 0 1px 5px rgba(15, 23, 42, 0.06);
 }
 
 .header.collapsed { padding: 0 12px; }
@@ -139,7 +141,7 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
 .sidebar .nav-item .nav-badge { margin-left: auto; background: var(--primary); color: #fff; font-size: 0.6875rem; font-weight: 700; padding: 1px 7px; border-radius: 999px; line-height: 1.4; }
 .layout.collapsed .sidebar .nav-item .nav-badge { display: none; }
 
-.main { flex: 1; min-width: 0; padding: 32px; overflow-y: auto; }
+.main { flex: 1; min-width: 0; padding: 32px; overflow-y: visible; }
 .main .page-header { margin-bottom: 24px; }
 .main .page-header h1 { font-size: 1.5rem; font-weight: 700; color: var(--text-strong); }
 .main .page-header p { color: var(--text-muted); font-size: 0.875rem; margin-top: 4px; }
@@ -251,11 +253,47 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
     outline-offset: 2px;
 }
 
+.dashboard-workspaces {
+    margin-top: 4px;
+}
+
+.dashboard-workspaces__head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 0 2px 12px;
+}
+
+.dashboard-workspaces__head h2 {
+    color: var(--text-strong);
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+.dashboard-workspaces__head p {
+    margin-top: 3px;
+    color: var(--text-muted);
+    font-size: 0.8125rem;
+}
+
 .staff-dashboard-grid {
     display: grid;
     grid-template-columns: minmax(0, 1.15fr) minmax(290px, 0.85fr);
     align-items: start;
     gap: 16px;
+}
+
+.staff-dashboard-grid--school-head.has-wfp {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.staff-dashboard-grid--school-head.has-wfp .staff-dashboard-panel--aip {
+    grid-column: 1 / -1;
+}
+
+.staff-dashboard-grid--school-head:not(.has-wfp) {
+    grid-template-columns: minmax(0, 1fr);
 }
 
 .staff-dashboard-panel {
@@ -461,6 +499,21 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
 
 .staff-dashboard-panel--aip .dashboard-plan-card {
     gap: 14px;
+}
+
+.staff-dashboard-grid--school-head.has-wfp .aip-dashboard-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(220px, auto) auto;
+    align-items: center;
+    gap: 18px;
+}
+
+.staff-dashboard-grid--school-head.has-wfp .aip-dashboard-card__actions {
+    justify-content: flex-end;
+}
+
+.staff-dashboard-grid--school-head.has-wfp .aip-dashboard-card > .dashboard-plan-card__link {
+    white-space: nowrap;
 }
 
 .aip-dashboard-card__intro {
@@ -1274,6 +1327,26 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
     .staff-dashboard-grid {
         grid-template-columns: minmax(0, 1fr);
     }
+
+    .staff-dashboard-grid--school-head.has-wfp {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .staff-dashboard-grid--school-head.has-wfp .staff-dashboard-panel--aip {
+        grid-column: auto;
+    }
+
+    .staff-dashboard-grid--school-head.has-wfp .aip-dashboard-card {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .staff-dashboard-grid--school-head.has-wfp .aip-dashboard-card__actions {
+        justify-content: flex-start;
+    }
+
+    .staff-dashboard-grid--school-head.has-wfp .aip-dashboard-card > .dashboard-plan-card__link {
+        white-space: normal;
+    }
 }
 
 @media (max-width: 560px) {
@@ -1281,6 +1354,10 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
         align-items: flex-start;
         flex-direction: column;
         padding: 20px;
+    }
+
+    .dashboard-workspaces__head {
+        margin-bottom: 10px;
     }
 
     .viewer-submission-overview {
@@ -2068,6 +2145,8 @@ body.sorting .mem-drag-handle { cursor: grabbing; }
 .aip-template-signature { display: flex; flex-direction: column; min-width: 0; gap: 3px; }
 .aip-template-signature strong { margin-top: 22px; }
 .aip-template-signatures--review { padding-inline: 0; }
+.aip-review-signature { display: block; width: min(100%, 180px); height: 42px; margin: 4px 0 2px; object-fit: contain; object-position: left center; }
+.aip-review-signature-date { display: block; margin: 0 0 2px; color: var(--text-muted); font-size: 0.68rem; }
 @media (max-width: 560px) { .aip-template-signatures { grid-template-columns: 1fr; } }
 .aip-wfp-note { margin: 0 0 4px; }
 .aip-title-card { padding: 18px 22px; border-left: 4px solid var(--border); transition: border-color 0.2s ease; }
@@ -2281,7 +2360,7 @@ body.sorting .mem-drag-handle { cursor: grabbing; }
 .profile-meta-value { color: var(--text-strong); word-break: break-word; }
 
 /* ==========================================================================
-   DIGITAL SIGNATURE CARD
+   ELECTRONIC SIGNATURE CARD
    ========================================================================== */
 .sig-card { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-card); padding: 20px 22px 22px; }
 .sig-card-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; }
@@ -2300,6 +2379,23 @@ body.sorting .mem-drag-handle { cursor: grabbing; }
 .sig-alert-close:hover { opacity: 1; }
 
 .sig-grid { display: grid; grid-template-columns: minmax(220px, 320px) 1fr; gap: 22px; margin-top: 18px; }
+.sig-method-switch { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; max-width: 520px; margin-top: 18px; padding: 5px; border: 1px solid var(--border); border-radius: 11px; background: var(--bg-muted); }
+.sig-method-button { display: inline-flex; min-height: 42px; align-items: center; justify-content: center; gap: 8px; padding: 9px 14px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text-muted); font: inherit; font-size: 0.875rem; font-weight: 600; line-height: 1.25; cursor: pointer; transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s; }
+.sig-method-button:hover { border-color: var(--border); background: var(--bg-panel); color: var(--text-strong); }
+.sig-method-button.is-active { border-color: var(--primary); background: var(--bg-panel); color: var(--primary-strong); box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1); }
+.sig-method-button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.sig-draw-panel { margin-top: 20px; padding: 20px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elevated); }
+.sig-draw-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 12px; }
+.sig-draw-heading h3 { margin: 0; color: var(--text-strong); font-size: 0.9375rem; font-weight: 700; }
+.sig-draw-heading p { margin: 4px 0 0; color: var(--text-muted); font-size: 0.8125rem; }
+.sig-draw-hint { color: var(--text-faint); font-size: 0.75rem; }
+.sig-draw-board { position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-panel); box-shadow: inset 0 1px 3px rgba(15, 23, 42, 0.04); }
+.sig-draw-board canvas { position: relative; z-index: 1; display: block; width: 100%; height: 320px; touch-action: none; cursor: crosshair; }
+.sig-draw-baseline { position: absolute; right: 24px; bottom: 58px; left: 24px; border-bottom: 1px solid var(--border); }
+.sig-draw-placeholder { position: absolute; top: 50%; left: 50%; color: var(--text-faint); font-size: 0.875rem; pointer-events: none; transform: translate(-50%, -50%); }
+.sig-draw-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; margin-top: 14px; }
+.sig-draw-actions .btn-primary, .sig-draw-actions .btn-ghost { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.sig-draw-actions button:disabled { opacity: 0.55; cursor: not-allowed; }
 /* Stacked until the details column has room to be read as a table: at 820px
    the preview (320px) left it 131px wide, which broke "Not uploaded" inside
    a word. The preview is capped at 320px, so two columns only pay off once
@@ -2315,6 +2411,13 @@ body.sorting .mem-drag-handle { cursor: grabbing; }
         justify-content: center;
         width: 100%;
     }
+    .sig-method-switch { max-width: none; }
+    .sig-method-button { min-height: 44px; padding: 8px 10px; font-size: 0.8125rem; }
+    .sig-draw-panel { padding: 14px; }
+    .sig-draw-board canvas { height: 280px; }
+    .sig-draw-baseline { right: 16px; bottom: 48px; left: 16px; }
+    .sig-draw-actions { flex-direction: column-reverse; }
+    .sig-draw-actions .btn-primary, .sig-draw-actions .btn-ghost { width: 100%; }
     .profile-card { padding: 16px; gap: 16px; }
     .profile-meta-grid { grid-template-columns: 1fr; }
     .sig-card { padding: 16px; }
@@ -2360,7 +2463,7 @@ body.sorting .mem-drag-handle { cursor: grabbing; }
 .sig-help { margin-top: 14px; color: var(--text-faint); font-size: 0.75rem; line-height: 1.5; }
 
 /* --------------------------------------------------------------------------
-   DIGITAL SIGNATURE DIALOG (account menu)
+   ELECTRONIC SIGNATURE DIALOG (account menu)
    The dialog hosts the signature card, so it needs the room the card's two
    columns want, a bare close row (the card's own heading follows it), and the
    card's frame turned off — the dialog panel is the frame now.

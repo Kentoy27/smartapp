@@ -168,6 +168,8 @@ class DashboardLiveTest extends TestCase
             ->get(route('home'))
             ->assertOk()
             ->assertSee('staff-dashboard-grid', false)
+            ->assertSee('Your workspaces')
+            ->assertSee('dashboard-workspaces', false)
             ->assertSee('Office Performance Commitment and Review Form (OPCRF)')
             ->assertSee('upload your commitment')
             ->assertSee('Financial plan')

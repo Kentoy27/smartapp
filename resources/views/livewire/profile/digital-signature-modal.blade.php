@@ -1,4 +1,4 @@
-{{-- The "Digital Signature" dialog, opened from the account menu.
+{{-- The "Electronic Signature" dialog, opened from the account menu.
 
      The body is the real signature component, so the upload flow and the
      confirmed removal are the ones DigitalSignatureTest owns. Only the dialog
@@ -14,7 +14,7 @@
              @click="self && $wire.closeModal()"
              x-on:keydown.escape.window="$wire.closeModal()"
              role="presentation">
-            <div class="modal modal--signature" role="dialog" aria-modal="true" aria-label="Digital Signature" @click.stop>
+            <div class="modal modal--signature" role="dialog" aria-modal="true" aria-label="Electronic Signature" @click.stop>
                 <div class="modal-head modal-head--bare">
                     <button type="button" class="modal-close" wire:click="closeModal" aria-label="Close" title="Close">×</button>
                 </div>

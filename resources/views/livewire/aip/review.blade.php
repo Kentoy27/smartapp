@@ -197,11 +197,31 @@
                                 </table>
                             </div>
                             <p class="aip-template-note">Note: Rows may be added as needed.</p>
+                            @php($submitterSignature = $reviewPlan->submitterSignature())
+                            @php($reviewerSignatures = $reviewPlan->reviewerSignatures())
                             <div class="aip-template-signatures aip-template-signatures--review">
-                                <div><strong>Prepared by:</strong> {{ $reviewPlan->creator?->name }}<br>{{ $reviewPlan->creator?->position ?: 'Position/Designation' }}</div>
-                                <div><strong>Reviewed by:</strong> {{ config('aip.template.reviewed_by.name') }}<br>{{ config('aip.template.reviewed_by.role') }}</div>
-                                <div><strong>Recommending Approval</strong><br>{{ config('aip.template.recommending_approval.name') }}<br>{{ config('aip.template.recommending_approval.role') }}</div>
-                                <div><strong>Approved:</strong><br>{{ config('aip.template.approved_by.name') }}<br>{{ config('aip.template.approved_by.role') }}</div>
+                                <div>
+                                    <strong>Prepared by:</strong>
+                                    @if ($submitterSignature)
+                                        <img class="aip-review-signature" src="{{ $submitterSignature['url'] }}" alt="Digital signature of {{ $submitterSignature['name'] }}">
+                                        @if ($submitterSignature['signed_at'] !== '')
+                                            <span class="aip-review-signature-date">Submitted {{ $submitterSignature['signed_at'] }}</span>
+                                        @endif
+                                    @endif
+                                    {{ $submitterSignature['name'] ?? $reviewPlan->creator?->name }}<br>
+                                    {{ ($submitterSignature['position'] ?? null) ?: ($reviewPlan->creator?->position ?: 'Position/Designation') }}
+                                </div>
+                                @foreach (['reviewed_by' => 'Reviewed by:', 'recommending_approval' => 'Recommending Approval', 'approved_by' => 'Approved:'] as $slot => $label)
+                                    @php($signatory = config('aip.template.'.$slot))
+                                    <div>
+                                        <strong>{{ $label }}</strong>
+                                        @if (isset($reviewerSignatures[$slot]))
+                                            <img class="aip-review-signature" src="{{ $reviewerSignatures[$slot]['url'] }}" alt="Digital signature of {{ $reviewerSignatures[$slot]['name'] }}">
+                                            <span class="aip-review-signature-date">{{ $reviewerSignatures[$slot]['signed_at'] }}</span>
+                                        @endif
+                                        {{ $signatory['name'] }}<br>{{ $signatory['role'] }}
+                                    </div>
+                                @endforeach
                             </div>
                         @else
                         @forelse ($contents['projects'] ?? [] as $pi => $project)

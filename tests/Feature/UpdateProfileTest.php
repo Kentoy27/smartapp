@@ -74,6 +74,12 @@ class UpdateProfileTest extends TestCase
             ->call('openModal')
             ->assertSet('showModal', true)
             ->assertSee('Update My Profile')
+            ->assertSee('id="profileCurrentPassword"', false)
+            ->assertSee('id="profileNewPassword"', false)
+            ->assertSee('id="profilePasswordConfirmation"', false)
+            ->assertSee('Show current password')
+            ->assertSee('Show new password')
+            ->assertSee('Show password confirmation')
             ->assertSee('Save changes');
     }
 
@@ -247,10 +253,14 @@ class UpdateProfileTest extends TestCase
             ->set('password_confirmation', 'new-password-1')
             ->call('save')
             ->assertHasNoErrors()
+            ->assertSet('showModal', false)
+            ->assertRedirect(route('login'))
+            ->assertSessionHas('success', 'Your password has been updated. Please sign in again.')
             // The typed password is not kept in the form once it is saved.
             ->assertSet('current_password', '')
             ->assertSet('password', '')
-            ->assertSet('password_confirmation', '');
+            ->assertSet('password_confirmation', '')
+            ->assertGuest();
 
         $this->assertTrue(Hash::check('new-password-1', $account->refresh()->password));
     }

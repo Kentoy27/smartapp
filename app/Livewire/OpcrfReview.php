@@ -419,9 +419,8 @@ class OpcrfReview extends Component
         // visible, but read-only.
         abort_unless($submission->isAssignedTo(Auth::user()), 403);
 
-        $submission->forceFill([
-            'reviewer_remarks' => $this->validatedObjectiveRemarks(),
-        ])->save();
+        $objectiveRemarks = $this->validatedObjectiveRemarks();
+        $submission->forceFill(['reviewer_remarks' => $objectiveRemarks])->save();
 
         $remarks = trim($this->reviewRemarks) !== '' ? trim($this->reviewRemarks) : null;
 
@@ -432,7 +431,13 @@ class OpcrfReview extends Component
         $signerRole = $routeTo === null ? 'APPROVING AUTHORITY' : 'RATER';
         $signedAt = now();
         $signatureStamped = $submission->stampReviewerSignature(Auth::user(), $signerRole, $signedAt);
-        $submission->markCompliant(Auth::user(), $remarks, $routeTo, reviewedAt: $signedAt);
+        $submission->markCompliant(
+            Auth::user(),
+            $remarks,
+            $routeTo,
+            reviewedAt: $signedAt,
+            objectiveRemarks: $objectiveRemarks,
+        );
 
         // The staff member's bell carries the approval and reviewer's remarks.
         $submission->user?->notify(new OpcrfDecided(
@@ -487,11 +492,10 @@ class OpcrfReview extends Component
         // original reviewer of a forwarded submission is read-only.
         abort_unless($submission->isAssignedTo(Auth::user()), 403);
 
-        $submission->forceFill([
-            'reviewer_remarks' => $this->validatedObjectiveRemarks(),
-        ])->save();
+        $objectiveRemarks = $this->validatedObjectiveRemarks();
+        $submission->forceFill(['reviewer_remarks' => $objectiveRemarks])->save();
 
-        $submission->returnForRevision(Auth::user());
+        $submission->returnForRevision(Auth::user(), objectiveRemarks: $objectiveRemarks);
 
         $this->showReview = false;
         $this->reviewId = null;

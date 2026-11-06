@@ -110,6 +110,7 @@ class UpdateProfile extends Component
         $this->successMessage = null;
 
         $validated = $this->validate();
+        $passwordChanged = filled($validated['password']);
 
         $account->name = $validated['name'];
         $account->position = $validated['position'] ?: null;
@@ -118,16 +119,17 @@ class UpdateProfile extends Component
 
         // Blank means "keep the current password" — the field is on screen
         // only so the account can change it, not as a required step.
-        if (filled($validated['password'])) {
+        if ($passwordChanged) {
             $account->password = $validated['password'];
         }
 
         $account->save();
+        $this->showModal = false;
 
         $this->resetPasswordFields();
         $this->resetValidation();
 
-        $this->successMessage = 'Your profile has been updated.';
+        $this->successMessage = null;
 
         // Keep the account menu in sync when the displayed real name changes.
         $this->dispatch(
@@ -136,6 +138,15 @@ class UpdateProfile extends Component
             username: $account->username,
             email: $account->email,
         );
+
+        if ($passwordChanged) {
+            Auth::logout();
+            request()->session()->invalidate();
+            request()->session()->regenerateToken();
+            session()->flash('success', 'Your password has been updated. Please sign in again.');
+
+            $this->redirect(route('login'), navigate: false);
+        }
     }
 
     /**

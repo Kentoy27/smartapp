@@ -370,6 +370,10 @@
                                             <span class="opcrf-history-dot" aria-hidden="true"></span>
                                         <div class="opcrf-history-body">
                                             <div class="opcrf-history-action">{{ $entry->actionLabel() }}</div>
+                                            @php($objectiveRemarks = $entry->objective_remarks ?? [])
+                                            @if ($loop->last && $entry->action === \App\Models\OpcrfReview::ACTION_RETURN && $objectiveRemarks === [])
+                                                @php($objectiveRemarks = $this->reviewSubmission()->reviewer_remarks ?? [])
+                                            @endif
                                             @if ($entry->action === \App\Models\OpcrfReview::ACTION_FORWARD && $entry->to !== null)
                                                 <div class="opcrf-history-meta">Forwarded to: <strong>{{ $entry->to->username }}</strong></div>
                                                 <div class="opcrf-history-meta">By: <strong>{{ $entry->reviewer?->username ?? '—' }}</strong></div>
@@ -384,6 +388,15 @@
                                             @if ($entry->remarks !== null && trim($entry->remarks) !== '')
                                                 <div class="opcrf-history-remarks">Remarks: {{ $entry->remarks }}</div>
                                             @endif
+                                            @foreach ($objectiveRemarks as $partIndex => $objectives)
+                                                @foreach ($objectives as $objectiveIndex => $remark)
+                                                    @if (is_string($remark) && trim($remark) !== '')
+                                                        <div class="opcrf-history-remarks">
+                                                            Part {{ (int) $partIndex + 1 }} — Objective {{ (int) $objectiveIndex + 1 }}: {{ $remark }}
+                                                        </div>
+                                                    @endif
+                                                @endforeach
+                                            @endforeach
                                             <div class="opcrf-history-meta">Date: {{ $entry->reviewed_at->format('M j, Y g:i A') }}</div>
                                         </div>
                                         </div>

@@ -116,7 +116,15 @@
     @elseif ($user->canReviewAllOpcrfSubmissions())
         <livewire:viewer-submission-stats />
     @elseif ($user->canAccessOpcrfTemplate())
-        <div class="staff-dashboard-grid{{ $wfpTemplate !== null ? ' has-wfp' : '' }}">
+        <section class="dashboard-workspaces" aria-labelledby="dashboard-workspaces-title">
+            <div class="dashboard-workspaces__head">
+                <div>
+                    <h2 id="dashboard-workspaces-title">Your workspaces</h2>
+                    <p>Prepare, manage, and follow your school’s plans.</p>
+                </div>
+            </div>
+
+        <div class="staff-dashboard-grid staff-dashboard-grid--school-head{{ $wfpTemplate !== null ? ' has-wfp' : '' }}">
             <section class="staff-dashboard-panel" aria-labelledby="dashboard-opcrf-heading">
                 <div class="staff-dashboard-panel__intro">
                     <span class="staff-dashboard-panel__step">01</span>
@@ -198,5 +206,6 @@
                 </section>
             @endif
         </div>
+        </section>
     @endif
 @endsection

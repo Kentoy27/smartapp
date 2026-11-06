@@ -22,6 +22,21 @@ class AipPageTest extends TestCase
 {
     use RefreshDatabase;
 
+    private const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFUlEQVR4nGP8z8DAwMDAwMDEAAWMDAwAKrQCAo0Y7sMAAAAASUVORK5CYII=';
+
+    private function addSignatureTo(User $user): void
+    {
+        $path = 'signatures/'.$user->id.'/aip.png';
+        Storage::disk('local')->put($path, (string) base64_decode(self::PNG, true));
+        $user->forceFill([
+            'signature_path' => $path,
+            'signature_original_name' => 'aip.png',
+            'signature_mime_type' => 'image/png',
+            'signature_uploaded_at' => now(),
+            'signature_updated_at' => now(),
+        ])->save();
+    }
+
     private function schoolHead(): User
     {
         return User::factory()->create(['role' => 'user', 'is_superadmin' => false]);
@@ -84,11 +99,23 @@ class AipPageTest extends TestCase
             'AIP should appear above OPCRF in the School Head sidebar.'
         );
 
-        // The placeholder is only listed for School Heads.
+        // School Heads author plans; reviewers only get the review queue.
         $adminItems = collect(Livewire::actingAs($this->superadmin())->test(Sidebar::class)->instance()->items());
+        $aipReview = $adminItems->firstWhere('label', 'AIP Review');
 
         $this->assertNull($adminItems->firstWhere('label', 'AIP'));
+        $this->assertNotNull($aipReview);
+        $this->assertSame('aip.review', $aipReview['route']);
+        $this->assertSame('Files', $aipReview['section']);
         $this->assertNull($adminItems->firstWhere('label', 'Review AIP'));
+
+        $sy = User::factory()->create([
+            'username' => 'SY',
+            'role' => 'superadmin',
+            'is_superadmin' => true,
+        ]);
+        $syItems = collect(Livewire::actingAs($sy)->test(Sidebar::class)->instance()->items());
+        $this->assertNotNull($syItems->firstWhere('label', 'AIP Review'));
 
         $viewer = User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]);
         $viewerItems = collect(Livewire::actingAs($viewer)->test(Sidebar::class)->instance()->items());
@@ -139,6 +166,7 @@ class AipPageTest extends TestCase
         Storage::fake('local');
         $user = $this->schoolHead();
         $user->update(['name' => 'Morgan Elena School Head', 'position' => 'School Head']);
+        $this->addSignatureTo($user);
         $district = District::create(['name' => 'District I']);
         $school = School::create(['name' => 'Alpha Elementary School', 'district_id' => $district->id]);
         $user->update(['school_id' => $school->id]);
@@ -185,6 +213,10 @@ class AipPageTest extends TestCase
             ->assertDownload('AIP 2027 - Alpha Elementary School.xlsx');
         $xlsxPath = tempnam(sys_get_temp_dir(), 'aip-download-').'.xlsx';
         file_put_contents($xlsxPath, $download->getContent());
+        $parts = (new \App\Support\PurePhpZipReader($xlsxPath))->readAll();
+        $this->assertArrayHasKey('xl/media/image1.png', $parts);
+        $drawingXml = $parts['xl/drawings/drawing1.xml'] ?? '';
+        $this->assertStringContainsString('Digital signature of Morgan Elena School Head', $drawingXml);
         $workbook = \PhpOffice\PhpSpreadsheet\IOFactory::load($xlsxPath);
         $exportedValues = [];
 
@@ -380,6 +412,7 @@ class AipPageTest extends TestCase
 
     public function test_aip_approval_routes_from_rebonie_to_eve_then_sy(): void
     {
+        Storage::fake('local');
         config([
             'aip.review_route' => 'Rebonie',
             'aip.next_reviewer' => 'Eve',
@@ -400,6 +433,8 @@ class AipPageTest extends TestCase
             'is_superadmin' => true,
         ]);
         $owner = $this->schoolHead();
+        $this->addSignatureTo($owner);
+        $this->addSignatureTo($eve);
         $district = District::create(['name' => 'District I']);
         $school = School::create(['name' => 'Alpha Elementary School', 'district_id' => $district->id]);
         $owner->update(['school_id' => $school->id]);
@@ -418,8 +453,15 @@ class AipPageTest extends TestCase
         Livewire::actingAs($rebonie)
             ->test(\App\Livewire\AipReview::class)
             ->call('openReview', $plan->id)
+            ->assertSee(route('aip.signature', ['plan' => $plan, 'signer' => $owner]), false)
+            ->assertDontSee(route('aip.signature', ['plan' => $plan, 'signer' => $eve]), false)
             ->call('approve')
             ->assertSet('successMessage', 'AIP approved and forwarded to Eve.');
+
+        $this->actingAs($rebonie)
+            ->get(route('aip.signature', ['plan' => $plan, 'signer' => $owner]))
+            ->assertOk()
+            ->assertStreamedContent((string) base64_decode(self::PNG, true));
 
         $plan->refresh();
         $this->assertSame(AipPlan::STATUS_FORWARDED, $plan->status);
@@ -441,6 +483,36 @@ class AipPageTest extends TestCase
         $this->assertNull($plan->approved_at);
         $this->assertFalse($plan->isAssignedTo($eve));
         $this->assertTrue($plan->isAssignedTo($sy));
+        $eveQueue = Livewire::actingAs($eve)->test(\App\Livewire\AipReview::class);
+        $this->assertSame(1, $eveQueue->instance()->plans->total());
+        $this->assertNotNull(AipPlan::query()->visibleTo($eve)->find($plan->id));
+        Livewire::actingAs($eve)
+            ->test(\App\Livewire\AipReview::class)
+            ->call('openReview', $plan->id)
+            ->assertSet('showReview', true)
+            ->assertSee('Forwarded to Superadmin SY');
+        Livewire::actingAs($eve)
+            ->test(\App\Livewire\AipReview::class)
+            ->call('openReview', $plan->id)
+            ->call('approve')
+            ->assertForbidden();
+
+        Livewire::actingAs($sy)
+            ->test(\App\Livewire\AipReview::class)
+            ->call('openReview', $plan->id)
+            ->assertSee(route('aip.signature', ['plan' => $plan, 'signer' => $owner]), false)
+            ->assertSee(route('aip.signature', ['plan' => $plan, 'signer' => $eve]), false);
+
+        $this->actingAs($sy)
+            ->get(route('aip.signature', ['plan' => $plan, 'signer' => $eve]))
+            ->assertOk()
+            ->assertStreamedContent((string) base64_decode(self::PNG, true));
+
+        $unrelated = User::factory()->create();
+        $this->addSignatureTo($unrelated);
+        $this->actingAs($sy)
+            ->get(route('aip.signature', ['plan' => $plan, 'signer' => $unrelated]))
+            ->assertNotFound();
 
         Livewire::actingAs($sy)
             ->test(\App\Livewire\AipReview::class)

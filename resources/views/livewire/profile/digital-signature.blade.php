@@ -1,4 +1,4 @@
-{{-- The Digital Signature card — one account, one signature. The same card is
+{{-- The Electronic Signature card — one account, one signature. The same card is
      rendered on the profile page for a user and for a superadmin; only the
      account behind it differs.
 
@@ -15,6 +15,103 @@
         clientError: null,
         maxKb: {{ (int) $maxKb }},
         allowed: ['image/png', 'image/jpeg', 'image/webp'],
+        mode: 'upload',
+        drawing: false,
+        hasInk: false,
+        pixelRatio: 1,
+        context: null,
+        initCanvas(canvas) {
+            if (canvas.clientWidth < 1) return;
+            this.pixelRatio = Math.max(window.devicePixelRatio || 1, 1);
+            canvas.width = Math.round(canvas.clientWidth * this.pixelRatio);
+            canvas.height = Math.round(canvas.clientHeight * this.pixelRatio);
+            this.context = canvas.getContext('2d');
+            this.context.scale(this.pixelRatio, this.pixelRatio);
+            this.context.strokeStyle = '#0f172a';
+            this.context.lineWidth = 2.4;
+            this.context.lineCap = 'round';
+            this.context.lineJoin = 'round';
+        },
+        openDrawing() {
+            this.mode = 'draw';
+            this.$nextTick(() => {
+                if (! this.context) this.initCanvas(this.$refs.drawCanvas);
+            });
+        },
+        startDrawing(event) {
+            if (this.mode !== 'draw' || ! this.context) return;
+            this.drawing = true;
+            this.hasInk = true;
+            event.currentTarget.setPointerCapture(event.pointerId);
+            this.context.beginPath();
+            this.context.arc(event.offsetX, event.offsetY, this.context.lineWidth / 2, 0, Math.PI * 2);
+            this.context.fill();
+            this.context.beginPath();
+            this.context.moveTo(event.offsetX, event.offsetY);
+        },
+        continueDrawing(event) {
+            if (! this.drawing || ! this.context) return;
+            this.context.lineTo(event.offsetX, event.offsetY);
+            this.context.stroke();
+        },
+        stopDrawing() {
+            this.drawing = false;
+        },
+        clearDrawing() {
+            if (! this.context) return;
+            this.context.clearRect(0, 0, this.$refs.drawCanvas.clientWidth, this.$refs.drawCanvas.clientHeight);
+            this.hasInk = false;
+        },
+        useDrawing() {
+            if (! this.hasInk) {
+                this.clientError = 'Please draw your signature before continuing.';
+                return;
+            }
+
+            const source = this.$refs.drawCanvas;
+            const pixels = this.context.getImageData(0, 0, source.width, source.height).data;
+            let left = source.width;
+            let top = source.height;
+            let right = -1;
+            let bottom = -1;
+
+            for (let y = 0; y < source.height; y++) {
+                for (let x = 0; x < source.width; x++) {
+                    if (pixels[(y * source.width + x) * 4 + 3] === 0) continue;
+                    left = Math.min(left, x);
+                    top = Math.min(top, y);
+                    right = Math.max(right, x);
+                    bottom = Math.max(bottom, y);
+                }
+            }
+
+            if (right < left || bottom < top) {
+                this.clientError = 'Please draw your signature before continuing.';
+                return;
+            }
+
+            const padding = Math.round(8 * this.pixelRatio);
+            const width = right - left + 1;
+            const height = bottom - top + 1;
+            const cropped = document.createElement('canvas');
+            cropped.width = width + padding * 2;
+            cropped.height = height + padding * 2;
+            cropped.getContext('2d').drawImage(source, left, top, width, height, padding, padding, width, height);
+
+            cropped.toBlob((blob) => {
+                if (! blob) {
+                    this.clientError = 'The drawn signature could not be prepared. Please try again.';
+                    return;
+                }
+
+                const file = new File([blob], 'drawn-signature.png', { type: 'image/png' });
+                const transfer = new DataTransfer();
+                transfer.items.add(file);
+                this.$refs.sigFile.files = transfer.files;
+                this.mode = 'upload';
+                this.$refs.sigFile.dispatchEvent(new Event('change', { bubbles: true }));
+            }, 'image/png');
+        },
         check(input) {
             this.clientError = null;
 
@@ -39,7 +136,7 @@
         <div class="sig-card-heading">
             <h2 class="sig-card-title">
                 <x-icon name="pen-line" :size="18" />
-                Digital Signature
+                Electronic Signature
             </h2>
             <p class="sig-card-sub">
                 Your signature is stamped onto the documents the system generates for you.
@@ -50,6 +147,21 @@
             <x-icon :name="$account->hasSignature() ? 'check-circle' : 'alert-triangle'" :size="14" />
             {{ $account->signatureStatusLabel() }}
         </span>
+    </div>
+
+    <div class="sig-method-switch" role="group" aria-label="Choose how to add your signature">
+        <button type="button" class="sig-method-button"
+                x-on:click="mode = 'upload'"
+                x-bind:class="{ 'is-active': mode === 'upload' }"
+                x-bind:aria-pressed="(mode === 'upload').toString()">
+            <x-icon name="upload" :size="15" /> Upload an image
+        </button>
+        <button type="button" class="sig-method-button"
+                x-on:click="openDrawing()"
+                x-bind:class="{ 'is-active': mode === 'draw' }"
+                x-bind:aria-pressed="(mode === 'draw').toString()">
+            <x-icon name="pen-line" :size="15" /> Draw a signature
+        </button>
     </div>
 
     {{-- SUCCESS / ERROR MESSAGES --}}
@@ -76,7 +188,7 @@
         </div>
     </template>
 
-    <div class="sig-grid">
+    <div class="sig-grid" x-show="mode === 'upload'" x-cloak>
 
         {{-- PREVIEW: the picked file first, then the saved signature, then
              the empty state. --}}
@@ -94,7 +206,7 @@
                         </div>
                     @endif
                 @elseif ($account->hasSignature())
-                    <img src="{{ $account->signatureUrl() }}" alt="Your saved digital signature" class="sig-preview-img">
+                    <img src="{{ $account->signatureUrl() }}" alt="Your saved electronic signature" class="sig-preview-img">
                 @else
                     <div class="sig-preview-generic">
                         <x-icon name="image" :size="28" />
@@ -162,6 +274,38 @@
         </div>
     </div>
 
+    <section class="sig-draw-panel" x-show="mode === 'draw'" x-cloak aria-label="Draw your signature">
+        <div class="sig-draw-heading">
+            <div>
+                <h3>Draw your signature</h3>
+                <p>Use your mouse, finger, or stylus inside the box.</p>
+            </div>
+            <span class="sig-draw-hint">Your drawing stays private</span>
+        </div>
+        <div class="sig-draw-board">
+            <canvas
+                x-ref="drawCanvas"
+                x-init="initCanvas($el)"
+                x-on:pointerdown="startDrawing($event)"
+                x-on:pointermove="continueDrawing($event)"
+                x-on:pointerup="stopDrawing()"
+                x-on:pointercancel="stopDrawing()"
+                aria-label="Signature drawing board"
+                tabindex="0"
+            ></canvas>
+            <span class="sig-draw-baseline" aria-hidden="true"></span>
+            <span class="sig-draw-placeholder" x-show="!hasInk" x-cloak>Sign here</span>
+        </div>
+        <div class="sig-draw-actions">
+            <button type="button" class="btn-ghost" x-on:click="clearDrawing()" x-bind:disabled="!hasInk">
+                <x-icon name="trash" :size="15" /> Clear board
+            </button>
+            <button type="button" class="btn-primary" x-on:click="useDrawing()">
+                <x-icon name="check" :size="15" /> Use this signature
+            </button>
+        </div>
+    </section>
+
     {{-- INSTRUCTIONS --}}
     <div class="sig-instructions">
         <span>Accepted formats: <strong>{{ $formatHint }}</strong>.</span>
@@ -174,10 +318,10 @@
         {{-- The real file input is visually hidden and opened by its label, so
              the button keeps the page's styling while staying a native picker
              (keyboard and screen-reader friendly). --}}
-        <label class="btn-primary sig-file-label" for="signatureFile">
+        <label class="btn-primary sig-file-label" for="signatureFile" x-show="mode === 'upload'">
             <x-icon name="upload" :size="16" />
             <span wire:loading.remove wire:target="signature">
-                {{ $account->hasSignature() ? 'Change Signature' : 'Upload Digital Signature' }}
+                {{ $account->hasSignature() ? 'Change Signature' : 'Upload Electronic Signature' }}
             </span>
             <span wire:loading wire:target="signature">Uploading…</span>
         </label>
@@ -230,13 +374,13 @@
          role="presentation">
         <div class="modal modal--confirmation" role="dialog" aria-modal="true" aria-labelledby="signatureRemoveTitle" @click.stop>
             <div class="modal-head">
-                <h2 id="signatureRemoveTitle">Remove Digital Signature</h2>
+                <h2 id="signatureRemoveTitle">Remove Electronic Signature</h2>
                 <button type="button" class="modal-close" wire:click="closeRemoveModal" aria-label="Close" title="Close">×</button>
             </div>
 
             <div class="modal-form">
                 <p class="delete-modal-description">
-                    Are you sure you want to remove your digital signature?
+                    Are you sure you want to remove your electronic signature?
                     @if ($account->signature_original_name)
                         <strong>{{ $account->signature_original_name }}</strong> will be deleted.
                     @endif

@@ -9,7 +9,7 @@
     {{-- The version is bumped whenever dashboard.css changes: browsers that
          cached an older copy keep painting the stale sheet at the same URL,
          which is why a broken stylesheet can survive a fresh deploy. --}}
-    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=43">
+    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=47">
     <title>@yield('title', 'Dashboard — SmartApp')</title>
     <script>
         /* Apply the saved theme before first paint to avoid a flash.
@@ -108,7 +108,7 @@
             flex-direction: column;
             flex: 1;
             min-width: 0;
-            overflow: hidden;
+            overflow: visible;
         }
 
         /* ---------- HEADER ---------- */
@@ -123,8 +123,10 @@
             justify-content: flex-start;
             flex-shrink: 0;
             transition: padding 0.25s ease;
-            position: relative;
+            position: sticky;
+            top: 0;
             z-index: 100;
+            box-shadow: 0 1px 5px rgba(15, 23, 42, 0.06);
         }
 
         .header.collapsed {
@@ -4950,7 +4952,7 @@
         .main {
             flex: 1;
             padding: 32px;
-            overflow-y: auto;
+            overflow-y: visible;
         }
 
         .main .page-header {
@@ -7001,6 +7003,184 @@
             align-items: center;
         }
 
+        .opcrf-history-menu {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .opcrf-history-menu-trigger {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            padding: 8px 10px;
+            border: 0;
+            border-radius: 8px;
+            background: none;
+            color: var(--text-faint);
+            font: inherit;
+            font-size: 0.8125rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: color 0.15s, background 0.15s;
+        }
+
+        .opcrf-history-menu-trigger:hover,
+        .opcrf-history-menu-trigger.open {
+            background: var(--bg-hover);
+            color: var(--text-strong);
+        }
+
+        .opcrf-history-menu-trigger:focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: 2px;
+        }
+
+        .opcrf-history-menu-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 17px;
+            height: 17px;
+            padding: 0 4px;
+            border-radius: 999px;
+            background: var(--primary);
+            color: #fff;
+            font-size: 0.625rem;
+            font-weight: 700;
+            line-height: 1;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .opcrf-history-menu-panel {
+            position: absolute;
+            top: calc(100% + 10px);
+            right: 0;
+            z-index: 200;
+            width: min(440px, calc(100vw - 24px));
+            display: none;
+            flex-direction: column;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            box-shadow: var(--shadow-dropdown);
+            overflow: hidden;
+        }
+
+        .opcrf-history-menu-panel.open {
+            display: flex;
+        }
+
+        .opcrf-history-menu-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .opcrf-history-menu-title {
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .opcrf-history-menu-head a {
+            color: var(--primary-strong);
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-decoration: none;
+        }
+
+        .opcrf-history-menu-list {
+            max-height: min(560px, 70vh);
+            overflow-y: auto;
+        }
+
+        .opcrf-history-menu-submission {
+            border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+        }
+
+        .opcrf-history-menu-submission summary {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 12px 14px;
+            color: var(--text-strong);
+            font-size: 0.8125rem;
+            cursor: pointer;
+            list-style: none;
+        }
+
+        .opcrf-history-menu-submission summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .opcrf-history-menu-school {
+            display: grid;
+            gap: 3px;
+            min-width: 0;
+            font-weight: 700;
+        }
+
+        .opcrf-history-menu-school small,
+        .opcrf-history-menu-events,
+        .opcrf-history-menu-entry-meta,
+        .opcrf-history-menu-entry time {
+            color: var(--text-faint);
+            font-size: 0.6875rem;
+            font-weight: 500;
+        }
+
+        .opcrf-history-menu-events {
+            flex: none;
+        }
+
+        .opcrf-history-menu-timeline {
+            padding: 0 14px 8px;
+        }
+
+        .opcrf-history-menu-entry {
+            padding: 9px 0;
+            border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+        }
+
+        .opcrf-history-menu-entry-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            color: var(--text-strong);
+            font-size: 0.75rem;
+        }
+
+        .opcrf-history-menu-entry-head time {
+            flex: none;
+        }
+
+        .opcrf-history-menu-entry-meta {
+            margin-top: 3px;
+        }
+
+        .opcrf-history-menu-remarks {
+            margin: 6px 0 0;
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            line-height: 1.45;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+
+        .opcrf-history-menu-empty {
+            padding: 18px 14px;
+            color: var(--text-muted);
+            font-size: 0.8125rem;
+        }
+
         .opcrf-taskbar-trigger {
             position: relative;
             display: inline-flex;
@@ -7225,6 +7405,13 @@
         }
 
         @media (max-width: 560px) {
+            .opcrf-history-menu-panel {
+                position: fixed;
+                top: 60px;
+                left: 10px;
+                right: 10px;
+                width: auto;
+            }
             .opcrf-taskbar-panel {
                 position: fixed;
                 top: 60px;
@@ -7444,6 +7631,9 @@
                          beside the theme toggle and the account menu. --}}
                     @auth
                         <livewire:notifications-menu />
+                        @if (Auth::user()->is_superadmin)
+                            <livewire:opcrf-review-history-menu />
+                        @endif
                         @if (Auth::user()->canViewOpcrfParts() && Auth::user()->canAccessStaffPages())
                             <livewire:opcrf-tasks-menu />
                         @endif
@@ -7497,7 +7687,7 @@
                             <x-icon name="user-round" :size="16" /> Update My Profile
                         </button>
                         <button type="button" class="user-dropdown-link" role="menuitem" data-modal-event="open-signature-modal">
-                            <x-icon name="pen-line" :size="16" /> Digital Signature
+                            <x-icon name="pen-line" :size="16" /> Electronic Signature
                         </button>
                         <form method="POST" action="{{ route('logout') }}">
                             @csrf

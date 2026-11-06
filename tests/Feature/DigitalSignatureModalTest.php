@@ -9,7 +9,7 @@ use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
- * The "Digital Signature" dialog behind the account menu.
+ * The "Electronic Signature" dialog behind the account menu.
  *
  * The dialog is only a shell: it hosts the one signature component, so the
  * upload flow is not re-tested here (DigitalSignatureTest owns that). What
@@ -50,10 +50,10 @@ class DigitalSignatureModalTest extends TestCase
     {
         Livewire::actingAs($this->staff())->test(DigitalSignatureModal::class)
             ->assertSet('showModal', false)
-            ->assertDontSee('Digital Signature')
+            ->assertDontSee('Electronic Signature')
             ->call('openModal')
             ->assertSet('showModal', true)
-            ->assertSee('Digital Signature');
+            ->assertSee('Electronic Signature');
     }
 
     public function test_the_dialog_closes_again(): void
@@ -63,7 +63,7 @@ class DigitalSignatureModalTest extends TestCase
             ->assertSet('showModal', true)
             ->call('closeModal')
             ->assertSet('showModal', false)
-            ->assertDontSee('Digital Signature');
+            ->assertDontSee('Electronic Signature');
     }
 
     public function test_the_dialog_mounts_the_real_signature_component(): void
@@ -77,7 +77,8 @@ class DigitalSignatureModalTest extends TestCase
                 // Its contents come along: heading, status and the upload action.
                 ->assertSee('Your signature is stamped onto the documents')
                 ->assertSee('Not uploaded')
-                ->assertSee('Upload Digital Signature');
+                ->assertSee('Draw a signature')
+                ->assertSee('Upload Electronic Signature');
         }
     }
 

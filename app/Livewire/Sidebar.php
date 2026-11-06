@@ -200,6 +200,15 @@ class Sidebar extends Component
 
         if (Auth::user()?->hasAdminAccess()) {
             $items[] = [
+                'label' => 'AIP Review',
+                'route' => 'aip.review',
+                'path' => 'aip-review',
+                'icon' => 'file-spreadsheet',
+                'section' => 'Files',
+                'order' => 9,
+            ];
+
+            $items[] = [
                 'label' => 'OPCRF',
                 'route' => 'opcrf.review',
                 'path' => 'opcrf-review',

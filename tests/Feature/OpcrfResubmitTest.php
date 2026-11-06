@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Livewire\OpcrfMovs;
 use App\Livewire\OpcrfReview;
+use App\Livewire\OpcrfReviewHistoryMenu;
 use App\Livewire\OpcrfTasksMenu;
 use App\Models\OpcrfSubmission;
 use App\Models\User;
@@ -174,6 +175,91 @@ class OpcrfResubmitTest extends TestCase
             ->assertSee('Correct the timeline and update Section 3.')
             ->assertSee('Clarify the target measurement.')
             ->assertSee('Update the supporting evidence.');
+    }
+
+    public function test_superadmin_topbar_history_shows_school_head_resubmissions_and_reviewer_remarks(): void
+    {
+        $eve = $this->superadmin();
+        $eve->update(['username' => 'Eve']);
+        $sy = User::create([
+            'name' => 'Superadmin SY',
+            'username' => 'SY',
+            'email' => 'sy@example.com',
+            'password' => Hash::make('password123'),
+            'is_superadmin' => true,
+        ]);
+        $staff = $this->staffUser();
+        $submission = $this->createSubmission($staff, [
+            'reviewer_id' => $eve->id,
+            'assigned_to' => $eve->id,
+        ]);
+
+        $submission->returnForRevision($eve, 'Eve: please update the evidence.');
+        $submission->resubmit();
+        $submission->forceFill([
+            'assigned_to' => $sy->id,
+            'status' => OpcrfSubmission::STATUS_FORWARDED,
+        ])->save();
+        $submission->reviews()->create([
+            'reviewer_id' => $eve->id,
+            'action' => \App\Models\OpcrfReview::ACTION_FORWARD,
+            'remarks' => 'Eve: forwarded the revised OPCRF to SY.',
+            'from_id' => $eve->id,
+            'to_id' => $sy->id,
+            'previous_status' => OpcrfSubmission::STATUS_RESUBMITTED,
+            'new_status' => OpcrfSubmission::STATUS_FORWARDED,
+            'reviewed_at' => now(),
+        ]);
+        $submission->reviews()->create([
+            'reviewer_id' => $sy->id,
+            'action' => \App\Models\OpcrfReview::ACTION_COMPLIANCE_FINAL,
+            'remarks' => 'SY: the revised OPCRF is complete.',
+            'from_id' => $eve->id,
+            'previous_status' => OpcrfSubmission::STATUS_FORWARDED,
+            'new_status' => OpcrfSubmission::STATUS_FOR_COMPLIANCE,
+            'reviewed_at' => now(),
+        ]);
+
+        Livewire::actingAs($eve)
+            ->test(OpcrfReviewHistoryMenu::class)
+            ->assertOk()
+            ->assertSee('OPCRF remarks history')
+            ->assertSee('staff')
+            ->assertSee('Resubmitted by staff')
+            ->assertSee('Eve: please update the evidence.')
+            ->assertSee('Eve: forwarded the revised OPCRF to SY.')
+            ->assertSee('SY: the revised OPCRF is complete.');
+
+        Livewire::actingAs($sy)
+            ->test(OpcrfReviewHistoryMenu::class)
+            ->assertOk()
+            ->assertSee('Eve: please update the evidence.')
+            ->assertSee('Eve: forwarded the revised OPCRF to SY.')
+            ->assertSee('SY: the revised OPCRF is complete.');
+    }
+
+    public function test_superadmin_history_menu_does_not_expose_unrouted_submissions_or_staff_access(): void
+    {
+        $eve = $this->superadmin();
+        $staff = $this->staffUser();
+        $other = User::create([
+            'name' => 'Unrelated Superadmin',
+            'username' => 'unrelated-admin',
+            'email' => 'unrelated-admin@example.com',
+            'password' => Hash::make('password123'),
+            'is_superadmin' => true,
+        ]);
+        $submission = $this->createSubmission($staff, ['reviewer_id' => $eve->id]);
+        $submission->returnForRevision($eve, 'Private review note.');
+
+        Livewire::actingAs($other)
+            ->test(OpcrfReviewHistoryMenu::class)
+            ->assertOk()
+            ->assertDontSee('Private review note.');
+
+        Livewire::actingAs($staff)
+            ->test(OpcrfReviewHistoryMenu::class)
+            ->assertNotFound();
     }
 
     public function test_school_head_can_mark_topbar_tasks_complete(): void
