@@ -37,6 +37,10 @@ class AipSubmissionUpload extends Component
 
     public bool $isReplacingReturned = false;
 
+    public bool $isReplacingExisting = false;
+
+    public bool $isRestartingReview = false;
+
     public function mount(): void
     {
         abort_unless(Auth::user()?->canAccessAip(), 404);
@@ -64,6 +68,8 @@ class AipSubmissionUpload extends Component
         $this->originalName = null;
         $this->analysisMessage = null;
         $this->isReplacingReturned = false;
+        $this->isReplacingExisting = false;
+        $this->isRestartingReview = false;
         $this->resetValidation('aipFile');
 
         if (! $this->aipFile instanceof TemporaryUploadedFile) {
@@ -113,12 +119,17 @@ class AipSubmissionUpload extends Component
         }
 
         $this->isReplacingReturned = $existingPlan?->isReturned() ?? false;
-        $this->analysisMessage = count($this->previewRows).' AIP row(s) found. '
-            .($this->isReplacingReturned
-                ? 'This upload will replace the returned FY '.$this->detectedYear.' AIP and resubmit it for review.'
-                : ($existingPlan !== null
-                    ? 'This upload will replace the existing FY '.$this->detectedYear.' AIP, preserve its submission history, and restart review.'
-                    : 'Review the preview before submitting.'));
+        $this->isReplacingExisting = $existingPlan !== null;
+        $this->isRestartingReview = $existingPlan !== null
+            && ! $this->isReplacingReturned
+            && $existingPlan->submitted_at !== null;
+        $replacementMessage = match (true) {
+            $this->isReplacingReturned => 'This upload will replace the returned FY '.$this->detectedYear.' AIP and resubmit it for review.',
+            $this->isRestartingReview => 'This upload will replace the submitted FY '.$this->detectedYear.' AIP, preserve its submission history, and restart review with the first reviewer.',
+            $this->isReplacingExisting => 'This upload will replace the FY '.$this->detectedYear.' draft and submit it for review.',
+            default => 'Review the preview before submitting.',
+        };
+        $this->analysisMessage = count($this->previewRows).' AIP row(s) found. '.$replacementMessage;
     }
 
     public function submit(): mixed
@@ -266,7 +277,16 @@ class AipSubmissionUpload extends Component
 
     private function resetUpload(): void
     {
-        $this->reset(['aipFile', 'previewRows', 'detectedYear', 'originalName', 'analysisMessage', 'isReplacingReturned']);
+        $this->reset([
+            'aipFile',
+            'previewRows',
+            'detectedYear',
+            'originalName',
+            'analysisMessage',
+            'isReplacingReturned',
+            'isReplacingExisting',
+            'isRestartingReview',
+        ]);
     }
 
     public function render()

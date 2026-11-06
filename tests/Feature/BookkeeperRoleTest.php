@@ -147,9 +147,9 @@ class BookkeeperRoleTest extends TestCase
             // SH — the account records the school it is based at.
             ->assertSee('School Division', false);
 
-        // The password field stays a real field for the role: no auto
-        // password, so nothing is derived from the School ID.
-        $this->assertFalse($component->instance()->hasAutoPassword());
+        // The password field stays a real field for the role; nothing is
+        // derived from the School ID.
+        $component->assertSee('formPassword', false);
         $this->assertTrue($component->instance()->belongsToSchool());
 
         $component

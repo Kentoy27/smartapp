@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Support\SchoolDivision;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\Password;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Title;
@@ -72,8 +73,8 @@ class UsersTable extends Component
 
     /**
      * The account's school assignment: division picked first, then the
-     * school within it — the school's own School ID fills the read-only
-     * field. Null school_id = no school (superadmins typically).
+     * school within it — the school's own School ID fills the login by
+     * default. Null school_id = no school (superadmins typically).
      */
     public string $school_division = '';
 
@@ -102,32 +103,17 @@ class UsersTable extends Component
     public string $username = '';
 
     /**
-     * The School ID this form last filled into $username for the superadmin.
+     * The School ID this form last filled into $username for the administrator.
      *
      * Picking a school prefills the login with that school's ID. Keeping
      * track of what we wrote is what lets a later change of school refresh
-     * the default while leaving a login the superadmin typed by hand alone.
+     * the default while leaving a login the administrator typed by hand alone.
      */
     public string $usernamePrefill = '';
 
     public string $email = '';
 
     public string $password = '';
-
-    /**
-     * Does this form set the password itself?
-     *
-     * An SH's account is keyed to their school: the school's DepEd ID is both
-     * the login and the starting password, so the administrator never types one
-     * and the field is not rendered at all. It is decided by the ROLE alone —
-     * the field must not reappear just because no school has been picked yet.
-     * (An SH whose school has no ID on record cannot be saved; createUser says
-     * so instead of quietly making an account nobody can sign in to.)
-     */
-    public function hasAutoPassword(): bool
-    {
-        return $this->isSchoolHead();
-    }
 
     /**
      * Role selection in the add/edit modal. Only administrators may set or
@@ -152,7 +138,13 @@ class UsersTable extends Component
     {
         $editing = $this->editingUserId !== null;
         $belongsToSchool = $this->belongsToSchool();
-        $autoPassword = $this->hasAutoPassword();
+        $passwordRules = $editing
+            ? ($this->isSchoolHead()
+                ? ['nullable', Password::min(12)->mixedCase()->numbers()->symbols()]
+                : ['nullable', 'string', 'min:8'])
+            : ($this->isSchoolHead()
+                ? ['required', Password::min(12)->mixedCase()->numbers()->symbols()]
+                : ['required', 'string', 'min:8']);
 
         return [
             // Only the school-side roles (SH and Bookkeeper) belong to a
@@ -198,11 +190,9 @@ class UsersTable extends Component
                 'required', 'string', 'email', 'max:255',
                 Rule::unique('users', 'email')->ignore($this->editingUserId),
             ],
-            // Required when creating — unless the form derives it from the
-            // school's School ID. Optional when editing (blank = keep).
-            'password' => $editing || $autoPassword
-                ? ['nullable', 'string', 'min:8']
-                : ['required', 'string', 'min:8'],
+            // School Head passwords must be private, strong, and entered
+            // explicitly; a public school identifier is never a password.
+            'password' => $passwordRules,
             'role' => ['required', Rule::in(['user', 'viewer', 'bookkeeper', 'budget', 'administrator', 'superadmin'])],
         ];
     }
@@ -304,6 +294,8 @@ class UsersTable extends Component
         $user->forceFill([
             'role' => $validated['selectedRole'],
             'is_superadmin' => $validated['selectedRole'] === 'superadmin',
+            'must_change_password' => $user->must_change_password
+                || ($validated['selectedRole'] === 'user' && $user->role !== 'user'),
         ])->save();
 
         $username = $user->username;
@@ -585,21 +577,10 @@ class UsersTable extends Component
             ? ($this->isSuperadmin ? 'superadmin' : $validated['role'])
             : 'user';
 
-        // An SH's password IS their school's DepEd ID. A school without one
-        // has nothing to hand out, so stop here rather than mint an account
-        // nobody could sign in to.
-        if ($selectedRole === 'user' && $this->selectedSchoolId === '') {
-            $this->addError(
-                'school_id_choice',
-                "This school has no School ID on record, so it cannot be used as the account password. Set the school's ID first."
-            );
-
-            return;
-        }
-
         $classification = $this->classificationFor($selectedRole);
 
-        $user = User::create([
+        $user = new User;
+        $user->forceFill([
             // SH and Bookkeeper are both school-side roles; for the others a
             // crafted school choice is dropped rather than attached.
             'school_id' => in_array($selectedRole, ['user', 'bookkeeper'], true) && $validated['school_id_choice'] !== ''
@@ -611,14 +592,11 @@ class UsersTable extends Component
             'name' => $validated['name'],
             'username' => $validated['username'],
             'email' => $validated['email'],
-            // No password typed (the SH case): the school's DepEd ID is the
-            // starting password, matching the login it already defaults to.
-            'password' => ($validated['password'] ?? '') !== ''
-                ? $validated['password']
-                : $this->selectedSchoolId, // hashed by the model cast
+            'password' => $validated['password'],
+            'must_change_password' => $selectedRole === 'user',
             'role' => $selectedRole,
             'is_superadmin' => $selectedRole === 'superadmin',
-        ]);
+        ])->save();
 
         $this->showCreateModal = false;
         $this->editingUserId = null;
@@ -636,7 +614,8 @@ class UsersTable extends Component
             'viewer' => 'a viewer',
             default => 'a user',
         };
-        $this->successMessage = "Account created — {$user->username} was added as {$roleDescription}.";
+        $this->successMessage = "Account created — {$user->username} was added as {$roleDescription}."
+            .($selectedRole === 'user' ? ' A password change is required at first sign-in.' : '');
 
         $this->announce();
     }
@@ -656,6 +635,7 @@ class UsersTable extends Component
         $selectedRole = $this->canAssignRoles()
             ? $validated['role']
             : 'user';
+        $roleChangedToSchoolHead = $selectedRole === 'user' && $user->role !== 'user';
 
         $classification = $this->classificationFor($selectedRole);
 
@@ -675,6 +655,9 @@ class UsersTable extends Component
 
         if (($validated['password'] ?? '') !== '') {
             $user->password = $validated['password']; // hashed by the model cast
+            $user->must_change_password = $selectedRole === 'user';
+        } elseif ($roleChangedToSchoolHead) {
+            $user->must_change_password = true;
         }
 
         $user->save();
@@ -777,8 +760,8 @@ class UsersTable extends Component
     /**
      * School changed: the school's DepEd School ID becomes the default login.
      *
-     * An SH signs in with their school's ID, so picking the school is enough
-     * to fill the Username field in. The field stays editable — the superadmin
+     * An SH may use their school's ID as a username, so picking the school is
+     * enough to fill the Username field in. The field stays editable — the administrator
      * can type another login over it — and a login they already typed survives
      * a later change of school: the prefill only takes the field back while it
      * still holds the default we wrote (or nothing at all).

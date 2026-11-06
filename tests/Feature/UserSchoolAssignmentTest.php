@@ -15,8 +15,8 @@ use Tests\TestCase;
  * The Add User form's School Division → School → School ID workflow:
  * the account is linked to the selected school record, its School ID is
  * never typed by hand, the dropdowns load from the database, and — the
- * cascade belongs to the SH role alone, where the School ID doubles as the
- * account's default login.
+ * cascade belongs to school-side roles, while the School ID may prefill
+ * the SH username but is never used as a password.
  */
 class UserSchoolAssignmentTest extends TestCase
 {
@@ -56,7 +56,7 @@ class UserSchoolAssignmentTest extends TestCase
             ->set('name', 'Test Person')
             ->set('username', 'jane')
             ->set('email', 'jane@example.com')
-            ->set('password', 'password123')
+            ->set('password', 'StrongPassword123!')
             ->call('saveUser')
             ->assertHasNoErrors();
 
@@ -78,7 +78,7 @@ class UserSchoolAssignmentTest extends TestCase
             ->set('name', 'Test Person')
             ->set('username', 'noschool')
             ->set('email', 'noschool@example.com')
-            ->set('password', 'password123')
+            ->set('password', 'StrongPassword123!')
             ->call('saveUser')
             ->assertHasErrors(['school_division', 'school_id_choice']);
 
@@ -201,19 +201,15 @@ class UserSchoolAssignmentTest extends TestCase
             ->assertSee('no School ID on record', false);
     }
 
-    public function test_an_sh_password_defaults_to_the_school_id(): void
+    public function test_an_sh_must_set_a_private_password_and_change_it_on_first_login(): void
     {
         $admin = $this->administrator();
         $district = District::create(['name' => 'Division A']);
         $school = School::create(['district_id' => $district->id, 'name' => 'ABC Elementary School', 'school_id' => '123456']);
 
-        // No password is typed: the login and the starting password are both
-        // the school's DepEd ID, so an SH can sign in straight away.
         $component = Livewire::actingAs($admin)
             ->test(UsersTable::class)
             ->call('openCreateModal');
-
-        $this->assertTrue($component->instance()->hasAutoPassword()); // SH: never a field
 
         $component
             ->set('school_division', (string) $district->id)
@@ -221,29 +217,28 @@ class UserSchoolAssignmentTest extends TestCase
             ->assertSet('username', '123456')
             ->set('name', 'Test Person')
             ->set('email', 'head@example.com')
+            ->set('password', 'StrongPassword123!')
             ->call('saveUser')
             ->assertHasNoErrors();
 
         $user = User::where('username', '123456')->first();
 
         $this->assertNotNull($user);
-        $this->assertTrue(Hash::check('123456', $user->password));
+        $this->assertTrue(Hash::check('StrongPassword123!', $user->password));
+        $this->assertTrue($user->must_change_password);
     }
 
-    public function test_the_password_field_stays_for_a_school_without_an_id(): void
+    public function test_a_school_without_an_id_can_still_have_a_school_head_account(): void
     {
         $admin = $this->administrator();
         $district = District::create(['name' => 'Division A']);
         $school = School::create(['district_id' => $district->id, 'name' => 'No ID School', 'school_id' => null]);
 
-        // The field is decided by the ROLE, so it is already gone for an SH —
-        // but there is then nothing to hand out, and saving is refused rather
-        // than minting an account nobody can sign in to.
         $component = Livewire::actingAs($admin)
             ->test(UsersTable::class)
             ->call('openCreateModal');
 
-        $this->assertTrue($component->instance()->hasAutoPassword()); // SH: no field
+        $component->assertSee('formPassword', false);
 
         $component
             ->set('school_division', (string) $district->id)
@@ -251,29 +246,27 @@ class UserSchoolAssignmentTest extends TestCase
             ->set('name', 'Test Person')
             ->set('username', 'head_two')
             ->set('email', 'head2@example.com')
+            ->set('password', 'StrongPassword123!')
             ->call('saveUser')
-            ->assertHasErrors(['school_id_choice'])
-            ->assertSet('showCreateModal', true); // not created
+            ->assertHasNoErrors();
 
-        $this->assertDatabaseMissing('users', ['username' => 'head_two']);
+        $user = User::where('username', 'head_two')->firstOrFail();
+        $this->assertSame($school->id, $user->school_id);
+        $this->assertTrue($user->must_change_password);
     }
 
-    public function test_the_password_field_is_gone_for_an_sh_before_a_school_is_picked(): void
+    public function test_the_password_field_is_visible_for_an_sh_before_a_school_is_picked(): void
     {
         $admin = $this->administrator();
 
-        // The role alone decides it: the field must not pop back into the
-        // "add form" the moment a school has not been chosen yet.
         $component = Livewire::actingAs($admin)
             ->test(UsersTable::class)
             ->call('openCreateModal');
 
-        $this->assertTrue($component->instance()->hasAutoPassword());
-        $component->assertDontSee('formPassword', false);
+        $component->assertSee('formPassword', false);
 
-        // Switching to a role with no school brings the field back.
+        // The field stays available for every role.
         $component->set('role', 'viewer');
-        $this->assertFalse($component->instance()->hasAutoPassword());
         $component->assertSee('formPassword', false);
     }
 
@@ -289,9 +282,6 @@ class UserSchoolAssignmentTest extends TestCase
             ->set('username', 'viewer_two')
             ->set('email', 'viewer2@example.com')
             ->set('password', 'supersecret1');
-
-        // No school, so nothing can be derived — the superadmin sets it.
-        $this->assertFalse($component->instance()->hasAutoPassword());
 
         $component->call('saveUser')->assertHasNoErrors();
 
@@ -383,7 +373,7 @@ class UserSchoolAssignmentTest extends TestCase
             ->set('name', 'Test Person')
             ->set('username', 'viewer_one')
             ->set('email', 'viewer@example.com')
-            ->set('password', 'password123')
+            ->set('password', 'StrongPassword123!')
             // A crafted payload cannot attach a school to a non-SH either.
             ->set('school_division', (string) $district->id)
             ->set('school_id_choice', (string) $school->id)

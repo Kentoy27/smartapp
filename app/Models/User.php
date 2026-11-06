@@ -35,11 +35,13 @@ class User extends Authenticatable
     protected $hidden = [
         'password',
         'remember_token',
+        'must_change_password',
     ];
 
     protected $casts = [
         'password' => 'hashed',
         'is_superadmin' => 'boolean',
+        'must_change_password' => 'boolean',
         'signature_size' => 'integer',
         'signature_uploaded_at' => 'datetime',
         'signature_updated_at' => 'datetime',

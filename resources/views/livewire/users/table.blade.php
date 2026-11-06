@@ -396,8 +396,7 @@
 
                 {{-- SCHOOL ASSIGNMENT (SH and Bookkeeper): division → school →
                      School ID (read only — it comes from the selected school's
-                     record) → for an SH the same ID fills the login below; a
-                     Bookkeeper signs in with a login of their own. --}}
+                     record) → for an SH it prefills the username only. --}}
                 @if ($this->belongsToSchool())
                     <div class="field">
                         <label for="formSchoolDivision">School Division</label>
@@ -536,13 +535,10 @@
                         @if ($this->selectedSchoolId !== '')
                             <div class="field-hint">Defaults to {{ $this->selectedSchoolId }} — the selected school's ID. Change it if you want a different login.</div>
                             @if ($this->editingUserId === null)
-                                <div class="field-hint">The password is set to the same ID automatically, so the SH can sign in straight away.</div>
+                                <div class="field-hint">A private password is required and must be changed at first sign-in.</div>
                             @endif
                         @else
-                            {{-- A school with no School ID on record has nothing to
-                                 default the login to — say so instead of leaving
-                                 the superadmin wondering why it stayed blank. --}}
-                            <div class="field-hint">This school has no School ID on record, so the login can't be filled in for you — type one.</div>
+                            <div class="field-hint">This school has no School ID on record, so enter a username.</div>
                         @endif
                     @endif
                     @error('username') <div class="error-text">{{ $message }}</div> @enderror
@@ -562,43 +558,39 @@
                     @error('email') <div class="error-text">{{ $message }}</div> @enderror
                 </div>
 
-                {{-- PASSWORD: skipped entirely when the form can derive one.
-                     An SH's starting password is their school's ID — the same
-                     value the login already defaults to — so there is nothing
-                     to type. Editing keeps the field: blank means "unchanged",
-                     and that is how an admin resets a forgotten password. --}}
-                @unless ($this->hasAutoPassword())
-                    <div class="field">
-                        <label for="formPassword">Password</label>
-                        <div class="password-wrap">
-                            <input
-                                id="formPassword"
-                                type="password"
-                                placeholder="{{ $editingUserId ? 'Leave blank to keep current password' : 'Minimum 8 characters' }}"
-                                autocomplete="new-password"
-                                wire:model="password"
-                                @class(['error' => $errors->has('password')])
-                                {{ $editingUserId ? '' : 'required' }}
-                            >
-                            <button
-                                type="button"
-                                class="password-toggle"
-                                x-on:click="revealed = !revealed"
-                                x-data="{ revealed: false }"
-                                x-bind:type="'button'"
-                                :aria-pressed="revealed.toString()"
-                                :aria-label="revealed ? 'Hide password' : 'Show password'"
-                                :title="revealed ? 'Hide password' : 'Show password'"
-                                x-bind:class="revealed && 'revealed'"
-                                x-effect="document.getElementById('formPassword').type = revealed ? 'text' : 'password'"
-                            >
-                                <x-icon name="eye" :size="18" class="icon-eye" />
-                                <x-icon name="eye-off" :size="18" class="icon-eye-off" />
-                            </button>
-                        </div>
-                        @error('password') <div class="error-text">{{ $message }}</div> @enderror
+                <div class="field">
+                    <label for="formPassword">Password</label>
+                    <div class="password-wrap">
+                        <input
+                            id="formPassword"
+                            type="password"
+                            placeholder="{{ $editingUserId ? ($this->isSchoolHead() ? 'Leave blank to keep current password; reset requires 12+ strong characters' : 'Leave blank to keep current password') : ($this->isSchoolHead() ? '12+ characters, mixed case, number and symbol' : 'Minimum 8 characters') }}"
+                            autocomplete="new-password"
+                            wire:model="password"
+                            @class(['error' => $errors->has('password')])
+                            {{ $editingUserId ? '' : 'required' }}
+                        >
+                        <button
+                            type="button"
+                            class="password-toggle"
+                            x-on:click="revealed = !revealed"
+                            x-data="{ revealed: false }"
+                            x-bind:type="'button'"
+                            :aria-pressed="revealed.toString()"
+                            :aria-label="revealed ? 'Hide password' : 'Show password'"
+                            :title="revealed ? 'Hide password' : 'Show password'"
+                            x-bind:class="revealed && 'revealed'"
+                            x-effect="document.getElementById('formPassword').type = revealed ? 'text' : 'password'"
+                        >
+                            <x-icon name="eye" :size="18" class="icon-eye" />
+                            <x-icon name="eye-off" :size="18" class="icon-eye-off" />
+                        </button>
                     </div>
-                @endunless
+                    @if ($this->isSchoolHead())
+                        <span class="field-hint">Use at least 12 characters with uppercase and lowercase letters, a number, and a symbol. The SH must change any new or reset password at first sign-in.</span>
+                    @endif
+                    @error('password') <div class="error-text">{{ $message }}</div> @enderror
+                </div>
 
                 <div class="modal-actions">
                     <button type="button" class="btn-ghost" wire:click="closeCreateModal">Cancel</button>

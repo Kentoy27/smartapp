@@ -437,13 +437,13 @@ class AipPlan extends Model
 
     /**
      * Plans a reviewer may see: ones routed to them, currently assigned to
-     * them, ones they have already reviewed, or unassigned legacy records.
-     * Prior reviewers retain read access after forwarding, but can no longer
-     * act on the plan.
+     * them, or ones they have already reviewed. Only superadmins can recover
+     * unassigned legacy plans; Viewer access stays limited to their route.
      */
     public function scopeVisibleTo(Builder $query, User $reviewer): Builder
     {
-        if ($reviewer->canReviewAip() && ! $reviewer->is_superadmin) {
+        if ($reviewer->isBudgetRole()
+            || ($reviewer->hasAdminAccess() && ! $reviewer->is_superadmin)) {
             return $query;
         }
 
@@ -451,10 +451,13 @@ class AipPlan extends Model
             $routed->where('reviewer_id', $reviewer->id)
                 ->orWhere('assigned_to', $reviewer->id)
                 ->orWhereHas('reviews', fn (Builder $reviews): Builder => $reviews
-                    ->where('reviewer_id', $reviewer->id))
-                ->orWhere(function (Builder $unassigned): void {
+                    ->where('reviewer_id', $reviewer->id));
+
+            if ($reviewer->is_superadmin) {
+                $routed->orWhere(function (Builder $unassigned): void {
                     $unassigned->whereNull('reviewer_id')->whereNull('assigned_to');
                 });
+            }
         });
     }
 

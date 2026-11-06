@@ -122,8 +122,11 @@ class AipPageTest extends TestCase
     public function test_school_head_can_open_and_update_a_returned_aip_from_the_records_page(): void
     {
         $owner = $this->schoolHead();
+        $district = District::create(['name' => 'District I']);
+        $school = School::create(['name' => 'Alpha Elementary School', 'district_id' => $district->id]);
+        $owner->update(['school_id' => $school->id]);
         $plan = AipPlan::create([
-            'school_id' => $owner->school_id,
+            'school_id' => $school->id,
             'year' => 2026,
             'created_by' => $owner->id,
             'status' => AipPlan::STATUS_RETURNED,
@@ -692,6 +695,8 @@ class AipPageTest extends TestCase
         $returnedPlan->submit($owner);
 
         $viewer = User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]);
+        $approvedPlan->update(['reviewer_id' => $viewer->id, 'assigned_to' => $viewer->id]);
+        $returnedPlan->update(['reviewer_id' => $viewer->id, 'assigned_to' => $viewer->id]);
 
         Livewire::actingAs($viewer)
             ->test(\App\Livewire\AipReview::class)
@@ -867,7 +872,7 @@ class AipPageTest extends TestCase
             ->test(\App\Livewire\AipReview::class)
             ->assertDontSee('Delete this AIP submission?')
             ->call('deletePlan', $plan->id)
-            ->assertForbidden();
+            ->assertNotFound();
         $this->assertDatabaseHas('aip_plans', ['id' => $plan->id]);
 
         Livewire::actingAs($reviewer)
@@ -904,9 +909,12 @@ class AipPageTest extends TestCase
         ]);
         $plan->submit($owner);
 
-        // A submitted plan with legacy draft status must remain visible too.
+        // A submitted plan with legacy draft status remains visible to its
+        // assigned reviewer, but not to unrelated viewers.
         $plan->update(['status' => AipPlan::STATUS_DRAFT]);
         $viewer = User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]);
+        $plan->update(['reviewer_id' => $viewer->id, 'assigned_to' => $viewer->id]);
+        $otherViewer = User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]);
 
         Livewire::actingAs($viewer)
             ->test(\App\Livewire\AipReview::class)
@@ -915,6 +923,13 @@ class AipPageTest extends TestCase
             ->call('openReview', $plan->id)
             ->assertSee('Partial objective')
             ->assertSee('Partial activity');
+
+        $this->assertNotNull(AipPlan::query()->visibleTo($viewer)->find($plan->id));
+        $this->assertNull(AipPlan::query()->visibleTo($otherViewer)->find($plan->id));
+        Livewire::actingAs($otherViewer)
+            ->test(\App\Livewire\AipReview::class)
+            ->call('openReview', $plan->id)
+            ->assertNotFound();
     }
 
     public function test_school_head_can_submit_an_existing_incomplete_draft_for_viewer_review(): void
@@ -956,6 +971,7 @@ class AipPageTest extends TestCase
         $this->assertSame(1, $plan->versions()->count());
 
         $viewer = User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]);
+        $plan->update(['reviewer_id' => $viewer->id, 'assigned_to' => $viewer->id]);
         Livewire::actingAs($viewer)
             ->test(\App\Livewire\AipReview::class)
             ->assertSee('Alpha Elementary School')

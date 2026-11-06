@@ -500,13 +500,13 @@
                                         @php($pillarRows = $previewRows->filter(fn (array $row): bool => ($row['pillar'] ?? '') === $pillar))
                                         @forelse ($pillarRows as $row)
                                             <tr>
-                                                <td>{{ $row['strategic_objective'] ?: '—' }}</td>
-                                                <td>{{ $row['strategy'] ?: '—' }}</td>
-                                                <td>{{ $row['ppa'] ?: '—' }}</td>
-                                                <td>{{ $row['resources'] ?: '—' }}</td>
-                                                <td>{{ $row['budget'] ?: '—' }}</td>
-                                                <td>{{ $row['persons_responsible'] ?: '—' }}</td>
-                                                <td>{{ $row['timeline'] ?: '—' }}</td>
+                                                <td>{{ ($row['strategic_objective'] ?? '') ?: '—' }}</td>
+                                                <td>{{ ($row['strategy'] ?? '') ?: '—' }}</td>
+                                                <td>{{ ($row['ppa'] ?? '') ?: '—' }}</td>
+                                                <td>{{ ($row['resources'] ?? '') ?: '—' }}</td>
+                                                <td>{{ ($row['budget'] ?? '') ?: '—' }}</td>
+                                                <td>{{ ($row['persons_responsible'] ?? '') ?: '—' }}</td>
+                                                <td>{{ ($row['timeline'] ?? '') ?: '—' }}</td>
                                             </tr>
                                         @empty
                                             <tr><td colspan="7">&nbsp;</td></tr>

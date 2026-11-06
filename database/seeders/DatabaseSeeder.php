@@ -12,6 +12,10 @@ class DatabaseSeeder extends Seeder
     {
         $this->call(AccountClassificationSeeder::class);
 
+        if (! app()->environment(['local', 'testing'])) {
+            return;
+        }
+
         User::create([
             'username' => 'testuser',
             'email' => 'test@smartapp.local',

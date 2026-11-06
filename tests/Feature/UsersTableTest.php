@@ -87,6 +87,23 @@ class UsersTableTest extends TestCase
         $this->assertFalse($target->is_superadmin);
     }
 
+    public function test_assigning_the_school_head_role_requires_a_password_change(): void
+    {
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
+        $target = User::factory()->create(['is_superadmin' => false, 'role' => 'viewer']);
+
+        Livewire::actingAs($admin)
+            ->test('users-table')
+            ->call('openRoleModal', $target->id)
+            ->set('selectedRole', 'user')
+            ->call('updateRole')
+            ->assertHasNoErrors();
+
+        $target->refresh();
+        $this->assertSame('user', $target->role);
+        $this->assertTrue($target->must_change_password);
+    }
+
     public function test_administrator_can_create_a_budget_account(): void
     {
         $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
@@ -239,7 +256,7 @@ class UsersTableTest extends TestCase
             ->call('saveUser')
             ->assertHasErrors(['username' => 'unique'])
             ->assertHasErrors(['email'])
-            ->assertHasErrors(['password' => 'min'])
+            ->assertHasErrors('password')
             ->assertSet('showCreateModal', true); // stays open on failure
 
         $this->assertSame(2, User::count());
@@ -257,7 +274,7 @@ class UsersTableTest extends TestCase
             ->set('name', 'Jane Doe')
             ->set('username', 'jane')
             ->set('email', 'jane@example.com')
-            ->set('password', 'supersecret1')
+            ->set('password', 'StrongPassword123!')
             ->call('saveUser')
             ->assertSet('showCreateModal', false)
             ->assertSee('jane')
@@ -268,7 +285,7 @@ class UsersTableTest extends TestCase
         $this->assertNotNull($user);
         $this->assertSame('jane@example.com', $user->email);
         $this->assertSame('Jane Doe', $user->name);
-        $this->assertNotSame('supersecret1', $user->password); // hashed
+        $this->assertNotSame('StrongPassword123!', $user->password); // hashed
         $this->assertFalse($user->is_superadmin); // never created as superadmin
     }
 
@@ -312,9 +329,9 @@ class UsersTableTest extends TestCase
             ->set('name', 'Successive User')
             ->set('username', 'successive')
             ->set('email', 'successive@example.com')
-            ->set('password', 'supersecret1')
+            ->set('password', 'StrongPassword123!')
             ->call('saveUser')
-            ->assertSet('successMessage', 'Account created — successive was added as a user.');
+            ->assertSet('successMessage', 'Account created — successive was added as a user. A password change is required at first sign-in.');
 
         // The message is popped client-side via SweetAlert: the rendered HTML
         // must carry it into the smartAlert.success(...) call (Js::from may
@@ -453,7 +470,7 @@ class UsersTableTest extends TestCase
             ->set('name', 'Fresh Admin')
             ->set('username', 'freshadmin')
             ->set('email', 'freshadmin@example.com')
-            ->set('password', 'supersecret1')
+            ->set('password', 'StrongPassword123!')
             ->set('isSuperadmin', true)
             ->call('saveUser')
             ->assertSet('successMessage', 'Account created — freshadmin was added as a super admin.');

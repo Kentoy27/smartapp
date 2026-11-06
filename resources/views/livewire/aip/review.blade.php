@@ -181,13 +181,13 @@
                                             @php($pillarRows = $reviewRows->filter(fn (array $row): bool => ($row['pillar'] ?? '') === $pillar))
                                             @forelse ($pillarRows as $row)
                                                 <tr>
-                                                    <td>{{ $row['strategic_objective'] ?: '—' }}</td>
-                                                    <td>{{ $row['strategy'] ?: '—' }}</td>
-                                                    <td>{{ $row['ppa'] ?: '—' }}</td>
-                                                    <td>{{ $row['resources'] ?: '—' }}</td>
-                                                    <td>{{ $row['budget'] ?: '—' }}</td>
-                                                    <td>{{ $row['persons_responsible'] ?: '—' }}</td>
-                                                    <td>{{ $row['timeline'] ?: '—' }}</td>
+                                                    <td>{{ ($row['strategic_objective'] ?? '') ?: '—' }}</td>
+                                                    <td>{{ ($row['strategy'] ?? '') ?: '—' }}</td>
+                                                    <td>{{ ($row['ppa'] ?? '') ?: '—' }}</td>
+                                                    <td>{{ ($row['resources'] ?? '') ?: '—' }}</td>
+                                                    <td>{{ ($row['budget'] ?? '') ?: '—' }}</td>
+                                                    <td>{{ ($row['persons_responsible'] ?? '') ?: '—' }}</td>
+                                                    <td>{{ ($row['timeline'] ?? '') ?: '—' }}</td>
                                                 </tr>
                                             @empty
                                                 <tr><td colspan="7">&nbsp;</td></tr>
@@ -197,7 +197,6 @@
                                 </table>
                             </div>
                             <p class="aip-template-note">Note: Rows may be added as needed.</p>
-                            @include('aip.partials.signatures', ['plan' => $reviewPlan])
                         @else
                         @forelse ($contents['projects'] ?? [] as $pi => $project)
                             <div class="aip-preview-project">
@@ -242,6 +241,7 @@
                             <p class="table-empty">This plan has no projects.</p>
                         @endforelse
                         @endif
+                        @include('aip.partials.signatures', ['plan' => $reviewPlan])
 
                         <p class="aip-total-line">
                             <strong>Total budget:</strong>

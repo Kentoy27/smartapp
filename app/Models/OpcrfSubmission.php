@@ -956,6 +956,9 @@ class OpcrfSubmission extends Model
     public function canBeViewedBySdsViewer(?User $user): bool
     {
         return $user?->canReviewAllOpcrfSubmissions() === true
+            && $this->opcrf_part === self::FULL_WORKBOOK
+            && (int) $this->assigned_to === (int) $user->id
+            && in_array($this->status, [self::STATUS_PENDING, self::STATUS_RESUBMITTED], true)
             && $this->user()
                 ->where('role', 'user')
                 ->where('is_superadmin', false)

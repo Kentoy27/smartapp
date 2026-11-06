@@ -29,6 +29,7 @@ return Application::configure(basePath: dirname(__DIR__))
         // parameter the Part number arrives in is declared in one place.
         $middleware->alias([
             'opcrf.part' => \App\Http\Middleware\EnsureOpcrfPartIsOpen::class,
+            'password.change' => \App\Http\Middleware\EnsurePasswordIsChanged::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

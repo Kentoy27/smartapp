@@ -15,14 +15,14 @@
         <tbody>
             @forelse ($rows as $row)
                 <tr>
-                    <td>{{ $row['pillar'] ?: '—' }}</td>
-                    <td>{{ $row['strategic_objective'] ?: '—' }}</td>
-                    <td>{{ $row['strategy'] ?: '—' }}</td>
-                    <td>{{ $row['ppa'] ?: '—' }}</td>
-                    <td>{{ $row['resources'] ?: '—' }}</td>
-                    <td>{{ $row['budget'] ?: '—' }}</td>
-                    <td>{{ $row['persons_responsible'] ?: '—' }}</td>
-                    <td>{{ $row['timeline'] ?: '—' }}</td>
+                    <td>{{ ($row['pillar'] ?? '') ?: '—' }}</td>
+                    <td>{{ ($row['strategic_objective'] ?? '') ?: '—' }}</td>
+                    <td>{{ ($row['strategy'] ?? '') ?: '—' }}</td>
+                    <td>{{ ($row['ppa'] ?? '') ?: '—' }}</td>
+                    <td>{{ ($row['resources'] ?? '') ?: '—' }}</td>
+                    <td>{{ ($row['budget'] ?? '') ?: '—' }}</td>
+                    <td>{{ ($row['persons_responsible'] ?? '') ?: '—' }}</td>
+                    <td>{{ ($row['timeline'] ?? '') ?: '—' }}</td>
                 </tr>
             @empty
                 <tr><td class="table-empty" colspan="8">No AIP table rows were found in this record.</td></tr>

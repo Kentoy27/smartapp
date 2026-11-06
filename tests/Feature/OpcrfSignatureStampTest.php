@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Livewire\OpcrfMovs;
 use App\Livewire\OpcrfReview;
 use App\Livewire\OpcrfUpload;
-use App\Livewire\OpcrfViewerSubmissions;
 use App\Models\OpcrfSubmission;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -63,6 +62,7 @@ class OpcrfSignatureStampTest extends TestCase
             'username' => 'staff',
             'email' => 'staff@example.com',
             'password' => Hash::make('password123'),
+            'role' => 'user',
             'is_superadmin' => false,
         ]);
 
@@ -299,30 +299,7 @@ class OpcrfSignatureStampTest extends TestCase
             ->html();
         $this->assertSame(3, substr_count($rateeView, 'class="opcrf-sheet-signer-date"'));
 
-        $viewer = User::create([
-            'name' => 'Rebonie F. Emboltorio',
-            'username' => 'rebonie',
-            'email' => 'rebonie@example.com',
-            'password' => Hash::make('password123'),
-            'role' => 'viewer',
-            'is_superadmin' => false,
-        ]);
-        Livewire::actingAs($viewer)
-            ->test(OpcrfViewerSubmissions::class)
-            ->call('openSubmission', $submission->id)
-            ->assertSee(route('opcrf.review.signature', [$submission, $raterReview]), false)
-            ->assertSee(route('opcrf.review.signature', [$submission, $finalReview]), false)
-            ->assertSee('Digital signature of Maam Eve')
-            ->assertSee('Digital signature of Ferdinand S. Sy');
-
-        $this->actingAs($viewer)
-            ->get(route('opcrf.review.signature', [$submission, $raterReview]))
-            ->assertOk()
-            ->assertStreamedContent($this->signaturePng());
-        $this->actingAs($viewer)
-            ->get(route('opcrf.review.signature', [$submission, $finalReview]))
-            ->assertOk()
-            ->assertStreamedContent($this->signaturePng());
+        $viewer = User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]);
         $this->actingAs($viewer)
             ->get(route('opcrf.submission.download', $submission))
             ->assertNotFound();
@@ -490,6 +467,52 @@ class OpcrfSignatureStampTest extends TestCase
 
         $this->actingAs($outsider)
             ->get(route('opcrf.submission.signature', $submission))
+            ->assertNotFound();
+    }
+
+    public function test_sds_viewer_signature_access_requires_an_assigned_active_full_workbook(): void
+    {
+        $ratee = $this->signedStaffUser();
+        $submission = $this->fileOpcr($ratee);
+        $viewer = User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]);
+        $this->addSignatureTo($this->reviewer);
+
+        $submission->forceFill([
+            'assigned_to' => $viewer->id,
+            'opcrf_part' => OpcrfSubmission::FULL_WORKBOOK,
+            'status' => OpcrfSubmission::STATUS_PENDING,
+        ])->save();
+        $review = $submission->reviews()->create([
+            'reviewer_id' => $this->reviewer->id,
+            'action' => \App\Models\OpcrfReview::ACTION_COMPLIANCE,
+            'reviewed_at' => now(),
+        ]);
+        $this->assertTrue($submission->canBeViewedBySdsViewer($viewer));
+        $this->assertTrue($submission->hasSignedFile());
+        $this->assertTrue($ratee->hasSignature());
+
+        $this->actingAs($viewer)
+            ->get(route('opcrf.submission.signature', $submission))
+            ->assertOk();
+        $this->get(route('opcrf.review.signature', [$submission, $review]))
+            ->assertOk();
+
+        $otherViewer = User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]);
+        $this->actingAs($otherViewer)
+            ->get(route('opcrf.submission.signature', $submission))
+            ->assertNotFound();
+        $this->get(route('opcrf.review.signature', [$submission, $review]))
+            ->assertNotFound();
+
+        $submission->forceFill(['opcrf_part' => OpcrfSubmission::PART_ONE])->save();
+        $this->actingAs($viewer)
+            ->get(route('opcrf.submission.signature', $submission))
+            ->assertNotFound();
+        $submission->forceFill([
+            'opcrf_part' => OpcrfSubmission::FULL_WORKBOOK,
+            'status' => OpcrfSubmission::STATUS_APPROVED,
+        ])->save();
+        $this->get(route('opcrf.review.signature', [$submission, $review]))
             ->assertNotFound();
     }
 
