@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Models\AipPlan;
 use App\Models\MovCategory;
 use App\Models\MovPart;
 use App\Models\MovRequirement;
