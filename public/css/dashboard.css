@@ -3600,8 +3600,6 @@ a.mem-month-tab:hover .mem-month-tab__total { color: var(--text-muted); }
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-<<<<<<< HEAD
-=======
 
 /* ---------- SCHOOL PICKER (Per Line Item Expenditure toolbar) ----------
    The Budget office's report opens on one school at a time; with a whole
@@ -4180,4 +4178,3 @@ a.mem-month-tab:hover .mem-month-tab__total { color: var(--text-muted); }
         gap: 4px;
     }
 }
->>>>>>> jet
