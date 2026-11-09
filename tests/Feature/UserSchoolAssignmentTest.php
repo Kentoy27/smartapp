@@ -202,7 +202,7 @@ class UserSchoolAssignmentTest extends TestCase
             ->assertSee('no School ID on record', false);
     }
 
-    public function test_an_sh_must_set_a_private_password_and_change_it_on_first_login(): void
+    public function test_an_sh_account_can_be_created_without_forcing_a_password_change(): void
     {
         $admin = $this->administrator();
         $district = District::create(['name' => 'Division A']);
@@ -227,7 +227,7 @@ class UserSchoolAssignmentTest extends TestCase
 
         $this->assertNotNull($user);
         $this->assertTrue(Hash::check('StrongPassword123!', $user->password));
-        $this->assertTrue($user->must_change_password);
+        $this->assertFalse($user->must_change_password);
     }
 
     public function test_a_school_without_an_id_can_still_have_a_school_head_account(): void
@@ -255,7 +255,7 @@ class UserSchoolAssignmentTest extends TestCase
 
         $user = User::where('username', 'head_two')->firstOrFail();
         $this->assertSame($school->id, $user->school_id);
-        $this->assertTrue($user->must_change_password);
+        $this->assertFalse($user->must_change_password);
     }
 
     public function test_the_password_field_is_visible_for_an_sh_before_a_school_is_picked(): void

@@ -135,6 +135,7 @@ class ApplicationSmokeTest extends TestCase
             '/budget/per-line-item',
             '/wfp/matrices',
             '/wfp/matrices/template',
+            '/wfp/matrices/export',
             '/wfp/matrices/1',
             '/wfp/matrices/1/duplicate-check',
             '/wfp/plans/1',
@@ -459,10 +460,9 @@ class ApplicationSmokeTest extends TestCase
     }
 
     /**
-     * The Bookkeeper's interface is the school-scoped checking pages alone:
-     * the staff pages and the School Head's WFP workspace (components and
-     * model-bound editors) refuse it with the same 404 they give any other
-     * uninvited role.
+     * The Bookkeeper's interface is the school-scoped checking pages and
+     * read-only WFP sign-off list. Staff pages and WFP authoring components
+     * still refuse it with the same 404 they give any other uninvited role.
      */
     public function test_a_bookkeeper_is_refused_the_staff_and_wfp_authoring_components(): void
     {
@@ -478,7 +478,6 @@ class ApplicationSmokeTest extends TestCase
             MemMatrixList::class,
             MemEditor::class,
             WfpPlanEditor::class,
-            WfpManager::class,
             WfpGenerateButton::class,
             WfpLineItemAllotment::class,
         ];
@@ -492,6 +491,10 @@ class ApplicationSmokeTest extends TestCase
                 $component.' rendered for a Bookkeeper; its module is the checking pages alone.'
             );
         }
+
+        Livewire::actingAs($bookkeeper)
+            ->test(WfpManager::class)
+            ->assertSee('Work and Financial Plans');
     }
 
     /**

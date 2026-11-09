@@ -223,9 +223,9 @@ class WfpPlan extends Model
     }
 
     /**
-     * May this user open the plan at all? The owning School Head and the
-     * Superadmin (who previews and reviews it) may. The write gates stay
-     * separate, so the Superadmin's view is read-only.
+     * The owning School Head, Superadmin, and in-scope Budget/Bookkeeper
+     * readers may open it. The write gates stay separate, so every reader but
+     * the SH is read-only.
      */
     public function canBeViewedBy(?User $user): bool
     {
@@ -237,10 +237,19 @@ class WfpPlan extends Model
             return true;
         }
 
+        if ($this->school_id === null || ! $user->canAccessDivision($this->schoolDivision())) {
+            return false;
+        }
+
+        // Budget and Bookkeeper accounts read the plans their checking role
+        // covers; a Bookkeeper's assignment is re-read here, never trusted
+        // from a request.
+        if ($user->canCheckLineItems()) {
+            return $user->canAccessSchool((int) $this->school_id);
+        }
+
         return $user->canAccessWfp()
-            && $this->school_id !== null
-            && (int) $this->school_id === (int) $user->school_id
-            && $user->canAccessDivision($this->schoolDivision());
+            && (int) $this->school_id === (int) $user->school_id;
     }
 
     /* ------------------------------------------------- Budget readiness */
@@ -366,6 +375,7 @@ class WfpPlan extends Model
         });
 
         $this->refresh();
+
     }
 
     /**
@@ -423,6 +433,7 @@ class WfpPlan extends Model
                     'certified_by' => null,
                     'certified_at' => null,
                 ]);
+
         });
 
         $this->refresh();

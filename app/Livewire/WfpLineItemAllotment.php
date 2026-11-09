@@ -204,6 +204,16 @@ class WfpLineItemAllotment extends Component
         );
     }
 
+    #[Computed]
+    public function signatoryStatuses(): array
+    {
+        return WfpAllotment::signatoryStatuses(
+            Auth::user()?->school_id,
+            (int) $this->year,
+            $this->division(),
+        );
+    }
+
     public function render()
     {
         $this->user();
@@ -211,6 +221,7 @@ class WfpLineItemAllotment extends Component
         return view('livewire.wfp.line-items', [
             'preparedBy' => Auth::user(),
             'checking' => $this->checking,
+            'signatoryStatuses' => $this->signatoryStatuses,
             // The SH reads the block, never signs it: the check is the
             // Bookkeeper's statement, given on their own copy of the report.
             'canCheck' => false,

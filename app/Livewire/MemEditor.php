@@ -67,6 +67,15 @@ class MemEditor extends Component
 
     public ?string $errorMessage = null;
 
+    /**
+     * Set when a write just pushed the year's consumption deeper over the
+     * Budget office's allotment — the save that crossed the ceiling, or one
+     * that widened the overshoot. Shown once as a warning toast, then
+     * cleared; a reorder, or a write that brings spending back toward the
+     * ceiling, stays silent (the strip at the top still reports the state).
+     */
+    public ?string $warningMessage = null;
+
     /* Add-line modal. */
     public bool $showLineModal = false;
 
@@ -811,6 +820,12 @@ class MemEditor extends Component
 
         $this->duplicateWarning = null;
 
+        // Where the year stood before this write. The checked sibling months
+        // are written after persist() has returned, so the over-allotment
+        // warning needs this read taken while none of the line is on the
+        // books yet.
+        $beforeConsumed = $this->yearConsumed();
+
         $currentMonth = (int) $this->matrix->month;
 
         if ($this->editingKey !== null) {
@@ -906,6 +921,8 @@ class MemEditor extends Component
                 unset($this->months, $this->allocation, $this->totals);
             }
 
+            $this->warnIfOverAllotment($beforeConsumed);
+
             return;
         }
 
@@ -964,6 +981,8 @@ class MemEditor extends Component
 
         // The other months' totals and the year's balance changed too.
         unset($this->months, $this->allocation, $this->totals);
+
+        $this->warnIfOverAllotment($beforeConsumed);
     }
 
     /**
@@ -1657,6 +1676,11 @@ class MemEditor extends Component
             return false;
         }
 
+        // Where the year stood before this write, so the over-allotment
+        // warning can tell a crossing save from a reorder (see
+        // warnIfOverAllotment()).
+        $beforeConsumed = $this->yearConsumed();
+
         // Whether the report's check has anything to clear: the lines are
         // about to be rewritten, so a check that covered them no longer
         // describes what the report will show.
@@ -1706,7 +1730,62 @@ class MemEditor extends Component
         $this->loadedVersion = (int) $fresh->version;
         $this->loadItems($fresh);
 
+        $this->warnIfOverAllotment($beforeConsumed);
+
         return true;
+    }
+
+    /**
+     * The year's consumption as the allotted report counts it — quantity ×
+     * unit cost, rounded per line, over the twelve months of this matrix's
+     * school, division and year. The same figure the strip at the top and the
+     * exports read, so the warning can never disagree with them.
+     */
+    private function yearConsumed(): float
+    {
+        $matrix = $this->matrix;
+
+        $consumed = WfpAllotment::consumedBySchool(
+            [(int) $matrix->school_id],
+            (int) $matrix->year,
+            $matrix->schoolDivision(),
+        );
+
+        return $consumed[(int) $matrix->school_id] ?? 0.0;
+    }
+
+    /**
+     * Warn when a write has just added to an overspend: the year is over the
+     * Budget office's allotment AND this write pushed consumption past where
+     * it stood — the save that crossed the ceiling, or one that widened the
+     * overshoot. A reorder, or a write that brings spending back toward the
+     * ceiling, stays silent; the strip at the top keeps reporting the over
+     * state either way.
+     *
+     * The caller passes the consumption read before its write, because a
+     * modal save writes the checked sibling months after persist() has
+     * returned — only the caller sees the whole write.
+     */
+    private function warnIfOverAllotment(float $beforeConsumed): void
+    {
+        // The write has landed; forget the memoised strip figures so this
+        // reads the new lines, not the last render's.
+        unset($this->allotted, $this->months, $this->allocation, $this->totals);
+
+        $allocation = $this->allocation;
+
+        if ($allocation['allotted'] === null
+            || ! $allocation['is_over']
+            || $allocation['consumed'] <= $beforeConsumed + 0.004) {
+            $this->warningMessage = null;
+
+            return;
+        }
+
+        $this->warningMessage = 'This save brings CY '.$this->matrix->year.' consumption to '
+            .number_format($allocation['consumed'], 2).' — '
+            .number_format(abs($allocation['remaining']), 2).' over the '
+            .number_format($allocation['allotted'], 2).' allotted budget.';
     }
 
     /**
@@ -2423,6 +2502,10 @@ class MemEditor extends Component
             return;
         }
 
+        // Where the year stood before the import, for the over-allotment
+        // warning the write below may earn.
+        $beforeConsumed = $this->yearConsumed();
+
         $report = MemImporter::commit($analysis['valid'], $matrix, Auth::user());
 
         $this->showImport = false;
@@ -2431,6 +2514,8 @@ class MemEditor extends Component
         $fresh = MonthlyExpenditureMatrix::findOrFail($matrix->id);
         $this->loadedVersion = (int) $fresh->version;
         $this->loadItems($fresh);
+
+        $this->warnIfOverAllotment($beforeConsumed);
 
         $this->successMessage = "Import complete — {$report['imported']} line(s) added.";
     }
@@ -2461,6 +2546,11 @@ class MemEditor extends Component
     public function clearError(): void
     {
         $this->errorMessage = null;
+    }
+
+    public function clearWarning(): void
+    {
+        $this->warningMessage = null;
     }
 
     #[Computed]

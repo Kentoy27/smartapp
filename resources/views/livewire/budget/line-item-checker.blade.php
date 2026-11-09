@@ -80,6 +80,7 @@
                             <th scope="col">Lines</th>
                             <th scope="col">Months</th>
                             <th scope="col">Updated</th>
+                            <th scope="col">Sign-offs</th>
                             <th scope="col" class="users-actions-col"><span class="sr-only">Actions</span></th>
                         </tr>
                     </thead>
@@ -118,6 +119,12 @@
                                 <td>{{ number_format($lineCount) }}</td>
                                 <td>{{ $monthCount }} / 12</td>
                                 <td>{{ $lastUpdated?->diffForHumans() ?? '—' }}</td>
+                                <td class="users-actions-col" @click.stop>
+                                    @livewire('wfp-signatory-actions', [
+                                        'schoolId' => $school->id,
+                                        'year' => (int) $this->year,
+                                    ], key('monthly-signoffs-'.$school->id.'-'.$this->year))
+                                </td>
 
                                 <td class="users-actions-col" @click.stop>
                                     <button
@@ -135,7 +142,7 @@
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="7" class="table-empty">
+                                <td colspan="8" class="table-empty">
                                     @if ($this->hasNoAssignedSchools())
                                         Your account is not assigned to any school yet, so there is
                                         nothing to check here. Add the schools you are responsible for
@@ -202,6 +209,11 @@
                 <span class="mem-status mem-status--draft">Read-only</span>
             </p>
         </div>
+
+        @livewire('wfp-signatory-actions', [
+            'schoolId' => $selectedSchool->id,
+            'year' => (int) $this->year,
+        ], key('monthly-detail-signoffs-'.$selectedSchool->id.'-'.$this->year))
 
         {{-- THE ALLOTMENT BALANCE: the annual budget the Budget office set for
              this school, read against the year's matrices. The month tabs below

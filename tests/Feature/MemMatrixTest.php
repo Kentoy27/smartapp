@@ -2092,6 +2092,135 @@ class MemMatrixTest extends TestCase
             ->assertRedirect(route('wfp.matrices.export', ['matrix' => $matrix->id]));
     }
 
+    // ----------------------------------------------------------- over allotment
+
+    public function test_a_save_that_crosses_the_allotment_pops_a_warning(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        SchoolAllotment::create([
+            'school_id' => $sh->school_id,
+            'year' => 2026,
+            'amount' => 5000,
+        ]);
+
+        $component = Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openLineModal')
+            ->set('lineForm.activity_description', 'Payment for Electricity')
+            ->set('lineForm.quantity', '1')
+            ->set('lineForm.unit_cost', '6000')
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors()
+            ->assertSet('warningMessage', fn ($value) => is_string($value) && $value !== '');
+
+        // The toast names the figure it now stands at and the overshoot.
+        $warning = (string) $component->get('warningMessage');
+
+        $this->assertStringContainsString('6,000.00', $warning);
+        $this->assertStringContainsString('1,000.00 over the 5,000.00 allotted budget', $warning);
+    }
+
+    public function test_a_save_within_the_allotment_pops_no_warning(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        SchoolAllotment::create([
+            'school_id' => $sh->school_id,
+            'year' => 2026,
+            'amount' => 50000,
+        ]);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openLineModal')
+            ->set('lineForm.activity_description', 'Payment for Electricity')
+            ->set('lineForm.quantity', '1')
+            ->set('lineForm.unit_cost', '6000')
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors()
+            ->assertSet('warningMessage', null);
+    }
+
+    public function test_a_save_pops_no_warning_when_no_allotment_is_set(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openLineModal')
+            ->set('lineForm.activity_description', 'Payment for Electricity')
+            ->set('lineForm.quantity', '1')
+            ->set('lineForm.unit_cost', '6000')
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors()
+            // No ceiling set is not an overspend: the write records silently.
+            ->assertSet('warningMessage', null);
+    }
+
+    public function test_copies_into_sibling_months_are_counted_before_the_warning(): void
+    {
+        $sh = $this->schoolHead();
+        $january = $this->matrixFor($sh, month: 1);
+        $this->matrixFor($sh, month: 2);
+
+        SchoolAllotment::create([
+            'school_id' => $sh->school_id,
+            'year' => 2026,
+            'amount' => 50000,
+        ]);
+
+        // 30,000 copied into each of two months: the first copy alone stays
+        // under the ceiling, so only a warning reading the WHOLE write can
+        // see the 60,000 the year now carries.
+        $component = Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
+            ->call('openLineModal')
+            ->set('lineForm.activity_description', 'Payment for Electricity')
+            ->set('lineForm.quantity', '1')
+            ->set('lineForm.unit_cost', '30000')
+            ->set('lineRepeated', 'yes')
+            ->set('lineMonths', [1, 2])
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors()
+            ->assertSet('warningMessage', fn ($value) => is_string($value) && $value !== '');
+
+        $warning = (string) $component->get('warningMessage');
+
+        $this->assertStringContainsString('60,000.00', $warning);
+        $this->assertStringContainsString('10,000.00 over the 50,000.00 allotted budget', $warning);
+    }
+
+    public function test_a_write_that_adds_no_spending_stays_silent_while_over(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        $matrix->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Payment for Electricity',
+            'quantity' => 1,
+            'unit_cost' => 6000,
+        ]);
+
+        SchoolAllotment::create([
+            'school_id' => $sh->school_id,
+            'year' => 2026,
+            'amount' => 5000,
+        ]);
+
+        $component = Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix]);
+
+        $key = $component->get('items.0._key');
+
+        // The year is already over before this write; moving a line between
+        // sections changes no money, so no fresh warning is warranted — the
+        // strip at the top still reports the over state.
+        $component->call('moveRow', $key)
+            ->assertHasNoErrors()
+            ->assertSet('warningMessage', null);
+    }
+
     // ---------------------------------------------------------------- delete
 
     public function test_deleting_a_matrix_removes_it_and_its_lines(): void

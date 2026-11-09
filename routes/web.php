@@ -2,24 +2,27 @@
 
 use App\Http\Controllers\AipUploadController;
 use App\Http\Controllers\Auth\GoogleAuthController;
-use App\Http\Controllers\Auth\ForcedPasswordChangeController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\DashboardController;
 use App\Models\AipPlan;
+use App\Models\AipReview;
 use App\Models\MonthlyExpenditureMatrix;
 use App\Models\OpcrfMov;
+use App\Models\OpcrfReview;
 use App\Models\OpcrfSchedule;
 use App\Models\OpcrfSubmission;
 use App\Models\OpcrfTemplate;
 use App\Models\School;
 use App\Models\User;
 use App\Models\UserMov;
+use App\Models\WfpExportAudit;
 use App\Models\WfpImportLog;
 use App\Models\WfpPlan;
 use App\Models\WfpSubmission;
-use App\Support\AipXlsxExporter;
 use App\Support\MemDuplicateChecker;
 use App\Support\MemXlsxExporter;
+use App\Support\MemYearInitializer;
+use App\Support\MemYearXlsxExporter;
 use App\Support\MovEvidencePreview;
 use App\Support\OpcrfAccess;
 use App\Support\OpcrfPartOne;
@@ -56,12 +59,9 @@ Route::get('/logout', function () {
 Route::get('/auth/google/redirect', [GoogleAuthController::class, 'redirect'])->name('google.redirect')->middleware('guest');
 Route::get('/auth/google/callback', [GoogleAuthController::class, 'callback'])->name('google.callback');
 
-Route::get('/home', [DashboardController::class, 'index'])->middleware(['auth', 'password.change'])->name('home');
+Route::get('/home', [DashboardController::class, 'index'])->middleware(['auth'])->name('home');
 
-Route::middleware(['auth', 'password.change'])->group(function () {
-    Route::get('/password/change', [ForcedPasswordChangeController::class, 'show'])->name('password.change');
-    Route::post('/password/change', [ForcedPasswordChangeController::class, 'update'])->name('password.change.update');
-
+Route::middleware(['auth'])->group(function () {
     /* ------------------------------------------------------------------
      * The financial division the account is working in. The choice is a
      * preference held in the session; it is only ever honoured while the
@@ -101,7 +101,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
 
     Route::get('/profile/signature', function () {
         $user = Auth::user();
-        if (!($user instanceof User)) {
+        if (! ($user instanceof User)) {
             abort(404);
         }
 
@@ -173,7 +173,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
     Route::get('/aip/{plan}/signature/{signer}', function (AipPlan $plan, User $signer) {
         $viewer = Auth::user();
 
-        if (!($viewer instanceof User)) {
+        if (! ($viewer instanceof User)) {
             abort(404);
         }
 
@@ -186,8 +186,8 @@ Route::middleware(['auth', 'password.change'])->group(function () {
 
         $latestSubmission = $plan->reviews()
             ->whereIn('action', [
-                \App\Models\AipReview::ACTION_SUBMIT,
-                \App\Models\AipReview::ACTION_RESUBMIT,
+                AipReview::ACTION_SUBMIT,
+                AipReview::ACTION_RESUBMIT,
             ])
             ->reorder('id', 'desc')
             ->first();
@@ -196,7 +196,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
         $isApprovingReviewer = $latestSubmission !== null && $plan->reviews()
             ->where('id', '>', $latestSubmission->id)
             ->where('reviewer_id', $signer->id)
-            ->where('action', \App\Models\AipReview::ACTION_COMPLIANCE)
+            ->where('action', AipReview::ACTION_COMPLIANCE)
             ->exists();
 
         abort_unless($isSubmitter || $isApprovingReviewer, 404);
@@ -256,7 +256,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
         $csv = implode("\n", [
             'Account Title,RCA Code,UACS Sub-Object Code,UACS Object Code,Covering PPAS',
             'Office Supplies Expenses,50203010,00,5020301000,PPAS 1',
-        ]) . "\n";
+        ])."\n";
 
         return response($csv)
             ->header('Content-Type', 'text/csv; charset=UTF-8')
@@ -294,9 +294,9 @@ Route::middleware(['auth', 'password.change'])->group(function () {
     Route::get('/admin/wfp-setup/lookups/{category}', function (string $category) {
         $user = Auth::user();
         abort_unless($user instanceof User && $user->canManageUsersAndSchools(), 404);
-        abort_unless(is_array(config('wfp_lookups.categories.' . $category)), 404);
+        abort_unless(is_array(config('wfp_lookups.categories.'.$category)), 404);
 
-        $spec = config('wfp_lookups.categories.' . $category);
+        $spec = config('wfp_lookups.categories.'.$category);
 
         return view('wfp.setup.lookups', [
             'category' => $category,
@@ -314,7 +314,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
 
         return response($csv)
             ->header('Content-Type', 'text/csv; charset=UTF-8')
-            ->header('Content-Disposition', 'attachment; filename="wfp-' . $category . '-template.csv"');
+            ->header('Content-Disposition', 'attachment; filename="wfp-'.$category.'-template.csv"');
     })->name('wfp.setup.lookups.template');
 
     // Every row of one lookup category, active and retired, so an
@@ -327,7 +327,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
 
         return response($csv)
             ->header('Content-Type', 'text/csv; charset=UTF-8')
-            ->header('Content-Disposition', 'attachment; filename="wfp-' . $category . '.csv"');
+            ->header('Content-Disposition', 'attachment; filename="wfp-'.$category.'.csv"');
     })->name('wfp.setup.lookups.export');
 
     Route::get('/admin/wfp-setup/templates', function () {
@@ -371,7 +371,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
 
         return response($csv)
             ->header('Content-Type', 'text/csv; charset=UTF-8')
-            ->header('Content-Disposition', 'attachment; filename="wfp-import-' . $record->category . '-errors.csv"');
+            ->header('Content-Disposition', 'attachment; filename="wfp-import-'.$record->category.'-errors.csv"');
     })->name('wfp.setup.imports.errors');
 
     // Opcrf: a staff-facing page, reachable by regular users only —
@@ -382,7 +382,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
     Route::get('/opcrf', function () {
         $user = Auth::user();
         abort_unless($user instanceof User && $user->canViewOpcrfParts(), 404);
-        abort_if($user instanceof User && !$user->canAccessStaffPages(), 404);
+        abort_if($user instanceof User && ! $user->canAccessStaffPages(), 404);
 
         return view('opcrf.parts');
     })->name('opcrf.index');
@@ -406,7 +406,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
 
         return view('opcrf.part', [
             'part' => $part,
-            'partLabel' => 'Part ' . $part,
+            'partLabel' => 'Part '.$part,
             'partBlurb' => $blurbs[$part] ?? 'This Part of the OPCRF.',
             'schedule' => OpcrfAccess::scheduleFor(
                 OpcrfAccess::currentYear(),
@@ -457,12 +457,12 @@ Route::middleware(['auth', 'password.change'])->group(function () {
     Route::get('/download/opcrf-template', function () {
         $user = Auth::user();
 
-        if (!$user instanceof User) {
+        if (! $user instanceof User) {
             abort(404);
         }
 
         abort_unless($user->canAccessOpcrfTemplate(), 404);
-        abort_if(!$user->canAccessStaffPages(), 404);
+        abort_if(! $user->canAccessStaffPages(), 404);
         abort_unless(is_file(OpcrfPartOne::templatePath()), 404);
 
         // The full workbook is also needed during the shared Parts 2–4 term.
@@ -471,7 +471,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
         $partOneAccessible = OpcrfAccess::canAccess($user, OpcrfSchedule::PART_ONE);
         $includeAllParts = OpcrfPartOne::fullTemplateAvailable();
 
-        if (!$partOneAccessible && !$includeAllParts) {
+        if (! $partOneAccessible && ! $includeAllParts) {
             $state = OpcrfAccess::partState($user, OpcrfSchedule::PART_ONE);
 
             return redirect()
@@ -535,7 +535,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
                 (string) config('opcrf.template.version', '2026.1')
             );
 
-            if ($savedPartOne !== null && !$hasSavedWorkbook) {
+            if ($savedPartOne !== null && ! $hasSavedWorkbook) {
                 $bytes = OpcrfWorkbookProgress::mergeSubmissionData(
                     $bytes,
                     [
@@ -566,7 +566,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
         return response($bytes)
             ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             ->header('Content-Length', (string) strlen($bytes))
-            ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
+            ->header('Content-Disposition', 'attachment; filename="'.$filename.'"');
     })->name('opcrf.template');
 
     // A submission's workbook. The superadmin may fetch any submission
@@ -586,14 +586,14 @@ Route::middleware(['auth', 'password.change'])->group(function () {
     Route::get('/opcrf-submissions/{submission}/download', function (OpcrfSubmission $submission) {
         $user = Auth::user();
 
-        if (!$user instanceof User) {
+        if (! $user instanceof User) {
             abort(404);
         }
 
         abort_unless($submission->canBeDownloadedBy($user), 404);
         abort_unless($submission->hasFile(), 404);
 
-        if ($submission->hasSignedFile() && !$submission->signedFileHasValidXml()) {
+        if ($submission->hasSignedFile() && ! $submission->signedFileHasValidXml()) {
             abort_unless(
                 $submission->repairSignedFile(),
                 500,
@@ -608,7 +608,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
         // downloads always receive the archived file as stored.
         $bytes = null;
 
-        if (!$user->hasAdminAccess() && !OpcrfPartOne::windowOpen()) {
+        if (! $user->hasAdminAccess() && ! OpcrfPartOne::windowOpen()) {
             try {
                 $bytes = OpcrfWorkbookTrim::keepPart(
                     $storedPath,
@@ -626,7 +626,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
         return response($bytes)
             ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             ->header('Content-Length', (string) strlen($bytes))
-            ->header('Content-Disposition', 'attachment; filename="' . $submission->fileDownloadName() . '"');
+            ->header('Content-Disposition', 'attachment; filename="'.$submission->fileDownloadName().'"');
     })->name('opcrf.submission.download')->where('submission', '[0-9]+');
 
     // The ratee's digital signature, for the signer block the review modal
@@ -638,7 +638,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
     Route::get('/opcrf-submissions/{submission}/signature', function (OpcrfSubmission $submission) {
         $user = Auth::user();
 
-        if (!($user instanceof User)) {
+        if (! ($user instanceof User)) {
             abort(404);
         }
 
@@ -649,7 +649,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
         abort_unless($submission->hasSignedFile(), 404);
 
         $ratee = $submission->user;
-        if (!($ratee instanceof User)) {
+        if (! ($ratee instanceof User)) {
             abort(404);
         }
 
@@ -661,10 +661,10 @@ Route::middleware(['auth', 'password.change'])->group(function () {
     // A reviewer signature can only be fetched for a compliance action on
     // this submission by its owner, an assigned administrator, or an SDS
     // Viewer reading a School Head submission in the in-app review.
-    Route::get('/opcrf-submissions/{submission}/review-signature/{review}', function (OpcrfSubmission $submission, \App\Models\OpcrfReview $review) {
+    Route::get('/opcrf-submissions/{submission}/review-signature/{review}', function (OpcrfSubmission $submission, OpcrfReview $review) {
         $viewer = Auth::user();
 
-        if (!($viewer instanceof User)) {
+        if (! ($viewer instanceof User)) {
             abort(404);
         }
 
@@ -674,13 +674,13 @@ Route::middleware(['auth', 'password.change'])->group(function () {
         );
         abort_unless((int) $review->opcrf_submission_id === (int) $submission->id, 404);
         abort_unless(in_array($review->action, [
-            \App\Models\OpcrfReview::ACTION_COMPLIANCE,
-            \App\Models\OpcrfReview::ACTION_COMPLIANCE_FINAL,
+            OpcrfReview::ACTION_COMPLIANCE,
+            OpcrfReview::ACTION_COMPLIANCE_FINAL,
         ], true), 404);
         abort_unless($submission->hasSignedFile(), 404);
 
         $reviewer = $review->reviewer;
-        if (!($reviewer instanceof User)) {
+        if (! ($reviewer instanceof User)) {
             abort(404);
         }
 
@@ -695,7 +695,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
     Route::get('/opcrf-movs/{mov}/download', function (OpcrfMov $mov) {
         $user = Auth::user();
 
-        abort_if(!$mov->submission->canBeReviewedBy($user), 403);
+        abort_if(! $mov->submission->canBeReviewedBy($user), 403);
 
         /** @var FilesystemAdapter $disk */
         $disk = Storage::disk('local');
@@ -724,7 +724,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
 
     Route::get('/wfp', function () {
         $user = Auth::user();
-        abort_unless($user instanceof User && $user->canAccessWfp(), 404);
+        abort_unless($user instanceof User && $user->canViewWfpSignoffs(), 404);
 
         return view('wfp.index');
     })->name('wfp.index');
@@ -831,19 +831,31 @@ Route::middleware(['auth', 'password.change'])->group(function () {
     // that no longer exists, has no report to export: it is a 404. A school
     // that exists but is outside the account's roster — the Bookkeeper's
     // assignment list — is refused the same way, because the export is the
-    // report's figures leaving the server.
-    Route::get('/budget/per-line-item/export', function () {
+    // report's figures leaving the server. `signatures=with` (the default)
+    // stamps the registered profile signatures of the workflow signers;
+    // `signatures=without` leaves the signature bands empty for wet signing.
+    Route::get('/budget/per-line-item/export', function (Request $request) {
         $user = Auth::user();
         abort_unless($user instanceof User && $user->canCheckLineItems(), 404);
 
-        $schoolId = (int) request()->query('school');
+        $schoolId = (int) $request->query('school');
         $school = $schoolId > 0 ? School::query()->find($schoolId) : null;
         abort_if($school === null, 404);
 
         abort_unless($user->canAccessSchool($school->id), 404);
 
         $division = $user->activeDivision();
-        $year = WfpAllotment::resolveYear($school->id, (int) request()->query('year'), $division);
+        $year = WfpAllotment::resolveYear($school->id, (int) $request->query('year'), $division);
+
+        $includeSignatures = WfpAllotmentXlsxExporter::includesSignatures($request->query('signatures', 'with'));
+
+        if ($includeSignatures === null) {
+            $message = 'Choose "with" or "without" for the e-signature export option.';
+
+            return $request->expectsJson()
+                ? response()->json(['message' => $message], 422)
+                : response($message, 422)->header('Content-Type', 'text/plain; charset=UTF-8');
+        }
 
         // The form's "Prepared by" is the school's School Head, not the
         // Budget officer reading this copy — and the School Head of this
@@ -854,16 +866,25 @@ Route::middleware(['auth', 'password.change'])->group(function () {
             ->orderBy('name')
             ->orderBy('username')
             ->get()
-            ->first(fn(User $candidate): bool => $candidate->canAccessDivision($division));
+            ->first(fn (User $candidate): bool => $candidate->canAccessDivision($division));
 
-        $bytes = WfpAllotmentXlsxExporter::bytes($school->id, $year, $preparedBy, $division);
+        try {
+            $bytes = WfpAllotmentXlsxExporter::bytes($school->id, $year, $preparedBy, $division, $includeSignatures);
+        } catch (Throwable $exception) {
+            report($exception);
+            $message = 'The Excel workbook could not be generated. Please try again.';
+
+            return $request->expectsJson()
+                ? response()->json(['message' => $message], 500)
+                : response($message, 500)->header('Content-Type', 'text/plain; charset=UTF-8');
+        }
 
         // Bytes are built BEFORE the response (a streamed callback's return
         // value is discarded and would risk a 0-byte download).
         return response($bytes)
-            ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            ->header('Content-Type', WfpAllotmentXlsxExporter::CONTENT_TYPE)
             ->header('Content-Length', (string) strlen($bytes))
-            ->header('Content-Disposition', 'attachment; filename="' . WfpAllotmentXlsxExporter::downloadName($year, $school->name) . '"');
+            ->header('Content-Disposition', 'attachment; filename="'.WfpAllotmentXlsxExporter::downloadName($year, $school->name, $includeSignatures).'"');
     })->name('budget.per-line-item.export');
 
     /* ------------------------------------------------------------------
@@ -907,7 +928,11 @@ Route::middleware(['auth', 'password.change'])->group(function () {
 
     Route::get('/wfp/matrices', function () {
         $user = Auth::user();
-        abort_unless($user instanceof User && $user->canAccessWfp(), 404);
+        abort_unless($user instanceof User && ($user->canAccessWfp() || $user->canCheckLineItems()), 404);
+
+        if ($user->canCheckLineItems()) {
+            return view('budget.line-items');
+        }
 
         return view('wfp.matrices.index');
     })->name('wfp.matrices.index');
@@ -921,12 +946,76 @@ Route::middleware(['auth', 'password.change'])->group(function () {
         $csv = implode("\n", [
             'Section,Objective,Activity Description,Resource Kind,Quantity,Unit,Unit Cost,Account Title,Account Code,Funding Source,Organizational Classification,Activity MOVs',
             'operations,Improved learner outcomes,Procure office supplies,MOOE,10,ream,250.00,Office Supplies Expenses,5020301000,MOOE,School,PO and RIS',
-        ]) . "\n";
+        ])."\n";
 
         return response($csv)
             ->header('Content-Type', 'text/csv; charset=UTF-8')
             ->header('Content-Disposition', 'attachment; filename="mem-template.csv"');
     })->name('wfp.matrices.template');
+
+    // The whole SELECTED YEAR as one workbook: twelve worksheets (JAN…DEC),
+    // each the month's printed form as it stands now. The school is taken from
+    // the signed-in account — never from the query string — so this export
+    // cannot be pointed at another school's plan, and the year is validated
+    // against the same bounds the Add-year control uses. `signatures=with`
+    // (the default) stamps the registered profile signatures of the workflow
+    // signers; `signatures=without` leaves the signature bands empty. Declared
+    // before `{matrix}` for the same reason /template is.
+    //
+    // Errors are returned as JSON (for an XHR caller) or plain text, never as
+    // the HTML error page the browser could mistake for a workbook. The page
+    // itself generates the download through the Livewire action; this route
+    // is the same workbook by URL.
+    Route::get('/wfp/matrices/export', function (Request $request) {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canAccessWfp(), 404);
+        abort_if($user->school_id === null, 404);
+
+        $raw = $request->query('year');
+        $year = is_string($raw) && ctype_digit($raw) ? (int) $raw : 0;
+
+        if ($year < MemYearInitializer::MIN_YEAR || $year > MemYearInitializer::MAX_YEAR) {
+            $message = 'Choose a year between '.MemYearInitializer::MIN_YEAR.' and '.MemYearInitializer::MAX_YEAR.' to export.';
+
+            return $request->expectsJson()
+                ? response()->json(['message' => $message], 422)
+                : response($message, 422)->header('Content-Type', 'text/plain; charset=UTF-8');
+        }
+
+        $signatureMode = $request->query('signatures', 'with');
+
+        if (! is_string($signatureMode) || ! in_array($signatureMode, ['with', 'without'], true)) {
+            $message = 'Choose “with” or “without” for the e-signature export option.';
+
+            return $request->expectsJson()
+                ? response()->json(['message' => $message], 422)
+                : response($message, 422)->header('Content-Type', 'text/plain; charset=UTF-8');
+        }
+
+        $includeSignatures = $signatureMode === 'with';
+
+        try {
+            $bytes = MemYearXlsxExporter::bytes(
+                (int) $user->school_id,
+                $year,
+                $user->activeDivision(),
+                $user,
+                $includeSignatures,
+            );
+        } catch (Throwable $exception) {
+            report($exception);
+            $message = 'The Excel workbook could not be generated. Please try again.';
+
+            return $request->expectsJson()
+                ? response()->json(['message' => $message], 500)
+                : response($message, 500)->header('Content-Type', 'text/plain; charset=UTF-8');
+        }
+
+        return response($bytes)
+            ->header('Content-Type', MemYearXlsxExporter::CONTENT_TYPE)
+            ->header('Content-Length', (string) strlen($bytes))
+            ->header('Content-Disposition', 'attachment; filename="'.MemYearXlsxExporter::downloadName($year, $includeSignatures).'"');
+    })->name('wfp.matrices.year-export');
 
     // The matrix as the printed DepEd form — a .xlsx BUILT from the lines as
     // they stand (a MEM has no archived file to serve). Declared before
@@ -936,12 +1025,22 @@ Route::middleware(['auth', 'password.change'])->group(function () {
         $user = Auth::user();
         abort_unless($user instanceof User && $matrix->canBeViewedBy($user), 404);
 
-        $bytes = MemXlsxExporter::bytes($matrix, $user);
+        $preparedBy = $user->canManageWfp()
+            ? $user
+            : User::query()
+                ->where('school_id', $matrix->school_id)
+                ->where('role', 'user')
+                ->orderBy('name')
+                ->orderBy('username')
+                ->get()
+                ->first(fn (User $candidate): bool => $candidate->canAccessDivision($matrix->schoolDivision()));
+
+        $bytes = MemXlsxExporter::bytes($matrix, $preparedBy);
 
         return response($bytes)
             ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             ->header('Content-Length', (string) strlen($bytes))
-            ->header('Content-Disposition', 'attachment; filename="' . MemXlsxExporter::downloadName($matrix) . '"');
+            ->header('Content-Disposition', 'attachment; filename="'.MemXlsxExporter::downloadName($matrix).'"');
     })->name('wfp.matrices.export')->where('matrix', '[0-9]+');
 
     // The Add-a-line duplicate checker's search, called by the modal's
@@ -993,7 +1092,11 @@ Route::middleware(['auth', 'password.change'])->group(function () {
 
     Route::get('/wfp/line-items', function () {
         $user = Auth::user();
-        abort_unless($user instanceof User && $user->canAccessWfp(), 404);
+        abort_unless($user instanceof User && ($user->canAccessWfp() || $user->canCheckLineItems()), 404);
+
+        if ($user->canCheckLineItems()) {
+            return view('budget.per-line-item');
+        }
 
         return view('wfp.line-items');
     })->name('wfp.lineitems.index');
@@ -1003,22 +1106,45 @@ Route::middleware(['auth', 'password.change'])->group(function () {
     // caller's OWN school's matrices: a crafted ?year= reports on the newest
     // year the school actually has rather than on another school's figures.
     // An SH with no school has no report to export, so it is a 404.
-    Route::get('/wfp/line-items/export', function () {
+    // `signatures=with` (the default) stamps the registered profile
+    // signatures of the workflow signers; `signatures=without` leaves the
+    // signature bands empty for wet signing.
+    Route::get('/wfp/line-items/export', function (Request $request) {
         $user = Auth::user();
         abort_unless($user instanceof User && $user->canAccessWfp(), 404);
         abort_if($user->school_id === null, 404);
 
         $schoolId = (int) $user->school_id;
         $division = $user->activeDivision();
-        $year = WfpAllotment::resolveYear($schoolId, (int) request()->query('year'), $division);
-        $bytes = WfpAllotmentXlsxExporter::bytes($schoolId, $year, $user, $division);
+        $year = WfpAllotment::resolveYear($schoolId, (int) $request->query('year'), $division);
+
+        $includeSignatures = WfpAllotmentXlsxExporter::includesSignatures($request->query('signatures', 'with'));
+
+        if ($includeSignatures === null) {
+            $message = 'Choose "with" or "without" for the e-signature export option.';
+
+            return $request->expectsJson()
+                ? response()->json(['message' => $message], 422)
+                : response($message, 422)->header('Content-Type', 'text/plain; charset=UTF-8');
+        }
+
+        try {
+            $bytes = WfpAllotmentXlsxExporter::bytes($schoolId, $year, $user, $division, $includeSignatures);
+        } catch (Throwable $exception) {
+            report($exception);
+            $message = 'The Excel workbook could not be generated. Please try again.';
+
+            return $request->expectsJson()
+                ? response()->json(['message' => $message], 500)
+                : response($message, 500)->header('Content-Type', 'text/plain; charset=UTF-8');
+        }
 
         // Bytes are built BEFORE the response (a streamed callback's return
         // value is discarded and would risk a 0-byte download).
         return response($bytes)
-            ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            ->header('Content-Type', WfpAllotmentXlsxExporter::CONTENT_TYPE)
             ->header('Content-Length', (string) strlen($bytes))
-            ->header('Content-Disposition', 'attachment; filename="' . WfpAllotmentXlsxExporter::downloadName($year) . '"');
+            ->header('Content-Disposition', 'attachment; filename="'.WfpAllotmentXlsxExporter::downloadName($year, null, $includeSignatures).'"');
     })->name('wfp.lineitems.export');
 
     // The generated-plan page: the School Head's editor, opened read-only by
@@ -1034,27 +1160,50 @@ Route::middleware(['auth', 'password.change'])->group(function () {
     // The generated WFP as a patched copy of the official template. The
     // patching itself lives in WfpPlanExporter, which the "Generate and
     // Download WFP" button shares — both must hand back the same workbook.
+    // The two export modes use the same plan and template. Signature images
+    // are sourced only from the existing workflow records and profile
+    // signatures; the unsigned copy leaves those blocks blank.
     // Bytes are built BEFORE the response (a streamed callback's return value
     // is discarded and would risk a 0-byte download).
     Route::get('/wfp/plans/{plan}/export', function (WfpPlan $plan) {
         $user = Auth::user();
-        abort_unless($user instanceof User && $plan->canBeViewedBy($user), 404);
+        abort_unless(
+            $user instanceof User
+                && (($user->canManageWfp() && $plan->managedBy($user))
+                    || (($user->canCheckLineItems() || $user->canApproveWfp()) && $plan->canBeViewedBy($user))),
+            404,
+        );
         abort_unless(WfpTemplate::exists(), 404);
 
+        $signatureMode = request()->query('signatures', 'with');
+        abort_unless(is_string($signatureMode) && in_array($signatureMode, ['with', 'without'], true), 404);
+        $includeSignatures = $signatureMode === 'with';
+
+        $preparedBy = $user->canManageWfp()
+            ? $user
+            : User::query()
+                ->where('school_id', $plan->school_id)
+                ->where('role', 'user')
+                ->orderBy('name')
+                ->orderBy('username')
+                ->get()
+                ->first(fn (User $candidate): bool => $candidate->canAccessDivision($plan->schoolDivision()));
+
         try {
-            $bytes = WfpPlanExporter::bytes($plan);
+            $bytes = WfpPlanExporter::bytes($plan, $includeSignatures, $preparedBy);
         } catch (RuntimeException $e) {
             // The template could not be read: say so rather than emit a
             // guessed workbook the SH cannot open.
             abort(404, $e->getMessage());
         }
 
-        $filename = 'WFP-' . $plan->year . '.xlsx';
+        WfpExportAudit::record($user, $plan, (int) $plan->year, $includeSignatures);
+        $filename = sprintf('WFP_CY%d_%s.xlsx', $plan->year, $includeSignatures ? 'Signed' : 'Unsigned');
 
         return response($bytes)
             ->header('Content-Type', WfpPlanExporter::CONTENT_TYPE)
             ->header('Content-Length', (string) strlen($bytes))
-            ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
+            ->header('Content-Disposition', 'attachment; filename="'.$filename.'"');
     })->name('wfp.plans.export')->where('plan', '[0-9]+');
 
     // MOV uploads: the staff member's Means of Verification checklist —
@@ -1063,7 +1212,7 @@ Route::middleware(['auth', 'password.change'])->group(function () {
     // set, not the cycle's form.
     Route::get('/movs', function () {
         $user = Auth::user();
-        abort_if($user instanceof User && !$user->canAccessStaffPages(), 404);
+        abort_if($user instanceof User && ! $user->canAccessStaffPages(), 404);
 
         return view('mov.index');
     })->name('mov.index');

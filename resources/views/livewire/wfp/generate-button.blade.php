@@ -30,31 +30,50 @@
             </select>
         </label>
 
-        {{-- GENERATE + DOWNLOAD BUTTON: the school's WFP generated from its
-             Monthly Expenditure Matrix when it has one, and the blank
-             account-code form until then. Generating is the School Head's
-             alone, so a read-only reader (the school's Bookkeeper) gets the
-             button disabled rather than a dead click. --}}
+        {{-- BOTH EXPORTS use this same selected year and generation path. --}}
         @if ($this->canEdit())
-            <button
-                type="button"
-                class="opcr-download-btn"
-                wire:click="download"
-                wire:loading.attr="disabled"
-                wire:target="download"
-                title="{{ $this->planYear !== null
-                    ? 'Generate your CY '.$this->planYear.' WFP from your Monthly Expenditure Matrix and download it'
-                    : 'Generate a blank CY '.$this->year.' WFP from the account-code list and download it' }}"
-            >
-                <span wire:loading.remove wire:target="download">
-                    <x-icon name="download" :size="16" />
-                    <span>Generate and Download Work and Financial Plan</span>
-                </span>
-                <span wire:loading wire:target="download">
-                    <x-icon name="file-spreadsheet" :size="16" />
-                    <span>Generating…</span>
-                </span>
-            </button>
+            @php($missingSignatures = $this->missingSignatureLabels)
+            <div class="wfp-generate__exports">
+                <button
+                    type="button"
+                    class="opcr-download-btn"
+                    wire:click="download('with')"
+                    @if ($missingSignatures !== [])
+                        wire:confirm="These WFP sections have no applicable registered e-signature and will remain unsigned: {{ implode('; ', $missingSignatures) }}. Continue with the available signatures?"
+                    @endif
+                    wire:loading.attr="disabled"
+                    wire:target="download"
+                    title="{{ $this->planYear !== null
+                        ? 'Generate your CY '.$this->planYear.' WFP from your Monthly Expenditure Matrix'
+                        : 'Generate a blank CY '.$this->year.' WFP from the account-code list' }}"
+                >
+                    <span wire:loading.remove wire:target="download">
+                        <x-icon name="download" :size="16" />
+                        <span>Generate and Download WFP (With E-Signatures)</span>
+                    </span>
+                    <span wire:loading wire:target="download">
+                        <x-icon name="file-spreadsheet" :size="16" />
+                        <span>Generating…</span>
+                    </span>
+                </button>
+                <button
+                    type="button"
+                    class="btn-ghost"
+                    wire:click="download('without')"
+                    wire:loading.attr="disabled"
+                    wire:target="download"
+                    title="Generate the same WFP with its electronic-signature spaces left blank"
+                >
+                    <span wire:loading.remove wire:target="download">
+                        <x-icon name="download" :size="16" />
+                        <span>Generate and Download WFP (Without E-Signatures)</span>
+                    </span>
+                    <span wire:loading wire:target="download">
+                        <x-icon name="file-spreadsheet" :size="16" />
+                        <span>Generating…</span>
+                    </span>
+                </button>
+            </div>
         @else
             <button
                 type="button"
@@ -63,7 +82,7 @@
                 title="Read-only — only the School Head generates the WFP"
             >
                 <x-icon name="download" :size="16" />
-                <span>Generate and Download Work and Financial Plan</span>
+                <span>Generate and Download WFP</span>
             </button>
         @endif
     </div>
@@ -78,5 +97,12 @@
         <span class="wfp-generate__source">
             Built from your {{ $this->accountCount }} account code{{ $this->accountCount === 1 ? '' : 's' }} — complete the rest by hand.
         </span>
+    @endif
+
+    @if (auth()->user()?->school_id)
+        @livewire('wfp-signatory-actions', [
+            'schoolId' => auth()->user()->school_id,
+            'year' => (int) $this->year,
+        ], key('wfp-generate-signoffs-'.auth()->user()->school_id.'-'.$this->year))
     @endif
 </div>

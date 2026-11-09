@@ -633,7 +633,7 @@ class SchoolDivisionSeparationTest extends TestCase
         $this->assertSame('SENIOR_HIGH', $head->activeDivision());
     }
 
-    public function test_the_division_switcher_is_only_shown_to_school_heads(): void
+    public function test_the_division_switcher_is_shown_to_school_heads_and_division_wide_allotment_managers(): void
     {
         $school = $this->school();
         $head = $this->schoolHead($school, 'JUNIOR_HIGH', ['JUNIOR_HIGH', 'SENIOR_HIGH']);
@@ -644,16 +644,24 @@ class SchoolDivisionSeparationTest extends TestCase
             ->assertSee('id="divisionSwitcher"', false);
 
         foreach ([
-            User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]),
             User::factory()->create(['role' => 'budget', 'is_superadmin' => false]),
             User::factory()->create(['role' => 'administrator', 'is_superadmin' => false]),
             User::factory()->create(['role' => 'superadmin', 'is_superadmin' => true]),
-        ] as $nonSchoolHead) {
-            $this->actingAs($nonSchoolHead)
-                ->get(route('home'))
+        ] as $allotmentManager) {
+            $this->actingAs($allotmentManager)
+                ->get(route('budget.allotments.index'))
                 ->assertOk()
-                ->assertDontSee('id="divisionSwitcher"', false);
+                ->assertSee('id="divisionSwitcher"', false)
+                ->assertSee('value="JUNIOR_HIGH"', false)
+                ->assertSee('value="SENIOR_HIGH"', false);
         }
+
+        $viewer = User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]);
+
+        $this->actingAs($viewer)
+            ->get(route('home'))
+            ->assertOk()
+            ->assertDontSee('id="divisionSwitcher"', false);
     }
 
     public function test_a_division_switch_cannot_reach_an_unauthorized_division(): void

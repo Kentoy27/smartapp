@@ -376,6 +376,13 @@ class Sidebar extends Component
                         'route' => 'wfp.submissions.*',
                     ],
                     [
+                        'key' => 'budget-wfp-signoffs',
+                        'label' => 'WFP Sign-offs',
+                        'title' => 'View and sign the WFP sections assigned to your role',
+                        'url' => route('wfp.index'),
+                        'route' => 'wfp.index',
+                    ],
+                    [
                         'key' => 'budget-allotments',
                         'label' => 'School Allotments',
                         'title' => 'Set and certify each school\'s annual allotment',
@@ -421,6 +428,13 @@ class Sidebar extends Component
                 'section' => 'Files',
                 'order' => 14,
                 'children' => [
+                    [
+                        'key' => 'bookkeeper-wfp-signoffs',
+                        'label' => 'WFP Sign-offs',
+                        'title' => 'View and sign the WFP sections for your assigned schools',
+                        'url' => route('wfp.index'),
+                        'route' => 'wfp.index',
+                    ],
                     [
                         'key' => 'budget-line-items',
                         'label' => 'Monthly Expenditure',

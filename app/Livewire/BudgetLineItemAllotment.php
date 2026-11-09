@@ -4,8 +4,10 @@ namespace App\Livewire;
 
 use App\Models\School;
 use App\Models\User;
+use App\Models\WfpPlan;
 use App\Models\WfpReportCheck;
 use App\Support\WfpAllotment;
+use App\Support\WfpReportSignoffs;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
@@ -79,6 +81,9 @@ class BudgetLineItemAllotment extends Component
 
     /** The check-confirmation modal's open state (Bookkeepers only). */
     public bool $showCheckModal = false;
+
+    /** The Budget certification confirmation modal's open state. */
+    public bool $showCertificationModal = false;
 
     /** Success toast after a stored check (cleared via clearSuccess()). */
     public ?string $successMessage = null;
@@ -278,6 +283,7 @@ class BudgetLineItemAllotment extends Component
             $this->certification,
             $this->checking,
             $this->preparedBy,
+            $this->planUrl,
         );
     }
 
@@ -291,6 +297,18 @@ class BudgetLineItemAllotment extends Component
     public function canCheck(): bool
     {
         return Auth::user()?->canCheckWfpReport() === true;
+    }
+
+    public function canCertify(): bool
+    {
+        $user = Auth::user();
+        $school = $this->school;
+
+        return $user instanceof User
+            && $user->canCertifyAllotments()
+            && $school !== null
+            && WfpAllotment::allotment($school->id, (int) $this->year, $this->division()) !== null
+            && WfpAllotment::certification($school->id, (int) $this->year, $this->division()) === null;
     }
 
     /**
@@ -311,6 +329,61 @@ class BudgetLineItemAllotment extends Component
     public function closeCheckModal(): void
     {
         $this->showCheckModal = false;
+    }
+
+    public function openCertificationModal(): void
+    {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canCertifyAllotments(), 404);
+
+        $school = $this->school;
+        abort_unless($school !== null && $user->canAccessDivision($this->division()), 404);
+
+        if (WfpAllotment::certification($school->id, (int) $this->year, $this->division()) !== null) {
+            $this->errorMessage = $school->name.'’s CY '.$this->year.' allotment is already certified.';
+
+            return;
+        }
+
+        if (WfpAllotment::allotment($school->id, (int) $this->year, $this->division()) === null) {
+            $this->errorMessage = 'Set an allotment for '.$school->name.' in CY '.$this->year.' before signing its certification.';
+
+            return;
+        }
+
+        $this->errorMessage = null;
+        $this->showCertificationModal = true;
+        $this->resetValidation();
+    }
+
+    public function closeCertificationModal(): void
+    {
+        $this->showCertificationModal = false;
+    }
+
+    public function certify(): void
+    {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canCertifyAllotments(), 404);
+
+        $school = $this->school;
+        abort_unless($school !== null && $user->canAccessDivision($this->division()), 404);
+
+        $year = (int) WfpAllotment::resolveYear($school->id, (int) $this->year, $this->division());
+
+        try {
+            WfpReportSignoffs::certify($user, $school->id, $year, $this->division());
+        } catch (\RuntimeException $exception) {
+            $this->showCertificationModal = false;
+            $this->errorMessage = $exception->getMessage();
+
+            return;
+        }
+
+        $this->showCertificationModal = false;
+        $this->errorMessage = null;
+        $this->successMessage = 'Certified — '.$school->name.'’s CY '.$year.' allotment is available.';
+        $this->forgetFigures();
     }
 
     /**
@@ -552,6 +625,39 @@ class BudgetLineItemAllotment extends Component
         return WfpAllotment::checking($this->school?->id, (int) $this->year, $this->division());
     }
 
+    #[Computed]
+    public function signatoryStatuses(): array
+    {
+        return WfpAllotment::signatoryStatuses(
+            $this->school?->id,
+            (int) $this->year,
+            $this->division(),
+        );
+    }
+
+    /**
+     * The school's generated WFP page for the year on screen, when the viewer
+     * is the Bookkeeper and a plan exists — the route from the annual report
+     * to the plan whose correctness block the Bookkeeper signs. The Budget
+     * office gets no link: the plan is where the signature is given, and that
+     * is not its action. Null while no plan has been generated yet.
+     */
+    #[Computed]
+    public function planUrl(): ?string
+    {
+        if (! $this->canCheck() || $this->school === null) {
+            return null;
+        }
+
+        $plan = WfpPlan::query()
+            ->where('school_id', $this->school->id)
+            ->where('school_division', $this->division())
+            ->where('year', (int) $this->year)
+            ->first();
+
+        return $plan === null ? null : route('wfp.plans.edit', ['plan' => $plan->id]);
+    }
+
     /**
      * The account that signs the form as its preparer: the school's School
      * Head. The Budget officer reads this copy, they do not prepare the
@@ -585,7 +691,10 @@ class BudgetLineItemAllotment extends Component
         return view('livewire.budget.line-item-allotment', [
             'preparedBy' => $this->preparedBy,
             'checking' => $this->checking,
+            'signatoryStatuses' => $this->signatoryStatuses,
             'canCheck' => $this->canCheck(),
+            'canCertify' => $this->canCertify(),
+            'planUrl' => $this->planUrl,
         ]);
     }
 

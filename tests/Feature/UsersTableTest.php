@@ -87,7 +87,7 @@ class UsersTableTest extends TestCase
         $this->assertFalse($target->is_superadmin);
     }
 
-    public function test_assigning_the_school_head_role_requires_a_password_change(): void
+    public function test_assigning_the_school_head_role_does_not_force_a_password_change(): void
     {
         $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
         $target = User::factory()->create(['is_superadmin' => false, 'role' => 'viewer']);
@@ -101,7 +101,7 @@ class UsersTableTest extends TestCase
 
         $target->refresh();
         $this->assertSame('user', $target->role);
-        $this->assertTrue($target->must_change_password);
+        $this->assertFalse($target->must_change_password);
     }
 
     public function test_administrator_can_create_a_budget_account(): void
@@ -333,7 +333,7 @@ class UsersTableTest extends TestCase
             ->set('email', 'successive@example.com')
             ->set('password', 'StrongPassword123!')
             ->call('saveUser')
-            ->assertSet('successMessage', 'Account created — successive was added as a user. A password change is required at first sign-in.');
+            ->assertSet('successMessage', 'Account created — successive was added as a user.');
 
         // The message is popped client-side via SweetAlert: the rendered HTML
         // must carry it into the smartAlert.success(...) call (Js::from may

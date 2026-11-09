@@ -6,8 +6,9 @@ use App\Models\User;
 use App\Models\WfpApproval;
 use App\Models\WfpItem;
 use App\Models\WfpPlan;
+use App\Support\WfpAllotment;
 use App\Support\WfpGenerator;
-use App\Support\WfpTemplate;
+use App\Support\WfpPlanExporter;
 use App\Support\WfpValidator;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -239,6 +240,35 @@ class WfpPlanEditor extends Component
         return $this->plan->hasBudgetReview();
     }
 
+    /** Sign-off blocks without a current authorized account signature. */
+    #[Computed]
+    public function missingSignatureLabels(): array
+    {
+        $plan = $this->plan;
+        $preparedBy = Auth::user()?->canManageWfp()
+            ? Auth::user()
+            : User::query()
+                ->where('school_id', $plan->school_id)
+                ->where('role', 'user')
+                ->orderBy('name')
+                ->orderBy('username')
+                ->get()
+                ->first(fn (User $candidate): bool => $candidate->canAccessDivision($plan->schoolDivision()));
+
+        return WfpPlanExporter::missingSignatureLabels($plan, $preparedBy instanceof User ? $preparedBy : null);
+    }
+
+    #[Computed]
+    public function signatoryStatuses(): array
+    {
+        return WfpAllotment::signatoryStatuses(
+            $this->plan->school_id !== null ? (int) $this->plan->school_id : null,
+            (int) $this->plan->year,
+            $this->plan->schoolDivision(),
+            $this->plan,
+        );
+    }
+
     #[Computed]
     public function finalApproval(): ?WfpApproval
     {
@@ -297,7 +327,6 @@ class WfpPlanEditor extends Component
     {
         return view('livewire.wfp.plan-editor', [
             'plan' => $this->plan,
-            'templateName' => WfpTemplate::fileName(),
         ]);
     }
 }

@@ -125,7 +125,7 @@ class UpdateProfile extends Component
 
         // The details and the roster are one save: a failure in either must
         // not leave the other half-written.
-        DB::transaction(function () use ($account, $validated): void {
+        DB::transaction(function () use ($account, $validated, $passwordChanged): void {
             $account->name = $validated['name'];
             $account->position = $validated['position'] ?: null;
             $account->username = $validated['username'];
@@ -134,14 +134,6 @@ class UpdateProfile extends Component
             // Blank means "keep the current password" — the field is on screen
             // only so the account can change it, not as a required step.
             if ($passwordChanged) {
-                $account->password = $validated['password'];
-            }
-
-            $account->save();
-            $this->showModal = false;
-            // Blank means "keep the current password" — the field is on screen
-            // only so the account can change it, not as a required step.
-            if (filled($validated['password'])) {
                 $account->password = $validated['password'];
             }
 
@@ -160,8 +152,6 @@ class UpdateProfile extends Component
         $this->resetPasswordFields();
         $this->resetValidation();
 
-        $this->successMessage = null;
-
         // Keep the account menu in sync when the displayed real name changes.
         $this->dispatch(
             'smartapp-profile-updated',
@@ -171,13 +161,28 @@ class UpdateProfile extends Component
         );
 
         if ($passwordChanged) {
+            // A changed password ends this session: the account signs in again
+            // with the new one, so the modal does not stay open behind the
+            // redirect.
+            $this->showModal = false;
+
             Auth::logout();
-            request()->session()->invalidate();
-            request()->session()->regenerateToken();
+
+            // The session is resolved through the helper rather than
+            // request()->session(): a Livewire update request has no session
+            // store attached under the test harness, while both paths resolve
+            // the same store in a real request.
+            session()->invalidate();
+            session()->regenerateToken();
             session()->flash('success', 'Your password has been updated. Please sign in again.');
 
             $this->redirect(route('login'), navigate: false);
+
+            return;
         }
+
+        // A details-only save keeps the modal open under its confirmation.
+        $this->successMessage = 'Your profile has been updated.';
     }
 
     /**

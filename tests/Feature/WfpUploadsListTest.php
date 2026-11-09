@@ -88,7 +88,8 @@ class WfpUploadsListTest extends TestCase
         $this->actingAs($this->schoolHead('schoolhead', 'Smoke School'))
             ->get(route('wfp.index'))
             ->assertOk()
-            ->assertSee('Generate and Download Work and Financial Plan')
+            ->assertSee('Generate and Download WFP (With E-Signatures)')
+            ->assertSee('Generate and Download WFP (Without E-Signatures)')
             ->assertSee('Upload WFP');
     }
 

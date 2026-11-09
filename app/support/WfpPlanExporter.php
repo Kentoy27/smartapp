@@ -3,8 +3,11 @@
 namespace App\Support;
 
 use App\Models\MonthlyExpenditureMatrix;
+use App\Models\SchoolAllotment;
 use App\Models\User;
 use App\Models\WfpPlan;
+use App\Models\WfpReportCheck;
+use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 
 /**
@@ -22,6 +25,8 @@ final class WfpPlanExporter
 {
     public const CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
+    private const SIGNATURE_STAGES = ['prepared', 'bookkeeper', 'budget', 'superadmin'];
+
     /**
      * The plan as workbook bytes.
      *
@@ -30,9 +35,22 @@ final class WfpPlanExporter
      * column (see WfpTemplateFiller), so a plan stays portable across template
      * revisions.
      *
+     * The named sign-off blocks are sourced from the existing workflow records:
+     * the Bookkeeper's report check, the Budget certification, and the final
+     * Superadmin approval. Only the account attached to each valid record can
+     * contribute its registered profile signature. With
+     * The School Head's signature comes from the authenticated preparer; the
+     * other signatures require their existing, role-appropriate workflow
+     * records. With `$includeSignatures = false` every e-signature block is
+     * left blank; no workflow record or signature is changed.
+     *
      * @throws RuntimeException when the template cannot be read
      */
-    public static function bytes(WfpPlan $plan): string
+    public static function bytes(
+        WfpPlan $plan,
+        bool $includeSignatures = true,
+        ?User $preparedBy = null,
+    ): string
     {
         $layout = WfpTemplate::inspect();
 
@@ -49,19 +67,201 @@ final class WfpPlanExporter
             WfpTemplateFiller::titleCells((string) ($plan->school?->name ?? ''), (int) $plan->year),
         );
 
-        // The printed sign-off comes from the recorded final approval only.
-        // A pending, returned or legacy-finalized plan has no approval row,
-        // so `finalApproverName()` is null and the signature stays blank.
-        $approver = $plan->isApproved() ? $plan->finalApproverName() : null;
+        $blocks = WfpTemplateFiller::signatureBlocks($bytes);
 
-        if ($approver !== null) {
-            $bytes = WfpTemplateFiller::writeCells(
-                $bytes,
-                WfpTemplateFiller::approvalCells($bytes, $approver),
-            );
+        if ($blocks === []) {
+            return $bytes;
+        }
+
+        // Clear signature names in both modes. The signed copy restores only
+        // names supported by an existing, role-appropriate workflow record.
+        $bytes = self::blankSignatureNames($bytes, $blocks);
+
+        if (! $includeSignatures) {
+            return $bytes;
+        }
+
+        $signers = self::authorizedSigners($plan, $preparedBy);
+
+        foreach (self::SIGNATURE_STAGES as $stage) {
+            $block = $blocks[$stage] ?? null;
+            $signer = $signers[$stage] ?? null;
+
+            if ($block === null || $signer === null) {
+                continue;
+            }
+
+            $name = self::signerName($signer);
+
+            if ($name !== '') {
+                $bytes = WfpTemplateFiller::writeCells($bytes, [$block['name_cell'] => $name]);
+            }
+
+            $bytes = self::stampSignature($bytes, $signer, $block);
         }
 
         return $bytes;
+    }
+
+    /**
+     * The sign-off sections whose authorized signer or registered profile
+     * image is unavailable. Used to ask the SH before exporting a partially
+     * signed copy.
+     *
+     * @return array<int, string>
+     */
+    public static function missingSignatureLabels(?WfpPlan $plan, ?User $preparedBy = null): array
+    {
+        $definitions = (array) config('wfp.template.signatures', []);
+        $signers = $plan === null ? [] : self::authorizedSigners($plan, $preparedBy);
+        $missing = [];
+
+        foreach (self::SIGNATURE_STAGES as $stage) {
+            $definition = (array) ($definitions[$stage] ?? []);
+            $signer = $signers[$stage] ?? null;
+
+            if ($signer !== null && self::hasRegisteredSignature($signer)) {
+                continue;
+            }
+
+            $title = trim((string) ($definition['title'] ?? ucfirst($stage)));
+            $label = trim((string) ($definition['label'] ?? ''));
+            $missing[] = $title.($label !== '' ? ' — '.$label : '');
+        }
+
+        return $missing;
+    }
+
+    /**
+     * Clear every discovered signature block's printed name, keeping the
+     * block's cells and styles — the signature lines and role labels are
+     * part of the form. Used by both export modes: the with-signatures export
+     * then writes back only what a current signature supports.
+     *
+     * @param  array<string, array{name_cell: string}>  $blocks
+     */
+    private static function blankSignatureNames(string $bytes, array $blocks): string
+    {
+        $cells = [];
+
+        foreach ($blocks as $block) {
+            $cells[$block['name_cell']] = '';
+        }
+
+        return WfpTemplateFiller::writeCells($bytes, $cells);
+    }
+
+    /**
+     * Stamp the authorized signer's registered profile image over its block.
+     *
+     * @param  array{range: string}  $block
+     */
+    private static function stampSignature(string $bytes, User $signer, array $block): string
+    {
+        $path = (string) $signer->signature_path;
+
+        if ($path === '' || ! Storage::disk('local')->exists($path)) {
+            return $bytes;
+        }
+
+        $disk = Storage::disk('local');
+        $contents = (string) $disk->get($path);
+        $extension = strtolower(pathinfo((string) $signer->signature_original_name, PATHINFO_EXTENSION));
+        $extension = $extension !== '' ? $extension : (strtolower(pathinfo($path, PATHINFO_EXTENSION)) ?: 'png');
+        $stamped = OpcrfSignatureStamper::stampAtRange(
+            $bytes,
+            $contents,
+            $block['range'],
+            $extension,
+            self::signerName($signer),
+        );
+
+        if ($stamped === null) {
+            throw new RuntimeException('The registered signature for '.$signer->name.' could not be placed in the WFP template.');
+        }
+
+        return $stamped;
+    }
+
+    /**
+     * The School Head is identified by the authorized preparer; the other
+     * printed sections require their existing approval/check records. Role and
+     * school/division access are rechecked when exporting; a profile signature
+     * alone never establishes approval.
+     *
+     * @return array<string, User>
+     */
+    private static function authorizedSigners(WfpPlan $plan, ?User $preparedBy = null): array
+    {
+        if ($plan->school_id === null) {
+            return [];
+        }
+
+        $schoolId = (int) $plan->school_id;
+        $division = $plan->schoolDivision();
+        $year = (int) $plan->year;
+        $signers = [];
+
+        if ($preparedBy !== null && $plan->managedBy($preparedBy)) {
+            $signers['prepared'] = $preparedBy;
+        }
+
+        $check = WfpReportCheck::query()
+            ->with('checker')
+            ->where('school_id', $schoolId)
+            ->where('school_division', $division)
+            ->where('year', $year)
+            ->first();
+        $bookkeeper = $check?->checker;
+
+        if ($check?->isChecked()
+            && $bookkeeper?->canCheckWfpReport()
+            && $bookkeeper->canAccessSchool($schoolId)
+            && $bookkeeper->canAccessDivision($division)) {
+            $signers['bookkeeper'] = $bookkeeper;
+        }
+
+        $allotment = SchoolAllotment::query()
+            ->with('certifier')
+            ->where('school_id', $schoolId)
+            ->where('school_division', $division)
+            ->where('year', $year)
+            ->first();
+        $budget = $allotment?->certifier;
+
+        if ($allotment?->isCertified()
+            && $budget?->canCertifyAllotments()
+            && $budget->canAccessDivision($division)) {
+            $signers['budget'] = $budget;
+        }
+
+        if ($plan->isApproved()) {
+            $approval = $plan->finalApproval()->with('decidedBy')->first();
+            $approver = $approval?->decidedBy;
+
+            if ($approval?->isApproved()
+                && $approval->decided_by !== null
+                && (int) $approval->decided_by === (int) $plan->approved_by
+                && $approver?->canApproveWfp()) {
+                $signers['superadmin'] = $approver;
+            }
+        }
+
+        return $signers;
+    }
+
+    private static function hasRegisteredSignature(User $signer): bool
+    {
+        $path = trim((string) $signer->signature_path);
+
+        return $path !== '' && Storage::disk('local')->exists($path);
+    }
+
+    private static function signerName(User $signer): string
+    {
+        $name = trim((string) $signer->name);
+
+        return $name !== '' ? $name : trim((string) $signer->username);
     }
 
     /**
@@ -110,6 +310,23 @@ final class WfpPlanExporter
         }
 
         return $plan;
+    }
+
+    /**
+     * Find the plan for an SH's selected year without creating or regenerating
+     * it. Used to identify missing sign-offs before the confirmation prompt.
+     */
+    public static function existingFor(?User $user, int $year, ?string $division = null): ?WfpPlan
+    {
+        if ($user === null || ! $user->canAccessWfp() || $user->school_id === null) {
+            return null;
+        }
+
+        return WfpPlan::query()
+            ->where('school_id', (int) $user->school_id)
+            ->where('school_division', self::resolveDivision($user, $division))
+            ->where('year', $year)
+            ->first();
     }
 
     /**

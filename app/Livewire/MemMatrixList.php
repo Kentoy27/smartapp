@@ -10,6 +10,8 @@ use App\Models\WfpPlan;
 use App\Models\WfpReportCheck;
 use App\Support\MemWorkbookImporter;
 use App\Support\MemYearInitializer;
+use App\Support\MemYearXlsxExporter;
+use App\Support\WfpAllotment;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
@@ -145,6 +147,18 @@ class MemMatrixList extends Component
         return Auth::user()?->canManageWfp() === true;
     }
 
+    #[Computed]
+    public function signatoryStatuses(): array
+    {
+        $year = $this->filterYear() ?? (int) now()->year;
+
+        return WfpAllotment::signatoryStatuses(
+            Auth::user()?->school_id,
+            $year,
+            $this->division(),
+        );
+    }
+
     /* ------------------------------------------------------------ the year */
 
     /**
@@ -276,6 +290,69 @@ class MemMatrixList extends Component
         abort_unless($matrix->canBeViewedBy(Auth::user()), 404);
 
         return $this->redirect(route('wfp.matrices.export', ['matrix' => $matrix->id]));
+    }
+
+    /**
+     * The whole selected year as ONE workbook: twelve worksheets (JAN…DEC),
+     * each the month's printed form as it stands now. `with` stamps the
+     * workflow signers' registered profile signatures; `without` leaves the
+     * signature bands blank for wet signing. The workbook is generated in
+     * this action, so the button's loading state covers the work and a
+     * generation failure can be reported in-page instead of leaving the
+     * browser on an error page. The download itself is the Livewire file
+     * effect; the authenticated route is the same workbook by URL.
+     */
+    public function exportYear(string $signatureMode = 'with')
+    {
+        abort_unless(in_array($signatureMode, ['with', 'without'], true), 404);
+
+        $user = $this->user();
+
+        if ($user->school_id === null) {
+            $this->errorMessage = 'Your account has no school assigned, so there is no workbook to export. Ask an administrator to set your school first.';
+
+            return null;
+        }
+
+        $year = $this->filterYear();
+
+        if ($year === null) {
+            $this->errorMessage = 'Choose a specific year to export. “All” has no single year to put on the workbook.';
+
+            return null;
+        }
+
+        $includeSignatures = $signatureMode === 'with';
+
+        try {
+            $bytes = MemYearXlsxExporter::bytes(
+                (int) $user->school_id,
+                $year,
+                $this->division(),
+                $user,
+                $includeSignatures,
+            );
+        } catch (\Throwable $exception) {
+            report($exception);
+            $this->errorMessage = 'The Excel workbook could not be generated. Please try again.';
+
+            return null;
+        }
+
+        $filename = MemYearXlsxExporter::downloadName($year, $includeSignatures);
+
+        // Bytes are built BEFORE the response: a streamed callback must echo
+        // its output (its return value is discarded).
+        return response()->streamDownload(
+            static function () use ($bytes): void {
+                echo $bytes;
+            },
+            $filename,
+            [
+                'Content-Type' => MemYearXlsxExporter::CONTENT_TYPE,
+                'Content-Length' => (string) strlen($bytes),
+            ],
+        );
     }
 
     /* -------------------------------------------------------------- delete */

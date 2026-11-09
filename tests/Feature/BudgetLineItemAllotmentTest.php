@@ -87,11 +87,19 @@ class BudgetLineItemAllotmentTest extends TestCase
             ->assertSee('Travelling Expense (Local)')
             ->assertSee('53,000.00')
             // The year defaults to the newest year the school has a matrix
-            // for, and the export travels with it. (Escaped comparison: the
-            // href's & renders as &amp; in the HTML.)
+            // for, and both export modes travel with it. (Escaped comparison:
+            // the href's & renders as &amp; in the HTML.)
+            ->assertSee('Export with E-Signatures')
+            ->assertSee('Export without E-Signatures')
             ->assertSee(route('budget.per-line-item.export', [
                 'school' => $head->school_id,
                 'year' => '2026',
+                'signatures' => 'with',
+            ]))
+            ->assertSee(route('budget.per-line-item.export', [
+                'school' => $head->school_id,
+                'year' => '2026',
+                'signatures' => 'without',
             ]));
     }
 
@@ -471,7 +479,7 @@ class BudgetLineItemAllotmentTest extends TestCase
 
         $response->assertOk()
             ->assertHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-            ->assertDownload('per-line-item-expenditure-2026-alpha-elementary-school.xlsx');
+            ->assertDownload('per-line-item-expenditure-2026-alpha-elementary-school-signed.xlsx');
 
         $parts = $this->partsOf($response->getContent());
 
@@ -503,7 +511,7 @@ class BudgetLineItemAllotmentTest extends TestCase
                 'year' => 1999,
             ]))
             ->assertOk()
-            ->assertDownload('per-line-item-expenditure-2026-report-school.xlsx');
+            ->assertDownload('per-line-item-expenditure-2026-report-school-signed.xlsx');
     }
 
     public function test_the_export_requires_a_real_school_and_the_budget_role(): void
@@ -535,6 +543,31 @@ class BudgetLineItemAllotmentTest extends TestCase
                 ->get(route('budget.per-line-item.export', ['school' => $head->school_id]))
                 ->assertNotFound();
         }
+    }
+
+    public function test_the_export_rejects_an_unknown_signature_mode(): void
+    {
+        $head = $this->schoolHead();
+
+        $this->actingAs($this->budgetOfficer())
+            ->get(route('budget.per-line-item.export', [
+                'school' => $head->school_id,
+                'year' => 2026,
+                'signatures' => 'maybe',
+            ]))
+            ->assertStatus(422)
+            ->assertHeader('Content-Type', 'text/plain; charset=UTF-8');
+
+        $this->actingAs($this->budgetOfficer())
+            ->getJson(route('budget.per-line-item.export', [
+                'school' => $head->school_id,
+                'year' => 2026,
+                'signatures' => 'maybe',
+            ]))
+            ->assertStatus(422)
+            ->assertJsonFragment([
+                'message' => 'Choose "with" or "without" for the e-signature export option.',
+            ]);
     }
 
     // --------------------------------------------------------------- sidebar

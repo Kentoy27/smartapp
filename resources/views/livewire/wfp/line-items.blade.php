@@ -38,11 +38,17 @@
         'allocation' => $this->allocation,
         'certification' => $this->certification,
         'checking' => $checking,
+        'signatoryStatuses' => $signatoryStatuses,
         'canCheck' => false,
         'preparedBy' => $preparedBy,
         'schoolOptions' => null,
-        'exportUrl' => $this->school
-            ? route('wfp.lineitems.export', ['year' => $this->year])
+        'exportSignedUrl' => $this->school
+            ? route('wfp.lineitems.export', ['year' => $this->year, 'signatures' => 'with'])
             : null,
+        'exportUnsignedUrl' => $this->school
+            ? route('wfp.lineitems.export', ['year' => $this->year, 'signatures' => 'without'])
+            : null,
+        // The SH reads the block but never signs it, so no plan route shows.
+        'planUrl' => null,
     ])
 </div>

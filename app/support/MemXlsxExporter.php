@@ -4,21 +4,26 @@ namespace App\Support;
 
 use App\Models\MonthlyExpenditureItem;
 use App\Models\MonthlyExpenditureMatrix;
+use App\Models\School;
 use App\Models\User;
+use Illuminate\Support\Collection;
 
 /**
- * The Monthly Expenditure Matrix as the printed DepEd form: one .xlsx sheet
- * with the school/division header, the lines grouped under Operations- and
+ * The Monthly Expenditure Matrix as the printed DepEd form: the
+ * school/division header, the lines grouped under Operations- and
  * Project-Related Expenditures with their subtotals, the monthly TOTAL, and
  * the Prepared / Checked / Certifying / Approved signature block.
  *
- * The workbook is BUILT FROM SCRATCH — a MEM has no archived file to patch
- * (unlike a WFP, which rewrites the official template). It is a minimal but
- * complete OOXML package assembled through PurePhpZipWriter, because the
- * `zip` PHP extension is disabled on XAMPP's web-server PHP: inline strings
- * (never a sharedStrings table), builtin number format 4 ("#,##0.00") for
- * money, and a handful of cell styles. Numbers are written as numbers, so
- * the subtotals are real values a reviewer can sum, not text.
+ * One worksheet is built by {@see self::sheet()}; a whole year's twelve
+ * worksheets are packaged by {@see self::package()} (see
+ * {@see MemYearXlsxExporter}). The workbook is BUILT FROM SCRATCH — a MEM has
+ * no archived file to patch (unlike a WFP, which rewrites the official
+ * template). It is a minimal but complete OOXML package assembled through
+ * PurePhpZipWriter, because the `zip` PHP extension is disabled on XAMPP's
+ * web-server PHP: inline strings (never a sharedStrings table), builtin
+ * number format 4 ("#,##0.00") for money, and a handful of cell styles.
+ * Numbers are written as numbers, so the subtotals are real values a reviewer
+ * can sum, not text.
  *
  * Every value in the file comes from the lines as they stand NOW (quantity ×
  * unit cost, recomputed here exactly as the editor and the WFP generator do),
@@ -57,17 +62,41 @@ final class MemXlsxExporter
 
     private const S_PLAIN = 15;     // plain, no border
 
-    /** Build the workbook's bytes. */
+    private const S_SIGN_NAME = 16; // plain with a signature line beneath
+
+    private const S_CODE = 17;      // bordered, text format ("@"), left
+
+    private const S_EMPTY = 18;     // italic, centred, no border
+
+    /** The last frozen row: the two-tier column header. */
+    private const HEADER_ROW = 7;
+
+    /** The table's nine columns and their printed widths, in order. */
+    private const COLUMNS = [
+        'A' => 32,
+        'B' => 38,
+        'C' => 15,
+        'D' => 10,
+        'E' => 9,
+        'F' => 12,
+        'G' => 17,
+        'H' => 26,
+        'I' => 16,
+    ];
+
+    /**
+     * Build one matrix's workbook bytes.
+     *
+     * The signatories are the same records the annual report prints: the
+     * exporting School Head prepares, the Bookkeeper's check and the Budget
+     * Officer's certification fill the next two blocks, and the SDS approves
+     * on paper. A matrix with no sign-off keeps the blank line the form has
+     * always carried.
+     */
     public static function bytes(MonthlyExpenditureMatrix $matrix, ?User $exporter = null): string
     {
-        $school = $matrix->school;
-        $district = $school?->district;
+        $items = $matrix->items()->get();
 
-        // The two sign-offs the form prints besides the preparer's name: the
-        // Bookkeeper's check of the account titles and codes, and the Budget
-        // Officer's certification of the allotment. They are the same records
-        // the annual report prints; a matrix with no sign-off keeps the blank
-        // line the form has always carried.
         $checked = WfpAllotment::checking(
             (int) $matrix->school_id,
             (int) $matrix->year,
@@ -79,6 +108,65 @@ final class MemXlsxExporter
             $matrix->schoolDivision(),
         );
 
+        $sheet = self::sheet(
+            $matrix->school,
+            (int) $matrix->year,
+            (int) $matrix->month,
+            $items,
+            [
+                'prepared' => [
+                    'name' => self::userName($exporter),
+                    'position' => $exporter?->position ?: 'School Principal I',
+                ],
+                'checked' => [
+                    'name' => $checked['name'] ?? '',
+                    'position' => $checked['position'] ?? 'Senior Bookkeeper',
+                ],
+                'certified' => [
+                    'name' => $certified['name'] ?? '',
+                    'position' => $certified['position'] ?? 'Budget Officer III',
+                ],
+                'approved' => [
+                    'name' => '',
+                    'position' => 'Schools Division Superintendent',
+                ],
+            ],
+            $items->isEmpty(),
+        );
+
+        return self::package([
+            ['name' => 'MEM', 'xml' => $sheet['xml']],
+        ]);
+    }
+
+    /** The download's file name: sortable by year and month. */
+    public static function downloadName(MonthlyExpenditureMatrix $matrix): string
+    {
+        return sprintf(
+            'monthly-expenditure-matrix-%d-%02d.xlsx',
+            (int) $matrix->year,
+            (int) $matrix->month
+        );
+    }
+
+    /**
+     * One month's printed form as worksheet XML, with the ranges where each
+     * signatory's e-signature may be stamped.
+     *
+     * @param  Collection<int, MonthlyExpenditureItem>  $items
+     * @param  array<string, array{name: string, position: string}>  $signers
+     * @return array{xml: string, signature_ranges: array{prepared: string, checked: string, certified: string, approved: string}}
+     */
+    public static function sheet(
+        ?School $school,
+        int $year,
+        int $month,
+        Collection $items,
+        array $signers,
+        bool $emptyMessage = false,
+        bool $selectedTab = false,
+        bool $highlightTab = false,
+    ): array {
         $merges = [];
         $rows = [];
         $row = 0;
@@ -95,14 +183,14 @@ final class MemXlsxExporter
         // form with no division line reads worse than a generic one.
         $addRow(self::headerLine($row + 1, 'REPUBLIC OF THE PHILIPPINES', $merges));
         $addRow(self::headerLine($row + 1, 'DEPARTMENT OF EDUCATION', $merges));
-        $addRow(self::headerLine($row + 1, $district?->name ?: 'Schools Division Office', $merges));
+        $addRow(self::headerLine($row + 1, $school?->district?->name ?: 'Schools Division Office', $merges));
         $addRow(self::headerCell($row + 1, $school?->name ?: 'School', self::S_HEAD_BOLD, $merges));
-        $addRow(self::headerCell($row + 1, $matrix->year.' MONTHLY EXPENDITURE MATRIX', self::S_TITLE, $merges));
+        $addRow(self::headerCell($row + 1, $year.' MONTHLY EXPENDITURE MATRIX', self::S_TITLE, $merges));
         $addRow(self::headerCell(
             $row + 1,
-            'MONTH: '.strtoupper((string) $matrix->periodLabel()),
+            'MONTH: '.mb_strtoupper(self::monthName($month).' '.$year),
             self::S_PLAIN_LEFT,
-            $merges
+            $merges,
         ));
 
         /* ------------------------------------------------- column headers */
@@ -138,6 +226,8 @@ final class MemXlsxExporter
 
         /* ------------------------------------------------------- sections */
 
+        $bySection = $items->groupBy(fn (MonthlyExpenditureItem $item): string => (string) $item->section);
+
         $operationsTotal = 0.0;
         $projectTotal = 0.0;
 
@@ -150,12 +240,15 @@ final class MemXlsxExporter
             $addRow(self::cell($row + 1, 'A', self::S_BANNER, $banner));
             $merges[] = 'A'.$row.':I'.$row;
 
-            $items = $matrix->items()
-                ->where('section', $section)
-                ->get()
-                ->sortBy(fn (MonthlyExpenditureItem $item): int => (int) $item->position);
+            /** @var Collection<int, MonthlyExpenditureItem> $sectionItems */
+            $sectionItems = $bySection->get($section, collect())
+                ->sortBy([
+                    ['position', 'asc'],
+                    ['id', 'asc'],
+                ])
+                ->values();
 
-            foreach ($items as $item) {
+            foreach ($sectionItems as $item) {
                 $quantity = $item->quantity !== null ? (float) $item->quantity : null;
                 $unitCost = $item->unit_cost !== null ? (float) $item->unit_cost : null;
                 $total = round(($quantity ?? 0.0) * ($unitCost ?? 0.0), 2);
@@ -172,14 +265,14 @@ final class MemXlsxExporter
                     .self::numericCell($r, 'F', $unitCost)
                     .self::numericCell($r, 'G', $total)
                     .self::cell($r, 'H', self::S_TEXT, (string) ($item->account_title ?? ''))
-                    .self::cell($r, 'I', self::S_TEXT, (string) ($item->account_code ?? ''))
+                    .self::cell($r, 'I', self::S_CODE, (string) ($item->account_code ?? ''))
                 );
             }
 
             // A section with no lines still shows its banner and one empty
             // line, so the form reads as the month's matrix rather than as a
             // section that was forgotten.
-            if ($items->isEmpty()) {
+            if ($sectionItems->isEmpty()) {
                 $r = $row + 1;
 
                 $addRow(
@@ -191,7 +284,7 @@ final class MemXlsxExporter
                     .self::numericCell($r, 'F', null)
                     .self::numericCell($r, 'G', null)
                     .self::cell($r, 'H', self::S_TEXT, '')
-                    .self::cell($r, 'I', self::S_TEXT, '')
+                    .self::cell($r, 'I', self::S_CODE, '')
                 );
             }
 
@@ -226,13 +319,23 @@ final class MemXlsxExporter
         );
         $merges[] = 'A'.$r.':F'.$r;
 
+        if ($emptyMessage && $items->isEmpty()) {
+            // The month still gets its sheet — and says so — so a reader can
+            // tell "nothing was spent" from "the month was forgotten".
+            $r = $row + 1;
+
+            $addRow(self::cell($r, 'A', self::S_EMPTY, 'No expenditure entries for this month.'));
+            $merges[] = 'A'.$r.':I'.$r;
+        }
+
         /* ---------------------------------------------------- signatures */
 
         // The form's four blocks, left to right: the School Head prepares,
         // the Bookkeeper checks the account titles and codes, the Budget
         // Officer certifies the allotment, and the SDS approves. The second
         // label wraps under the first, as the printed column is narrow; the
-        // blank rows below the labels are the space a wet signature goes in.
+        // blank rows below the labels are the space a signature — wet or
+        // digital — goes in.
         $addRow('');
 
         $r = $row + 1;
@@ -260,13 +363,16 @@ final class MemXlsxExporter
         $addRow('');
         $addRow('');
 
+        $blankStart = $row - 2;
+        $blankEnd = $row;
+
         $r = $row + 1;
 
         $addRow(
-            self::cell($r, 'A', self::S_PLAIN, $exporter?->name ?: '_________________')
-            .self::cell($r, 'B', self::S_PLAIN, $checked['name'] ?? '_________________')
-            .self::cell($r, 'C', self::S_PLAIN, $certified['name'] ?? '_________________')
-            .self::cell($r, 'F', self::S_PLAIN, '_________________')
+            self::cell($r, 'A', self::S_SIGN_NAME, $signers['prepared']['name'] ?? '')
+            .self::cell($r, 'B', self::S_SIGN_NAME, $signers['checked']['name'] ?? '')
+            .self::cell($r, 'C', self::S_SIGN_NAME, $signers['certified']['name'] ?? '')
+            .self::cell($r, 'F', self::S_SIGN_NAME, $signers['approved']['name'] ?? '')
         );
 
         $merges[] = 'C'.$r.':E'.$r;
@@ -275,10 +381,10 @@ final class MemXlsxExporter
         $r = $row + 1;
 
         $addRow(
-            self::cell($r, 'A', self::S_PLAIN, $exporter?->position ?: 'School Principal I')
-            .self::cell($r, 'B', self::S_PLAIN, $checked['position'] ?? 'Senior Bookkeeper')
-            .self::cell($r, 'C', self::S_PLAIN, $certified['position'] ?? 'Budget Officer III')
-            .self::cell($r, 'F', self::S_PLAIN, 'Schools Division Superintendent')
+            self::cell($r, 'A', self::S_PLAIN, $signers['prepared']['position'] ?? 'School Principal I')
+            .self::cell($r, 'B', self::S_PLAIN, $signers['checked']['position'] ?? 'Senior Bookkeeper')
+            .self::cell($r, 'C', self::S_PLAIN, $signers['certified']['position'] ?? 'Budget Officer III')
+            .self::cell($r, 'F', self::S_PLAIN, $signers['approved']['position'] ?? 'Schools Division Superintendent')
         );
 
         $merges[] = 'C'.$r.':E'.$r;
@@ -286,51 +392,99 @@ final class MemXlsxExporter
 
         /* ------------------------------------------------------- package */
 
-        $sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            .'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-            .'<cols>'
-            .'<col min="1" max="1" width="32" customWidth="1"/>'
-            .'<col min="2" max="2" width="38" customWidth="1"/>'
-            .'<col min="3" max="3" width="15" customWidth="1"/>'
-            .'<col min="4" max="4" width="10" customWidth="1"/>'
-            .'<col min="5" max="5" width="9" customWidth="1"/>'
-            .'<col min="6" max="6" width="12" customWidth="1"/>'
-            .'<col min="7" max="7" width="17" customWidth="1"/>'
-            .'<col min="8" max="8" width="26" customWidth="1"/>'
-            .'<col min="9" max="9" width="16" customWidth="1"/>'
-            .'</cols>'
+        $lastRow = $row;
+
+        $xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            .'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+
+        if ($highlightTab) {
+            $xml .= '<sheetPr><tabColor rgb="FF2F5597"/></sheetPr>';
+        }
+
+        $xml .= '<dimension ref="A1:I'.$lastRow.'"/>'
+            .'<sheetViews><sheetView'
+            .($selectedTab ? ' tabSelected="1"' : '')
+            .' workbookViewId="0">'
+            .'<pane ySplit="'.self::HEADER_ROW.'" topLeftCell="A'.(self::HEADER_ROW + 1)
+            .'" activePane="bottomLeft" state="frozen"/>'
+            .'<selection pane="bottomLeft" activeCell="A'.(self::HEADER_ROW + 1)
+            .'" sqref="A'.(self::HEADER_ROW + 1).'"/>'
+            .'</sheetView></sheetViews>'
+            .'<sheetFormatPr defaultRowHeight="15"/>'
+            .self::colsXml()
             .'<sheetData>';
 
         foreach ($rows as $number => $cellsXml) {
-            $sheetXml .= '<row r="'.$number.'">'.$cellsXml.'</row>';
+            $xml .= '<row r="'.$number.'">'.$cellsXml.'</row>';
         }
 
-        $sheetXml .= '</sheetData>';
+        $xml .= '</sheetData>';
 
         if ($merges !== []) {
-            $sheetXml .= '<mergeCells count="'.count($merges).'">';
+            $xml .= '<mergeCells count="'.count($merges).'">';
 
             foreach ($merges as $merge) {
-                $sheetXml .= '<mergeCell ref="'.$merge.'"/>';
+                $xml .= '<mergeCell ref="'.$merge.'"/>';
             }
 
-            $sheetXml .= '</mergeCells>';
+            $xml .= '</mergeCells>';
         }
 
         // Landscape, fit to one page wide: the form is wider than it is tall,
         // and a printout that spills a lone Account Code column onto page two
         // is the sort of thing that gets retyped by hand.
-        $sheetXml .= '<pageMargins left="0.5" right="0.5" top="0.5" bottom="0.5" header="0.3" footer="0.3"/>'
+        $xml .= '<pageMargins left="0.5" right="0.5" top="0.5" bottom="0.5" header="0.3" footer="0.3"/>'
             .'<pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/>'
             .'</worksheet>';
 
-        return PurePhpZipWriter::create([
+        return [
+            'xml' => $xml,
+            'signature_ranges' => [
+                'prepared' => 'A'.$blankStart.':A'.$blankEnd,
+                'checked' => 'B'.$blankStart.':B'.$blankEnd,
+                'certified' => 'C'.$blankStart.':E'.$blankEnd,
+                'approved' => 'F'.$blankStart.':I'.$blankEnd,
+            ],
+        ];
+    }
+
+    /**
+     * Wrap one or more worksheet parts in a minimal but complete OOXML
+     * package. Styles are shared; the sheets are numbered in the order given.
+     *
+     * @param  array<int, array{name: string, xml: string}>  $sheets
+     */
+    public static function package(array $sheets, int $activeTab = 0): string
+    {
+        $sheetTags = '';
+        $relationships = '';
+        $overrides = '';
+
+        foreach ($sheets as $index => $sheet) {
+            $number = $index + 1;
+
+            $sheetTags .= '<sheet name="'.htmlspecialchars($sheet['name'], ENT_XML1 | ENT_QUOTES, 'UTF-8')
+                .'" sheetId="'.$number.'" r:id="rId'.$number.'"/>';
+            $relationships .= '<Relationship Id="rId'.$number.'" '
+                .'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+                .'Target="worksheets/sheet'.$number.'.xml"/>';
+            $overrides .= '<Override PartName="/xl/worksheets/sheet'.$number.'.xml" '
+                .'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
+        }
+
+        $stylesId = count($sheets) + 1;
+
+        $relationships .= '<Relationship Id="rId'.$stylesId.'" '
+            .'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" '
+            .'Target="styles.xml"/>';
+
+        $parts = [
             '[Content_Types].xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
                 .'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
                 .'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
                 .'<Default Extension="xml" ContentType="application/xml"/>'
                 .'<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-                .'<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+                .$overrides
                 .'<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
                 .'</Types>',
 
@@ -342,31 +496,23 @@ final class MemXlsxExporter
             'xl/workbook.xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
                 .'<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
                 .'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-                .'<sheets>'
-                .'<sheet name="MEM" sheetId="1" r:id="rId1"/>'
-                .'</sheets>'
+                .'<bookViews><workbookView activeTab="'.max(0, min(count($sheets) - 1, $activeTab)).'"/></bookViews>'
+                .'<sheets>'.$sheetTags.'</sheets>'
                 .'</workbook>',
 
             'xl/_rels/workbook.xml.rels' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
                 .'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-                .'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
-                .'<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+                .$relationships
                 .'</Relationships>',
 
             'xl/styles.xml' => self::stylesXml(),
+        ];
 
-            'xl/worksheets/sheet1.xml' => $sheetXml,
-        ]);
-    }
+        foreach ($sheets as $index => $sheet) {
+            $parts['xl/worksheets/sheet'.($index + 1).'.xml'] = $sheet['xml'];
+        }
 
-    /** The download's file name: sortable by year and month. */
-    public static function downloadName(MonthlyExpenditureMatrix $matrix): string
-    {
-        return sprintf(
-            'monthly-expenditure-matrix-%d-%02d.xlsx',
-            (int) $matrix->year,
-            (int) $matrix->month
-        );
+        return PurePhpZipWriter::create($parts);
     }
 
     /* ------------------------------------------------------- cell builders */
@@ -416,21 +562,46 @@ final class MemXlsxExporter
         return '<c r="'.$column.$rowNumber.'" s="'.$style.'"/>';
     }
 
+    private static function colsXml(): string
+    {
+        $xml = '<cols>';
+        $index = 0;
+
+        foreach (self::COLUMNS as $width) {
+            $index++;
+            $xml .= '<col min="'.$index.'" max="'.$index.'" width="'.$width.'" customWidth="1"/>';
+        }
+
+        return $xml.'</cols>';
+    }
+
+    private static function monthName(int $month): string
+    {
+        return date('F', mktime(0, 0, 0, max(1, min(12, $month)), 1, 2000));
+    }
+
+    private static function userName(?User $user): string
+    {
+        return trim((string) ($user?->name ?: $user?->username));
+    }
+
     /* ------------------------------------------------------------- styles */
 
     /**
-     * Three fonts, one gray fill, one thin border, and the cell styles the
-     * form needs. Money uses builtin numFmtId 4 ("#,##0.00") — no custom
-     * numFmts section, so the file opens the same in Excel and WPS.
+     * Four fonts, one gray fill, two borders (all-thin and signature-line),
+     * and the cell styles the form needs. Money uses builtin numFmtId 4
+     * ("#,##0.00") and account codes builtin 49 ("@") — no custom numFmts
+     * section, so the file opens the same in Excel and WPS.
      */
     private static function stylesXml(): string
     {
         $font = static fn (string $extra = ''): string => '<font>'.$extra.'<sz val="10"/><name val="Calibri"/></font>';
 
-        $fonts = '<fonts count="3">'
+        $fonts = '<fonts count="4">'
             .$font()
             .$font('<b/>')
             .'<font><b/><sz val="12"/><name val="Calibri"/></font>'
+            .$font('<i/>')
             .'</fonts>';
 
         $fills = '<fills count="3">'
@@ -441,12 +612,17 @@ final class MemXlsxExporter
 
         $thin = '<color indexed="64"/>';
 
-        $borders = '<borders count="2">'
+        $borders = '<borders count="3">'
             .'<border><left/><right/><top/><bottom/><diagonal/></border>'
             .'<border>'
             .'<left style="thin">'.$thin.'</left>'
             .'<right style="thin">'.$thin.'</right>'
             .'<top style="thin">'.$thin.'</top>'
+            .'<bottom style="thin">'.$thin.'</bottom>'
+            .'<diagonal/>'
+            .'</border>'
+            .'<border>'
+            .'<left/><right/><top/>'
             .'<bottom style="thin">'.$thin.'</bottom>'
             .'<diagonal/>'
             .'</border>'
@@ -456,7 +632,7 @@ final class MemXlsxExporter
         // attributes — never concatenated into the tag itself.
         $xf = static fn (array $attrs, string $alignment = ''): string => '<xf '.implode(' ', $attrs).' xfId="0">'.$alignment.'</xf>';
 
-        $cellXfs = '<cellXfs count="16">'
+        $cellXfs = '<cellXfs count="19">'
             .$xf(['numFmtId="0"', 'fontId="0"', 'fillId="0"', 'borderId="0"']) // 0 default
             .$xf(['numFmtId="0"', 'fontId="2"', 'fillId="0"', 'borderId="0"', 'applyFont="1"', 'applyAlignment="1"'], '<alignment horizontal="center" vertical="center"/>') // 1 title
             .$xf(['numFmtId="0"', 'fontId="0"', 'fillId="0"', 'borderId="0"', 'applyAlignment="1"'], '<alignment horizontal="center" vertical="center"/>') // 2 head line
@@ -473,6 +649,9 @@ final class MemXlsxExporter
             .$xf(['numFmtId="4"', 'fontId="1"', 'fillId="0"', 'borderId="1"', 'applyNumberFormat="1"', 'applyFont="1"', 'applyBorder="1"', 'applyAlignment="1"'], '<alignment horizontal="right" vertical="center"/>') // 13 total value
             .$xf(['numFmtId="0"', 'fontId="1"', 'fillId="0"', 'borderId="0"', 'applyFont="1"', 'applyAlignment="1"'], '<alignment horizontal="left" vertical="center"/>') // 14 label
             .$xf(['numFmtId="0"', 'fontId="0"', 'fillId="0"', 'borderId="0"', 'applyAlignment="1"'], '<alignment horizontal="left" vertical="center"/>') // 15 plain
+            .$xf(['numFmtId="0"', 'fontId="0"', 'fillId="0"', 'borderId="2"', 'applyBorder="1"', 'applyAlignment="1"'], '<alignment horizontal="left" vertical="center"/>') // 16 signature name
+            .$xf(['numFmtId="49"', 'fontId="0"', 'fillId="0"', 'borderId="1"', 'applyNumberFormat="1"', 'applyBorder="1"', 'applyAlignment="1"'], '<alignment horizontal="left" vertical="center"/>') // 17 account code
+            .$xf(['numFmtId="0"', 'fontId="3"', 'fillId="0"', 'borderId="0"', 'applyFont="1"', 'applyAlignment="1"'], '<alignment horizontal="center" vertical="center"/>') // 18 empty state
             .'</cellXfs>';
 
         return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'

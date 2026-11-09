@@ -243,7 +243,7 @@ class WfpApprovalTest extends TestCase
             ->assertSee('Pending Approval')
             ->call('openReview', $plan->id)
             ->assertSet('showReview', true)
-            ->assertSee('Approve WFP')
+            ->assertSee('Sign & approve WFP')
             ->assertSee('wire:confirm', false)
             ->set('remarks', 'Certified and approved.')
             ->call('approve')

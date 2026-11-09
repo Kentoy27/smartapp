@@ -16,11 +16,57 @@
 
     <div class="page-header">
         <h1>Monthly Expenditure Matrix</h1>
-        <p>
+        {{-- <p>
             Your school’s monthly expenditure lines — the source of truth your WFP is generated from.
             @if ($this->school) <span class="mem-chip">{{ $this->school->name }}</span> @endif
-        </p>
+        </p> --}}
     </div>
+
+    @if (Auth::user()?->school_id !== null)
+        @php($signatoryStatuses = $this->signatoryStatuses)
+        @if (! empty($signatoryStatuses))
+            <section class="card wfp-signatory-statuses" aria-label="Signatory status for the selected year">
+                <div class="card-head">
+                    <div class="card-title">Signatory Status</div>
+                </div>
+
+                <div class="wfp-signatory-statuses__list">
+                    @foreach ($signatoryStatuses as $status)
+                        <div class="wfp-signatory-status">
+                            <div class="wfp-signatory-status__header">
+                                <span class="wfp-signatory-status__label">{{ $status['label'] }}</span>
+                                <span @class([
+                                    'wfp-signatory-status__badge',
+                                    'wfp-signatory-status__badge--pending' => ($status['state'] ?? 'pending') === 'pending',
+                                    'wfp-signatory-status__badge--checked' => ($status['state'] ?? 'pending') === 'checked',
+                                    'wfp-signatory-status__badge--certified' => ($status['state'] ?? 'pending') === 'certified',
+                                    'wfp-signatory-status__badge--approved' => ($status['state'] ?? 'pending') === 'approved',
+                                    'wfp-signatory-status__badge--returned' => ($status['state'] ?? 'pending') === 'returned',
+                                ])>{{ $status['badge'] }}</span>
+                            </div>
+
+                            @if (($status['state'] ?? 'pending') === 'pending')
+                                <div class="wfp-signatory-status__meta">{{ $status['pending_text'] ?? 'Pending' }}</div>
+                            @else
+                                @if (! empty($status['name']))
+                                    <div class="wfp-signatory-status__meta">{{ $status['name'] }}</div>
+                                @endif
+                                @if (! empty($status['position']))
+                                    <div class="wfp-signatory-status__meta">{{ $status['position'] }}</div>
+                                @endif
+                                @if (! empty($status['date']))
+                                    <div class="wfp-signatory-status__meta">{{ $status['date']->format('M j, Y g:i A') }}</div>
+                                @endif
+                                @if (! empty($status['remarks']))
+                                    <div class="wfp-signatory-status__remarks"><strong>Remarks:</strong> {{ $status['remarks'] }}</div>
+                                @endif
+                            @endif
+                        </div>
+                    @endforeach
+                </div>
+            </section>
+        @endif
+    @endif
 
     @if ($errorMessage)
         <div class="ac-import-error mem-banner" role="alert">
@@ -82,6 +128,47 @@
                     </button> --}}
                 @endif
             </div>
+
+            @if ($this->canCreate())
+                {{-- The whole year is one workbook: twelve worksheets, JAN…DEC,
+                     each the month's printed form. The selected year on this
+                     page is the one exported. The signed copy stamps the
+                     workflow signers' registered profile signatures; the
+                     unsigned copy leaves the signature bands blank. --}}
+                <div class="mem-export-actions" aria-label="Export the selected year">
+                    <button
+                        type="button"
+                        class="ac-import-btn"
+                        wire:click="exportYear('with')"
+                        wire:loading.attr="disabled"
+                        wire:target="exportYear"
+                        @disabled($year === '')
+                        title="{{ $year === ''
+                            ? 'Choose a specific year to export'
+                            : 'Download all twelve months of CY '.$year.' with the available e-signatures' }}"
+                    >
+                        <x-icon name="file-spreadsheet" :size="16" />
+                        <span wire:loading.remove wire:target="exportYear">Export with E-Signatures</span>
+                        <span wire:loading wire:target="exportYear">Preparing…</span>
+                    </button>
+
+                    <button
+                        type="button"
+                        class="ac-import-btn"
+                        wire:click="exportYear('without')"
+                        wire:loading.attr="disabled"
+                        wire:target="exportYear"
+                        @disabled($year === '')
+                        title="{{ $year === ''
+                            ? 'Choose a specific year to export'
+                            : 'Download all twelve months of CY '.$year.' for wet signing' }}"
+                    >
+                        <x-icon name="download" :size="16" />
+                        <span wire:loading.remove wire:target="exportYear">Export without E-Signatures</span>
+                        <span wire:loading wire:target="exportYear">Preparing…</span>
+                    </button>
+                </div>
+            @endif
         </div>
 
         @unless ($this->canCreate())

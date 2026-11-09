@@ -3,10 +3,10 @@
 namespace App\Models;
 
 use App\Support\SchoolDivision;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
-use Carbon\CarbonInterface;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -37,7 +37,6 @@ class User extends Authenticatable
     protected $hidden = [
         'password',
         'remember_token',
-        'must_change_password',
     ];
 
     protected $casts = [
@@ -371,19 +370,25 @@ class User extends Authenticatable
 
     /**
      * Whether this account may access the School Head's Work and Financial
-     * Plan (WFP) workspace — the /wfp pages, the matrices and the report's
-     * school-scoped copy. The role column uses 'user' for the School Head
-     * (SH, the UI labels it 'SH'); only a non-superadmin SH reaches it —
-     * everyone else gets a 404 from the route guard.
-     *
-     * The Bookkeeper does NOT work these pages: its interface is the Budget
-     * office-style checking pair (Monthly Expenditure and Per Line Item
-     * Expenditure — see {@see canCheckLineItems()}), narrowed to its
-     * assigned schools.
+     * Plan authoring workspace. Budget and Bookkeeper have separate
+     * read-only sign-off access through {@see canViewWfpSignoffs()}.
      */
     public function canAccessWfp(): bool
     {
         return ! $this->is_superadmin && $this->role === 'user';
+    }
+
+    /**
+     * Whether this account may open the read-only WFP sign-off surfaces.
+     * The School Head reads their own work, the Budget and Bookkeeper roles
+     * read their division/school-assigned reports, and the approving official
+     * reads submitted plans. This does not grant any write permission.
+     */
+    public function canViewWfpSignoffs(): bool
+    {
+        return $this->canAccessWfp()
+            || $this->canCheckLineItems()
+            || $this->canApproveWfp();
     }
 
     /**
@@ -546,6 +551,44 @@ class User extends Authenticatable
     public function hasSignature(): bool
     {
         return $this->signature_path !== null && $this->signature_path !== '';
+    }
+
+    /**
+     * The account's stored signature bytes, for stamping into an exported
+     * workbook, or null when no readable signature is on file.
+     *
+     * The extension prefers the uploaded file's original name and falls back
+     * to the stored path, so a signature saved under a generated name still
+     * carries the format its bytes were uploaded as.
+     *
+     * @return array{bytes: string, extension: string}|null
+     */
+    public function signatureImage(): ?array
+    {
+        if (! $this->hasSignature()) {
+            return null;
+        }
+
+        $path = (string) $this->signature_path;
+        $disk = Storage::disk('local');
+
+        if (! $disk->exists($path)) {
+            return null;
+        }
+
+        $bytes = (string) $disk->get($path);
+
+        if (trim($bytes) === '') {
+            return null;
+        }
+
+        $extension = strtolower(pathinfo((string) $this->signature_original_name, PATHINFO_EXTENSION));
+
+        if ($extension === '') {
+            $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION)) ?: 'png';
+        }
+
+        return ['bytes' => $bytes, 'extension' => $extension];
     }
 
     /**

@@ -119,6 +119,17 @@
                             </td>
                             <td>
                                 <span class="mem-status mem-status--{{ $plan->status }}">{{ $plan->statusLabel() }}</span>
+                                @php($planSignatories = \App\Support\WfpAllotment::signatoryStatuses(
+                                    $plan->school_id !== null ? (int) $plan->school_id : null,
+                                    (int) $plan->year,
+                                    $plan->schoolDivision(),
+                                    $plan,
+                                ))
+                                <div class="wfp-approval-signoff-list">
+                                    @foreach ($planSignatories as $signatory)
+                                        <span class="wfp-signatory-status__badge">{{ $signatory['label'] }}: {{ $signatory['badge'] }}</span>
+                                    @endforeach
+                                </div>
                             </td>
                             <td>
                                 @if ($plan->isApproved())
@@ -143,7 +154,7 @@
                                 <button type="button" class="users-action" wire:click="openReview({{ $plan->id }})">
                                     <span class="users-action-inner">
                                         <x-icon name="eye" :size="14" />
-                                        <span>Review</span>
+                                        <span>{{ $plan->isPendingApproval() ? 'Review & Sign' : 'Review' }}</span>
                                     </span>
                                 </button>
                                 <a
@@ -227,6 +238,11 @@
                             @endif
                         </div>
                     </div>
+
+                    @livewire('wfp-signatory-actions', [
+                        'schoolId' => $reviewPlan->school_id,
+                        'year' => (int) $reviewPlan->year,
+                    ], key('wfp-approval-signoffs-'.$reviewPlan->id))
 
                     @if ($this->reviewOutOfDate)
                         <div class="mem-banner mem-banner--warn" role="status">
@@ -398,12 +414,12 @@
                                     type="button"
                                     class="btn-primary"
                                     wire:click="approve"
-                                    wire:confirm="Approve this WFP? This final sign-off cannot be undone."
+                                    wire:confirm="Sign and approve this WFP? This final sign-off cannot be undone."
                                     wire:loading.attr="disabled"
                                     wire:target="approve"
                                 >
-                                    <span wire:loading.remove wire:target="approve">Approve WFP</span>
-                                    <span wire:loading wire:target="approve">Approving…</span>
+                                    <span wire:loading.remove wire:target="approve">Sign &amp; approve WFP</span>
+                                    <span wire:loading wire:target="approve">Signing…</span>
                                 </button>
                             @else
                                 <button
@@ -412,7 +428,7 @@
                                     disabled
                                     title="The plan is out of date or Budget review is no longer current. Return it for revision instead."
                                 >
-                                    Approve WFP
+                                    Sign &amp; approve WFP
                                 </button>
                             @endif
                         </div>

@@ -301,8 +301,6 @@ class UsersTable extends Component
         $user->forceFill([
             'role' => $validated['selectedRole'],
             'is_superadmin' => $validated['selectedRole'] === 'superadmin',
-            'must_change_password' => $user->must_change_password
-                || ($validated['selectedRole'] === 'user' && $user->role !== 'user'),
         ])->save();
 
         $username = $user->username;
@@ -553,7 +551,6 @@ class UsersTable extends Component
             'username' => $validated['username'],
             'email' => $validated['email'],
             'password' => $validated['password'],
-            'must_change_password' => $selectedRole === 'user',
             'role' => $selectedRole,
             'is_superadmin' => $selectedRole === 'superadmin',
         ])->save();
@@ -588,8 +585,7 @@ class UsersTable extends Component
             'viewer' => 'a viewer',
             default => 'a user',
         };
-        $this->successMessage = "Account created — {$user->username} was added as {$roleDescription}."
-            .($selectedRole === 'user' ? ' A password change is required at first sign-in.' : '');
+        $this->successMessage = "Account created — {$user->username} was added as {$roleDescription}.";
 
         $this->announce();
     }
@@ -609,7 +605,6 @@ class UsersTable extends Component
         $selectedRole = $this->canAssignRoles()
             ? $validated['role']
             : 'user';
-        $roleChangedToSchoolHead = $selectedRole === 'user' && $user->role !== 'user';
 
         $classification = $this->classificationFor($selectedRole, $user->schoolSublevel());
 
@@ -629,9 +624,6 @@ class UsersTable extends Component
 
         if (($validated['password'] ?? '') !== '') {
             $user->password = $validated['password']; // hashed by the model cast
-            $user->must_change_password = $selectedRole === 'user';
-        } elseif ($roleChangedToSchoolHead) {
-            $user->must_change_password = true;
         }
 
         $user->save();

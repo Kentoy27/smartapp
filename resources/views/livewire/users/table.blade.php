@@ -528,7 +528,7 @@
                         @if ($this->selectedSchoolId !== '')
                             <div class="field-hint">Defaults to {{ $this->selectedSchoolId }} — the selected school's ID. Change it if you want a different login.</div>
                             @if ($this->editingUserId === null)
-                                <div class="field-hint">A private password is required and must be changed at first sign-in.</div>
+                                <div class="field-hint">A private password is required.</div>
                             @endif
                         @else
                             <div class="field-hint">This school has no School ID on record, so enter a username.</div>
@@ -580,7 +580,7 @@
                         </button>
                     </div>
                     @if ($this->isSchoolHead())
-                        <span class="field-hint">Use at least 12 characters with uppercase and lowercase letters, a number, and a symbol. The SH must change any new or reset password at first sign-in.</span>
+                        <span class="field-hint">Use at least 12 characters with uppercase and lowercase letters, a number, and a symbol.</span>
                     @endif
                     @error('password') <div class="error-text">{{ $message }}</div> @enderror
                 </div>

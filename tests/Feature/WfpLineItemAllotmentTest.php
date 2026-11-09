@@ -10,14 +10,23 @@ use App\Models\MonthlyExpenditureMatrix;
 use App\Models\School;
 use App\Models\SchoolAllotment;
 use App\Models\User;
+use App\Models\WfpReportCheck;
 use App\Support\PurePhpZipReader;
+use App\Support\SchoolDivision;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Tests\TestCase;
 
 class WfpLineItemAllotmentTest extends TestCase
 {
     use RefreshDatabase;
+
+    private const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2n1cAAAAASUVORK5CYII=';
+
+    private const PNG_RED = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+    private const PNG_BLACK = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
     private function schoolHead(string $name = 'Allotment School'): User
     {
@@ -50,6 +59,19 @@ class WfpLineItemAllotmentTest extends TestCase
         ], $attributes));
     }
 
+    /** Register an account's profile signature, the way the profile page does. */
+    private function registerSignature(User $user, string $encoded = self::PNG): void
+    {
+        $path = 'signatures/'.$user->id.'/signature.png';
+        Storage::disk('local')->put($path, base64_decode($encoded));
+
+        $user->forceFill([
+            'signature_path' => $path,
+            'signature_original_name' => 'signature.png',
+            'signature_mime_type' => 'image/png',
+        ])->save();
+    }
+
     // ---------------------------------------------------------------- access
 
     public function test_a_guest_is_redirected_to_login(): void
@@ -64,8 +86,18 @@ class WfpLineItemAllotmentTest extends TestCase
             ->assertOk()
             ->assertSeeLivewire('wfp-line-item-allotment')
             ->assertSee('Per Line Item Expenditure')
-            // The Excel download travels with the year the reader is on.
-            ->assertSee(route('wfp.lineitems.export', ['year' => (string) now()->year]), false);
+            // Both Excel downloads travel with the year the reader is on.
+            ->assertSee('Export with E-Signatures')
+            ->assertSee('Export without E-Signatures')
+            // The href's & renders as &amp;, so the comparison is escaped.
+            ->assertSee(route('wfp.lineitems.export', [
+                'year' => (string) now()->year,
+                'signatures' => 'with',
+            ]))
+            ->assertSee(route('wfp.lineitems.export', [
+                'year' => (string) now()->year,
+                'signatures' => 'without',
+            ]));
     }
 
     public function test_non_school_head_roles_get_a_404(): void
@@ -254,7 +286,7 @@ class WfpLineItemAllotmentTest extends TestCase
 
         $response->assertOk()
             ->assertHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-            ->assertDownload('per-line-item-expenditure-2026.xlsx');
+            ->assertDownload('per-line-item-expenditure-2026-signed.xlsx');
 
         $parts = $this->partsOf($response->getContent());
 
@@ -356,7 +388,7 @@ class WfpLineItemAllotmentTest extends TestCase
         $this->actingAs($sh)
             ->get(route('wfp.lineitems.export', ['year' => 1999]))
             ->assertOk()
-            ->assertDownload('per-line-item-expenditure-2026.xlsx');
+            ->assertDownload('per-line-item-expenditure-2026-signed.xlsx');
     }
 
     public function test_another_schools_figures_are_never_in_the_export(): void
@@ -407,6 +439,163 @@ class WfpLineItemAllotmentTest extends TestCase
         $this->assertStringContainsString('MARIA BUDGET', $sheet);
         $this->assertStringContainsString('Budget Officer II', $sheet);
         $this->assertStringContainsString('Certified', $sheet);
+    }
+
+    public function test_the_signed_export_stamps_the_workflow_signatures_and_the_unsigned_copy_omits_them(): void
+    {
+        $sh = $this->schoolHead('Signature School');
+        // A name with an apostrophe, so the drawing descriptor's XML escaping
+        // is exercised: the assertions below compare the decoded text.
+        $sh->forceFill(['name' => "Annie O'Keefe"])->save();
+
+        $bookkeeper = User::factory()->create([
+            'role' => 'bookkeeper',
+            'is_superadmin' => false,
+            'school_id' => $sh->school_id,
+            'name' => 'Edilyn Lirazan',
+            'position' => 'Senior Bookkeeper',
+        ]);
+        $budget = User::factory()->create([
+            'role' => 'budget',
+            'is_superadmin' => false,
+            'name' => 'Lyn Rose E. Otea',
+            'position' => 'Budget Officer III',
+        ]);
+        $sds = User::factory()->create([
+            'role' => 'superadmin',
+            'is_superadmin' => true,
+            'name' => 'Grace Villanueva',
+        ]);
+
+        $this->registerSignature($sh, self::PNG);
+        $this->registerSignature($bookkeeper, self::PNG_RED);
+        $this->registerSignature($budget, self::PNG_BLACK);
+        $this->registerSignature($sds, self::PNG);
+
+        $this->line($sh, 1);
+
+        WfpReportCheck::create([
+            'school_id' => $sh->school_id,
+            'school_division' => SchoolDivision::ELEMENTARY,
+            'year' => 2026,
+            'checked_by' => $bookkeeper->id,
+            'checked_at' => now(),
+        ]);
+        SchoolAllotment::create([
+            'school_id' => $sh->school_id,
+            'school_division' => SchoolDivision::ELEMENTARY,
+            'year' => 2026,
+            'amount' => 50000,
+            'certified_by' => $budget->id,
+            'certified_at' => now(),
+        ]);
+
+        $signed = $this->actingAs($sh)->get(route('wfp.lineitems.export', ['year' => 2026]));
+
+        $signed->assertOk()
+            ->assertHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            ->assertDownload('per-line-item-expenditure-2026-signed.xlsx');
+
+        $parts = $this->partsOf($signed->getContent());
+
+        // Each distinct profile signature is stored once; the report's single
+        // sheet draws the three signers' images through one drawing part.
+        $this->assertCount(3, $this->partsMatching($parts, 'xl/media/'));
+        $this->assertCount(1, $this->partsMatching($parts, 'xl/drawings/drawing'));
+
+        // The descriptor is an XML attribute, so a name with an apostrophe
+        // arrives escaped; compare against the decoded text so the assertion
+        // does not depend on the factory name's decorative characters.
+        $drawing = html_entity_decode($parts['xl/drawings/drawing1.xml'], ENT_XML1 | ENT_QUOTES, 'UTF-8');
+        $this->assertStringContainsString('Digital signature of '.$sh->name, $drawing);
+        $this->assertStringContainsString('Digital signature of '.$bookkeeper->name, $drawing);
+        $this->assertStringContainsString('Digital signature of '.$budget->name, $drawing);
+
+        // The SDS has no approval record for this report, so its signature is
+        // never substituted into the Approved block.
+        $this->assertStringNotContainsString($sds->name, $drawing);
+
+        // The printed names are part of the form in either mode.
+        $sheet = $parts['xl/worksheets/sheet1.xml'];
+        $this->assertStringContainsString(strtoupper($sh->name), $sheet);
+        $this->assertStringContainsString('EDILYN LIRAZAN', $sheet);
+        $this->assertStringContainsString('LYN ROSE E. OTEA', $sheet);
+
+        // Without e-signatures the same form carries the names but no images
+        // or drawings, ready for wet signing.
+        $unsigned = $this->actingAs($sh)->get(route('wfp.lineitems.export', [
+            'year' => 2026,
+            'signatures' => 'without',
+        ]));
+
+        $unsigned->assertOk()
+            ->assertDownload('per-line-item-expenditure-2026-unsigned.xlsx');
+
+        $parts = $this->partsOf($unsigned->getContent());
+
+        $this->assertSame([], $this->partsMatching($parts, 'xl/media/'));
+        $this->assertSame([], $this->partsMatching($parts, 'xl/drawings/'));
+
+        $sheet = $parts['xl/worksheets/sheet1.xml'];
+        $this->assertStringNotContainsString('<drawing', $sheet);
+        $this->assertStringContainsString(strtoupper($sh->name), $sheet);
+        $this->assertStringContainsString('EDILYN LIRAZAN', $sheet);
+    }
+
+    public function test_a_check_whose_bookkeeper_lost_school_access_is_not_stamped(): void
+    {
+        $sh = $this->schoolHead('Stale School');
+        $bookkeeper = User::factory()->create([
+            'role' => 'bookkeeper',
+            'is_superadmin' => false,
+            'school_id' => $sh->school_id,
+            'name' => 'Unassigned Bookkeeper',
+        ]);
+
+        $this->registerSignature($sh, self::PNG);
+        $this->registerSignature($bookkeeper, self::PNG_RED);
+
+        $this->line($sh, 1);
+
+        WfpReportCheck::create([
+            'school_id' => $sh->school_id,
+            'school_division' => SchoolDivision::ELEMENTARY,
+            'year' => 2026,
+            'checked_by' => $bookkeeper->id,
+            'checked_at' => now(),
+        ]);
+
+        // The check exists, but the Bookkeeper is no longer assigned to the
+        // school: the workflow no longer authorizes the signature.
+        $bookkeeper->assignedSchools()->detach();
+
+        $drawing = html_entity_decode(
+            $this->partsOf(
+                $this->actingAs($sh)->get(route('wfp.lineitems.export', ['year' => 2026]))->getContent()
+            )['xl/drawings/drawing1.xml'] ?? '',
+            ENT_XML1 | ENT_QUOTES,
+            'UTF-8'
+        );
+
+        $this->assertStringContainsString('Digital signature of '.$sh->name, $drawing);
+        $this->assertStringNotContainsString('Unassigned Bookkeeper', $drawing);
+    }
+
+    public function test_the_export_rejects_an_unknown_signature_mode(): void
+    {
+        $sh = $this->schoolHead();
+
+        $this->actingAs($sh)
+            ->get(route('wfp.lineitems.export', ['year' => 2026, 'signatures' => 'maybe']))
+            ->assertStatus(422)
+            ->assertHeader('Content-Type', 'text/plain; charset=UTF-8');
+
+        $this->actingAs($sh)
+            ->getJson(route('wfp.lineitems.export', ['year' => 2026, 'signatures' => 'maybe']))
+            ->assertStatus(422)
+            ->assertJsonFragment([
+                'message' => 'Choose "with" or "without" for the e-signature export option.',
+            ]);
     }
 
     public function test_a_guest_and_non_school_head_roles_cannot_export(): void
@@ -471,6 +660,21 @@ class WfpLineItemAllotmentTest extends TestCase
         unlink($path);
 
         return $parts;
+    }
+
+    /**
+     * The part names that begin with the given prefix — the signature media
+     * and the drawing part, when a signed export added them.
+     *
+     * @param  array<string, string>  $parts
+     * @return array<int, string>
+     */
+    private function partsMatching(array $parts, string $prefix): array
+    {
+        return array_values(array_filter(
+            array_keys($parts),
+            fn (string $name): bool => str_starts_with($name, $prefix)
+        ));
     }
 
     /**

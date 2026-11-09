@@ -259,8 +259,12 @@ class UpdateProfileTest extends TestCase
             // The typed password is not kept in the form once it is saved.
             ->assertSet('current_password', '')
             ->assertSet('password', '')
-            ->assertSet('password_confirmation', '')
-            ->assertGuest();
+            ->assertSet('password_confirmation', '');
+
+        // The account is signed out. Livewire's Testable forwards unknown
+        // calls to the response, which carries no auth assertions, so the
+        // guest check is made on the test case itself.
+        $this->assertGuest();
 
         $this->assertTrue(Hash::check('new-password-1', $account->refresh()->password));
     }

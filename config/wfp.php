@@ -93,9 +93,51 @@ return [
          * name is written two rows above it. Change these when the office
          * renames the block; a workbook whose block cannot be found is left
          * unsigned rather than stamped in the wrong place.
+         *
+         * `signatures.superadmin` repeats these defaults so every stage is
+         * described in one block below; the values here remain the one place
+         * an installation overrides the final-approval wording.
          */
         'approval_label' => env('WFP_TEMPLATE_APPROVAL_LABEL', 'Approved:'),
         'approval_title' => env('WFP_TEMPLATE_APPROVAL_TITLE', 'Schools Division Superintendent'),
+
+        /*
+         * The printed sign-off blocks that carry an e-signature, keyed by the
+         * stage that signs them. The School Head prepares the form; the
+         * Bookkeeper, Budget and Superadmin sign only when their workflow
+         * records authorize them. Matching is tolerant
+         * (case/punctuation/whitespace ignored):
+         * the label locates the block's wording, the title its designation,
+         * and the column pins where the block lives — the pin keeps a phrase
+         * in the letterhead from being mistaken for a sign-off block. The
+         * name cell sits two rows above the designation, the signature row
+         * one row above that.
+         *
+         * The blocks are found in the FILLED workbook, so the template's row
+         * numbers may move without any change here.
+         */
+        'signatures' => [
+            'prepared' => [
+                'label' => 'Prepared by:',
+                'title' => env('WFP_TEMPLATE_PREPARED_TITLE', 'School Principal I'),
+                'column' => env('WFP_TEMPLATE_PREPARED_COLUMN', 'B'),
+            ],
+            'bookkeeper' => [
+                'label' => 'Checked as the Correctness of Account Titles and Codes',
+                'title' => 'Senior Bookkeeper',
+                'column' => env('WFP_TEMPLATE_BOOKKEEPER_COLUMN', 'O'),
+            ],
+            'budget' => [
+                'label' => 'Certifying Availability of Allotment',
+                'title' => 'Budget Officer',
+                'column' => env('WFP_TEMPLATE_BUDGET_COLUMN', 'Z'),
+            ],
+            'superadmin' => [
+                'label' => env('WFP_TEMPLATE_APPROVAL_LABEL', 'Approved:'),
+                'title' => env('WFP_TEMPLATE_APPROVAL_TITLE', 'Schools Division Superintendent'),
+                'column' => env('WFP_TEMPLATE_APPROVAL_COLUMN', 'AL'),
+            ],
+        ],
 
         /*
          * The static letterhead lines stamped above the school's name. The

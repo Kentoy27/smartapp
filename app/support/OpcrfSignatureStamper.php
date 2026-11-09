@@ -199,22 +199,6 @@ final class OpcrfSignatureStamper
             return null;
         }
 
-        if (preg_match('/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/', $range, $matches) !== 1) {
-            throw new RuntimeException('The signature range is invalid.');
-        }
-
-        $firstColumn = $matches[1];
-        $firstRow = (int) $matches[2];
-        $lastColumn = $matches[3];
-        $lastRow = (int) $matches[4];
-
-        if (self::columnIndex($lastColumn) <= self::columnIndex($firstColumn)
-            || $lastRow <= $firstRow
-            || $firstRow < 1) {
-            throw new RuntimeException('The signature range must cover a positive worksheet area.');
-        }
-
-        $format = self::detectExtension($signatureBytes, $extension);
         $parts = self::readParts($workbookBytes);
         $sheetPart = self::worksheetParts($parts)[0] ?? null;
 
@@ -222,17 +206,8 @@ final class OpcrfSignatureStamper
             return null;
         }
 
-        $anchor = [
-            'from_col' => self::columnIndex($firstColumn) - 1,
-            'from_row' => $firstRow - 1,
-            'to_col' => self::columnIndex($lastColumn),
-            'to_row' => $lastRow - 1,
-            'first_column' => $firstColumn,
-            'last_column' => $lastColumn,
-            'first_row' => $firstRow,
-            'last_row' => $lastRow - 1,
-            'geometry' => self::sheetGeometry($parts[$sheetPart], $firstRow, $lastRow - 1),
-        ];
+        $anchor = self::rangeAnchor($range, $parts[$sheetPart]);
+        $format = self::detectExtension($signatureBytes, $extension);
         $mediaPart = self::freeMediaPart($parts, $format);
         $parts[$mediaPart] = $signatureBytes;
         $parts['[Content_Types].xml'] = self::declareImageType(
@@ -243,6 +218,104 @@ final class OpcrfSignatureStamper
         $parts = self::stampSheet($parts, $sheetPart, $anchor, $mediaPart, $signerName);
 
         return PurePhpZipWriter::create($parts);
+    }
+
+    /**
+     * Stamp several signature images into fixed ranges on named worksheets in
+     * one read/write pass — the multi-sheet counterpart of stampAtRange().
+     *
+     * Identical image bytes share one media part, so a signature repeated on
+     * twelve monthly sheets is stored once and referenced twelve times.
+     *
+     * @param  array<int, array{sheet: string, range: string, bytes: string, extension?: string, name?: string|null}>  $stamps
+     *         `sheet` is the worksheet part, e.g. "xl/worksheets/sheet1.xml".
+     * @return string the stamped workbook
+     *
+     * @throws RuntimeException when a range is invalid or the workbook is unreadable
+     */
+    public static function stampManyAtRanges(string $workbookBytes, array $stamps): string
+    {
+        $parts = self::readParts($workbookBytes);
+
+        /** @var array<string, string> $mediaByImage */
+        $mediaByImage = [];
+
+        foreach ($stamps as $stamp) {
+            $sheetPart = $stamp['sheet'] ?? null;
+            $signatureBytes = (string) ($stamp['bytes'] ?? '');
+            $range = (string) ($stamp['range'] ?? '');
+
+            if (! is_string($sheetPart)
+                || $sheetPart === ''
+                || ! isset($parts[$sheetPart])
+                || trim($signatureBytes) === '') {
+                continue;
+            }
+
+            $format = self::detectExtension($signatureBytes, (string) ($stamp['extension'] ?? 'png'));
+            $imageKey = hash('sha256', $signatureBytes).':'.$format;
+
+            if (! isset($mediaByImage[$imageKey])) {
+                $mediaPart = self::freeMediaPart($parts, $format);
+                $parts[$mediaPart] = $signatureBytes;
+                $parts['[Content_Types].xml'] = self::declareImageType(
+                    $parts['[Content_Types].xml'] ?? '',
+                    $format
+                );
+                $mediaByImage[$imageKey] = $mediaPart;
+            }
+
+            $anchor = self::rangeAnchor($range, $parts[$sheetPart]);
+
+            $parts = self::stampSheet(
+                $parts,
+                $sheetPart,
+                $anchor,
+                $mediaByImage[$imageKey],
+                $stamp['name'] ?? null,
+            );
+        }
+
+        return PurePhpZipWriter::create($parts);
+    }
+
+    /**
+     * The anchor a fixed A1:B2 range describes, measured against its sheet.
+     *
+     * A single-column range is valid: the WFP's printed sign-off columns
+     * (O, Z, AL) are narrow, and the signature covers one column's width on
+     * one row. Only a range that covers nothing is refused.
+     *
+     * @return array{from_col: int, from_row: int, to_col: int, to_row: int, first_column: string, last_column: string, first_row: int, last_row: int, geometry: array<string, mixed>}
+     */
+    private static function rangeAnchor(string $range, string $sheetXml): array
+    {
+        if (preg_match('/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/', $range, $matches) !== 1) {
+            throw new RuntimeException('The signature range is invalid.');
+        }
+
+        $firstColumn = $matches[1];
+        $firstRow = (int) $matches[2];
+        $lastColumn = $matches[3];
+        $lastRow = (int) $matches[4];
+
+        if (self::columnIndex($lastColumn) < self::columnIndex($firstColumn)
+            || $lastRow <= $firstRow
+            || $firstRow < 1) {
+            throw new RuntimeException('The signature range must cover a positive worksheet area.');
+        }
+
+        return [
+            'from_col' => self::columnIndex($firstColumn) - 1,
+            'from_row' => $firstRow - 1,
+            'to_col' => self::columnIndex($lastColumn),
+            'to_row' => $lastRow - 1,
+            'first_column' => $firstColumn,
+            'last_column' => $lastColumn,
+            'first_row' => $firstRow,
+            'last_row' => $lastRow - 1,
+            'geometry' => self::sheetGeometry($sheetXml, $firstRow, $lastRow - 1),
+        ];
     }
 
     /**

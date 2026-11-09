@@ -11,11 +11,14 @@ use App\Livewire\UsersTable;
 use App\Livewire\WfpGenerateButton;
 use App\Livewire\WfpLineItemAllotment;
 use App\Livewire\WfpManager;
+use App\Livewire\WfpSignatoryActions;
 use App\Models\District;
 use App\Models\MonthlyExpenditureItem;
 use App\Models\MonthlyExpenditureMatrix;
 use App\Models\School;
+use App\Models\SchoolAllotment;
 use App\Models\User;
+use App\Models\WfpPlan;
 use App\Models\WfpReportCheck;
 use App\Support\PurePhpZipReader;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -265,15 +268,14 @@ class BookkeeperRoleTest extends TestCase
         $this->actingAs($bookkeeper)->get(route('budget.lineitems.index'))->assertOk();
         $this->actingAs($bookkeeper)->get(route('budget.per-line-item.index'))->assertOk();
 
-        // …while the staff pages, the SH's WFP workspace and the Budget
-        // office's own pages are refused by their guards.
+        // …while the staff pages and the Budget-only pages are refused.
         $this->actingAs($bookkeeper)->get(route('opcrf.index'))->assertNotFound();
         $this->actingAs($bookkeeper)->get(route('mov.index'))->assertNotFound();
         $this->actingAs($bookkeeper)->get(route('opcrf.template'))->assertNotFound();
         $this->actingAs($bookkeeper)->get(route('aip.index'))->assertNotFound();
-        $this->actingAs($bookkeeper)->get(route('wfp.index'))->assertNotFound();
-        $this->actingAs($bookkeeper)->get(route('wfp.matrices.index'))->assertNotFound();
-        $this->actingAs($bookkeeper)->get(route('wfp.lineitems.index'))->assertNotFound();
+        $this->actingAs($bookkeeper)->get(route('wfp.index'))->assertOk()->assertSee('Plans in your scope');
+        $this->actingAs($bookkeeper)->get(route('wfp.matrices.index'))->assertOk()->assertSee('Monthly Expenditure');
+        $this->actingAs($bookkeeper)->get(route('wfp.lineitems.index'))->assertOk()->assertSee('Per Line Item Expenditure');
         $this->actingAs($bookkeeper)->get(route('budget.allotments.index'))->assertNotFound();
     }
 
@@ -358,34 +360,27 @@ class BookkeeperRoleTest extends TestCase
             ->assertNotFound();
     }
 
-    public function test_the_school_head_wfp_pages_are_refused_for_a_bookkeeper(): void
+    public function test_a_bookkeeper_can_open_wfp_documents_read_only_but_cannot_manage_them(): void
     {
         $bookkeeper = $this->bookkeeper();
         $head = $this->schoolHead($bookkeeper->school);
         $matrix = $this->line($head, 3)->matrix;
 
-        foreach ([
-            MemMatrixList::class,
-            MemEditor::class,
-            WfpManager::class,
-            WfpGenerateButton::class,
-            WfpLineItemAllotment::class,
-        ] as $component) {
-            $html = Livewire::actingAs($bookkeeper)->test($component)->html();
+        $this->assertStringContainsString('Page Not Found', Livewire::actingAs($bookkeeper)->test(MemMatrixList::class)->html());
+        $this->assertStringContainsString('Page Not Found', Livewire::actingAs($bookkeeper)->test(WfpGenerateButton::class)->html());
+        $this->assertStringContainsString('Page Not Found', Livewire::actingAs($bookkeeper)->test(WfpLineItemAllotment::class)->html());
 
-            $this->assertStringContainsString(
-                'Page Not Found',
-                $html,
-                $component.' rendered for a Bookkeeper; the SH workspace is not its interface.'
-            );
-        }
+        Livewire::actingAs($bookkeeper)
+            ->test(WfpManager::class)
+            ->assertSee('Work and Financial Plans');
 
-        // With the model passed, the matrix editor still refuses the mount.
-        $html = Livewire::actingAs($bookkeeper)
+        Livewire::actingAs($bookkeeper)
             ->test(MemEditor::class, ['matrix' => $matrix])
-            ->html();
+            ->assertSee($matrix->periodLabel())
+            ->assertDontSee('Save changes');
 
-        $this->assertStringContainsString('Page Not Found', $html);
+        $this->assertTrue($matrix->canBeViewedBy($bookkeeper));
+        $this->assertFalse($matrix->managedBy($bookkeeper));
 
         // The CSV authoring template is the SH's too.
         $this->actingAs($bookkeeper)
@@ -403,25 +398,33 @@ class BookkeeperRoleTest extends TestCase
         // below read the same report.
         $head = $this->schoolHead($bookkeeper->school);
         $this->line($head, 3);
+        SchoolAllotment::create([
+            'school_id' => $head->school_id,
+            'school_division' => $head->activeDivision(),
+            'year' => 2026,
+            'amount' => 10000,
+        ]);
 
         // The Bookkeeper's copy carries the action and the signatory block.
         Livewire::actingAs($bookkeeper)
             ->test(BudgetLineItemAllotment::class)
             ->assertSee('Checked as to the Correctness of Account Titles and Codes')
-            ->assertSee('Check report');
+            ->assertSee('Sign check');
 
         // The Budget office reads the same block but gets no action — it
         // does not stand for the Bookkeeper's office.
         Livewire::actingAs($budget)
             ->test(BudgetLineItemAllotment::class)
             ->assertSee('Checked as to the Correctness of Account Titles and Codes')
-            ->assertDontSee('Check report');
+            ->assertDontSee('Sign check')
+            ->assertSee('Sign certification');
 
         // The School Head's own copy reads the block too, with no action.
         Livewire::actingAs($head)
             ->test(WfpLineItemAllotment::class)
             ->assertSee('Checked as to the Correctness of Account Titles and Codes')
-            ->assertDontSee('Check report');
+            ->assertDontSee('Sign check')
+            ->assertDontSee('Sign certification');
     }
 
     public function test_a_bookkeeper_signs_an_assigned_schools_check_and_the_report_names_them(): void
@@ -467,6 +470,84 @@ class BookkeeperRoleTest extends TestCase
         Livewire::actingAs($this->budgetOfficer())
             ->test(BudgetLineItemAllotment::class, ['schoolId' => (string) $head->school_id])
             ->assertSee('Bella Bookkeeper');
+    }
+
+    public function test_wfp_signatory_actions_are_role_specific(): void
+    {
+        $bookkeeper = $this->bookkeeper();
+        $budget = $this->budgetOfficer();
+        $head = $this->schoolHead($bookkeeper->school);
+        $this->line($head, 3);
+        WfpPlan::create([
+            'school_id' => $head->school_id,
+            'school_division' => $head->activeDivision(),
+            'year' => 2026,
+            'status' => WfpPlan::STATUS_DRAFT,
+        ]);
+
+        SchoolAllotment::create([
+            'school_id' => $head->school_id,
+            'school_division' => $head->activeDivision(),
+            'year' => 2026,
+            'amount' => 10000,
+        ]);
+
+        Livewire::actingAs($bookkeeper)
+            ->test(BudgetLineItemChecker::class)
+            ->assertSee('Sign check')
+            ->assertDontSee('Sign certification');
+
+        Livewire::actingAs($budget)
+            ->test(BudgetLineItemChecker::class)
+            ->assertSee('Sign certification')
+            ->assertDontSee('Sign check');
+
+        Livewire::actingAs($bookkeeper)
+            ->test(WfpManager::class)
+            ->assertSee('Sign check')
+            ->assertDontSee('Sign certification');
+
+        Livewire::actingAs($budget)
+            ->test(WfpManager::class)
+            ->assertSee('Sign certification')
+            ->assertDontSee('Sign check');
+
+        Livewire::actingAs($bookkeeper)
+            ->test(WfpSignatoryActions::class, ['schoolId' => $head->school_id, 'year' => 2026])
+            ->assertSee('Sign check')
+            ->assertDontSee('Sign certification')
+            ->call('signCheck')
+            ->assertSee('Bella Bookkeeper');
+
+        $this->assertDatabaseHas('wfp_report_checks', [
+            'school_id' => $head->school_id,
+            'year' => 2026,
+            'checked_by' => $bookkeeper->id,
+        ]);
+
+        Livewire::actingAs($bookkeeper)
+            ->test(WfpSignatoryActions::class, ['schoolId' => $head->school_id, 'year' => 2026])
+            ->call('signCertification')
+            ->assertNotFound();
+
+        Livewire::actingAs($budget)
+            ->test(WfpSignatoryActions::class, ['schoolId' => $head->school_id, 'year' => 2026])
+            ->assertSee('Sign certification')
+            ->assertDontSee('Sign check')
+            ->call('signCertification')
+            ->assertSee($budget->name);
+
+        $this->assertDatabaseHas('school_allotments', [
+            'school_id' => $head->school_id,
+            'year' => 2026,
+            'certified_by' => $budget->id,
+        ]);
+
+        Livewire::actingAs($budget)
+            ->test(WfpSignatoryActions::class, ['schoolId' => $head->school_id, 'year' => 2026])
+            ->call('signCheck')
+            ->assertNotFound();
+
     }
 
     public function test_the_check_prints_on_the_excel_export(): void

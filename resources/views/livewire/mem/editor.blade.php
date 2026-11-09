@@ -15,6 +15,24 @@
         ></div>
     @endif
 
+    {{-- OVER-ALLOTMENT WARNING: the write just crossed the year's allotted
+         budget, or widened the overshoot. Popped once as a toast, then
+         cleared; the strip below keeps reporting the over state. --}}
+    @if ($warningMessage)
+        <div
+            wire:key="mem-warning-{{ md5($warningMessage) }}"
+            x-data
+            x-init="
+                if (window.smartAlert) {
+                    smartAlert.warning('Over allotment', {{ \Illuminate\Support\Js::from($warningMessage) }});
+                }
+                $wire.clearWarning();
+            "
+            class="success-alert-sentinel"
+            aria-hidden="true"
+        ></div>
+    @endif
+
     <div class="page-header">
         <div class="memory-breadcrumb">
             <a href="{{ route('wfp.matrices.index') }}" wire:navigate.hover>Monthly Expenditure Matrix</a>
@@ -22,11 +40,16 @@
             <span>{{ $matrix->periodLabel() }}</span>
         </div>
         <h1>{{ $matrix->periodLabel() }}</h1>
-        <p>
+        {{-- <p>
             The source of truth for your Work and Financial Plan.
             · {{ count($items) }} {{ count($items) === 1 ? 'line' : 'lines' }}
-        </p>
+        </p> --}}
     </div>
+
+    @livewire('wfp-signatory-actions', [
+        'schoolId' => $matrix->school_id,
+        'year' => (int) $matrix->year,
+    ], key('mem-editor-signoffs-'.$matrix->id))
 
     {{-- THE ALLOTMENT BALANCE: the annual budget the Budget office set for
          this school, read against the year's matrices. The month being edited
@@ -1252,52 +1275,63 @@
                         @error('lineForm.organizational_classification') <div class="error-text">{{ $message }}</div> @enderror
                     </div>
 
-                    <div class="field">
-                        <label for="memLineMajorOutput">
-                            Major output
-                            @if ($this->templateFieldIsFilled('major_output'))
-                                <span class="field-template-tag">from template</span>
-                            @endif
-                        </label>
-                        <textarea
-                            id="memLineMajorOutput"
-                            rows="2"
-                            wire:model="lineForm.major_output"
-                            placeholder="The result this line delivers"
-                        ></textarea>
-                        @error('lineForm.major_output') <div class="error-text">{{ $message }}</div> @enderror
-                    </div>
+                    {{-- Major output, the indicator that measures it and the
+                         MOVs that verify it read as one understanding of what
+                         the line delivers, so — like Resource Needed — they
+                         share a bordered panel: output and indicator side by
+                         side, the MOVs across both. --}}
+                    <div class="mem-line-outputs mem-line-span" role="group" aria-labelledby="memLineOutputsLabel">
+                        <span id="memLineOutputsLabel" class="mem-line-outputs__label">Outputs &amp; MOVs</span>
 
-                    <div class="field">
-                        <label for="memLinePerformanceIndicator">
-                            Performance indicator
-                            @if ($this->templateFieldIsFilled('performance_indicator'))
-                                <span class="field-template-tag">from template</span>
-                            @endif
-                        </label>
-                        <textarea
-                            id="memLinePerformanceIndicator"
-                            rows="2"
-                            wire:model="lineForm.performance_indicator"
-                            placeholder="How the output is measured"
-                        ></textarea>
-                        @error('lineForm.performance_indicator') <div class="error-text">{{ $message }}</div> @enderror
-                    </div>
+                        <div class="mem-line-outputs__fields">
+                            <div class="field">
+                                <label for="memLineMajorOutput">
+                                    Major output
+                                    @if ($this->templateFieldIsFilled('major_output'))
+                                        <span class="field-template-tag">from template</span>
+                                    @endif
+                                </label>
+                                <textarea
+                                    id="memLineMajorOutput"
+                                    rows="2"
+                                    wire:model="lineForm.major_output"
+                                    placeholder="The result this line delivers"
+                                ></textarea>
+                                @error('lineForm.major_output') <div class="error-text">{{ $message }}</div> @enderror
+                            </div>
 
-                    <div class="field mem-line-span">
-                        <label for="memLineMovs">
-                            Activity MOVs
-                            @if ($this->templateFieldIsFilled('activity_movs'))
-                                <span class="field-template-tag">from template</span>
-                            @endif
-                        </label>
-                        <textarea
-                            id="memLineMovs"
-                            rows="2"
-                            wire:model="lineForm.activity_movs"
-                            placeholder="e.g. PO and RIS"
-                        ></textarea>
-                        @error('lineForm.activity_movs') <div class="error-text">{{ $message }}</div> @enderror
+                            <div class="field">
+                                <label for="memLinePerformanceIndicator">
+                                    Performance indicator
+                                    @if ($this->templateFieldIsFilled('performance_indicator'))
+                                        <span class="field-template-tag">from template</span>
+                                    @endif
+                                </label>
+                                <textarea
+                                    id="memLinePerformanceIndicator"
+                                    rows="2"
+                                    wire:model="lineForm.performance_indicator"
+                                    placeholder="How the output is measured"
+                                ></textarea>
+                                @error('lineForm.performance_indicator') <div class="error-text">{{ $message }}</div> @enderror
+                            </div>
+
+                            <div class="field mem-line-span">
+                                <label for="memLineMovs">
+                                    Activity MOVs
+                                    @if ($this->templateFieldIsFilled('activity_movs'))
+                                        <span class="field-template-tag">from template</span>
+                                    @endif
+                                </label>
+                                <textarea
+                                    id="memLineMovs"
+                                    rows="2"
+                                    wire:model="lineForm.activity_movs"
+                                    placeholder="e.g. PO and RIS"
+                                ></textarea>
+                                @error('lineForm.activity_movs') <div class="error-text">{{ $message }}</div> @enderror
+                            </div>
+                        </div>
                     </div>
 
                     {{-- Repeated item: "No" (the default) writes the line into

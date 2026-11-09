@@ -9,7 +9,7 @@
     {{-- The version is bumped whenever dashboard.css changes: browsers that
          cached an older copy keep painting the stale sheet at the same URL,
          which is why a broken stylesheet can survive a fresh deploy. --}}
-    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=49">
+    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=50">
     <title>@yield('title', 'Dashboard — SmartApp')</title>
     <script>
         /* Apply the saved theme before first paint to avoid a flash.
@@ -7768,10 +7768,11 @@
                         <livewire:profile.digital-signature-modal />
                     @endauth
 
-                    {{-- Only School Heads can switch between their authorized
-                         financial divisions. --}}
+                    {{-- School Heads switch their own workspace; the Budget
+                         office and administrators switch the division they
+                         are managing. --}}
                     @auth
-                        @if (Auth::user()->canAccessWfp() && Auth::user()->canSwitchDivision())
+                        @if ((Auth::user()->canAccessWfp() || Auth::user()->canManageAllotments()) && Auth::user()->canSwitchDivision())
                             <form method="POST" action="{{ route('division.switch') }}" class="division-switcher">
                                 @csrf
                                 <label for="divisionSwitcher" class="division-switcher-label">Division</label>
@@ -8246,6 +8247,20 @@
                 });
             }
 
+            function warning(title, text) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: title,
+                    text: text || '',
+                    toast: true,
+                    position: 'top-end',
+                    showConfirmButton: false,
+                    timer: 7000,
+                    timerProgressBar: true,
+                    ...themeOptions()
+                });
+            }
+
             function confirmDelete(options) {
                 return Swal.fire(Object.assign({
                     icon: 'warning',
@@ -8285,6 +8300,7 @@
             return {
                 success: success,
                 error: error,
+                warning: warning,
                 confirmDelete: confirmDelete,
                 confirm: confirm,
                 sessionExpired: sessionExpired

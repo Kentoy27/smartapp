@@ -13,6 +13,11 @@
         </span>
     </div>
 
+    <p class="card-text">
+        Downloads here are the original files you uploaded and are never modified.
+        The signed and unsigned export choices above apply to generated WFPs only.
+    </p>
+
     @if ($this->submissions()->isEmpty())
         <p class="card-text">
             No WFP uploads yet. Generate and download your WFP above, complete

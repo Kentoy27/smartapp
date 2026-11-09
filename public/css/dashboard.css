@@ -1676,6 +1676,21 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
 .mem-status--generated { background: var(--primary-soft); color: var(--primary-strong); }
 .mem-status--finalized { background: #d1fae5; color: var(--ok); }
 
+.wfp-signatory-statuses { margin-bottom: 16px; }
+.wfp-signatory-statuses__list { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+.wfp-signatory-status { display: grid; gap: 8px; min-width: 0; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+.wfp-signatory-status__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.wfp-signatory-status__label { color: var(--text-strong); font-size: 0.75rem; font-weight: 700; line-height: 1.45; }
+.wfp-signatory-status__badge { display: inline-flex; align-items: center; justify-content: center; padding: 4px 10px; border-radius: 999px; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+.wfp-signatory-status__badge--pending { background: var(--bg-muted); color: var(--text-muted); }
+.wfp-signatory-status__badge--checked { background: #dcfce7; color: #166534; }
+.wfp-signatory-status__badge--certified { background: #dbeafe; color: #1d4ed8; }
+.wfp-signatory-status__badge--approved { background: #dcfce7; color: #166534; }
+.wfp-signatory-status__badge--returned { background: #fef3c7; color: #92400e; }
+.wfp-signatory-status__meta { color: var(--text-muted); font-size: 0.75rem; line-height: 1.5; }
+.wfp-signatory-status__remarks { margin-top: 2px; color: var(--text-muted); font-size: 0.75rem; line-height: 1.5; }
+.wfp-signatory-status__remarks strong { color: var(--text-strong); }
+
 .mem-banner { display: flex; align-items: center; gap: 8px; margin: 0 0 16px; }
 /* Adding a year is a server round-trip: while it runs the table dims and a
    spinner covers it, so the click reads as progress rather than as a stall
@@ -1713,11 +1728,15 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
 .mem-chip { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 999px; background: var(--bg-muted); color: var(--text-muted); font-size: 0.75rem; font-weight: 600; }
 .mem-unit { color: var(--text-faint); font-size: 0.72rem; margin-left: 4px; }
 
-/* The matrix list's toolbar groups left — Year, then Add year — where the
-   shared .card-head (and .ac-toolbar-actions) would spread the two controls
-   to opposite edges. */
+/* The matrix list's toolbar groups the year and Add-year controls left, and
+   puts the year's export choices on the right, where a download control is
+   looked for. */
 .users-toolbar.mem-list-toolbar { justify-content: flex-start; }
 .mem-list-toolbar .ac-toolbar-actions { margin-left: 0; }
+.mem-export-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 720px) {
+    .mem-export-actions { margin-left: 0; width: 100%; justify-content: flex-end; }
+}
 
 .mem-toolbar { margin-left: auto; }
 /* One line of context above the grid, kept quiet so the buttons lead. */
@@ -1883,11 +1902,16 @@ control to a real radio size and keep it from growing as a flex item. */
 @media (max-width: 420px) {
     .mem-line-months__grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
-/* The resource group reads as one unit: a bordered panel whose label names
-   the set, with the four inputs and their computed total on a single row. */
-.mem-line-resource { min-width: 0; padding: 12px 14px 14px; border: 1px solid var(--border); border-radius: 10px; }
-.mem-line-resource__label { display: block; margin-bottom: 10px; font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
+/* The resource and outputs groups read as one unit each: a bordered panel
+   whose label names the set. Resource Needed puts its four inputs and their
+   computed total on a single row; Outputs & MOVs puts two textareas side by
+   side with the MOVs across. */
+.mem-line-resource,
+.mem-line-outputs { min-width: 0; padding: 12px 14px 14px; border: 1px solid var(--border); border-radius: 10px; }
+.mem-line-resource__label,
+.mem-line-outputs__label { display: block; margin-bottom: 10px; font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
 .mem-line-resource__fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 14px; align-items: start; }
+.mem-line-outputs__fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; align-items: start; }
 .mem-line-total { display: flex; flex-direction: column; gap: 2px; padding: 6px 12px; border-radius: 8px; background: var(--bg-muted); min-width: 110px; }
 .mem-line-total__label { font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
 .mem-line-total__value { font-size: 1.0625rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-strong); }
@@ -1898,6 +1922,9 @@ control to a real radio size and keep it from growing as a flex item. */
 }
 @media (max-width: 640px) {
     .mem-line-resource__fields { grid-template-columns: 1fr; }
+}
+@media (max-width: 720px) {
+    .mem-line-outputs__fields { grid-template-columns: 1fr; }
 }
 /* Several Resource Needed rows under one activity, as the printed form draws
    them: one header, then a row per resource. Each filled row is written as its
@@ -2069,6 +2096,27 @@ body.sorting .mem-drag-handle { cursor: grabbing; }
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
+}
+
+.wfp-generate__exports {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.staff-dashboard-panel--wfp .wfp-generate__exports {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.staff-dashboard-panel--wfp .wfp-generate__exports > * {
+    max-width: 100%;
+    justify-content: center;
+    text-align: center;
+    white-space: normal;
+    line-height: 1.35;
 }
 
 .wfp-generate__source {
@@ -2697,6 +2745,13 @@ body.sorting .mem-drag-handle { cursor: grabbing; }
     text-align: center;
     color: var(--text-muted);
     line-height: 1.5;
+}
+
+/* The report carries Print and the two export modes on the right of its
+   toolbar; the long labels wrap rather than hang past the card's edge. */
+.wfp-allotment-toolbar .ac-toolbar-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
 }
 
 .wfp-allotment-signatures {

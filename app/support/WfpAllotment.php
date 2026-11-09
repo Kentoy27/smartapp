@@ -6,6 +6,8 @@ use App\Models\MonthlyExpenditureItem;
 use App\Models\MonthlyExpenditureMatrix;
 use App\Models\School;
 use App\Models\SchoolAllotment;
+use App\Models\User;
+use App\Models\WfpPlan;
 use App\Models\WfpReportCheck;
 use Carbon\CarbonInterface;
 
@@ -165,6 +167,129 @@ final class WfpAllotment
             'name' => $check->checker->name ?: (string) $check->checker->username,
             'position' => $check->checker->position ?: 'Senior Bookkeeper',
             'checked_at' => $check->checked_at,
+        ];
+    }
+
+    /**
+     * The Bookkeeper account behind a valid check, while it still holds the
+     * role and school/division access that made the check valid. Null when the
+     * report has no check, the checker account is gone, or its access has since
+     * been withdrawn — an export never stamps a signature the workflow no
+     * longer authorizes.
+     */
+    public static function checkingUser(
+        int $schoolId,
+        int $year,
+        ?string $division = SchoolDivision::ELEMENTARY,
+    ): ?User {
+        $check = WfpReportCheck::query()
+            ->with('checker')
+            ->where('school_id', $schoolId)
+            ->where('year', $year)
+            ->when($division !== null, fn ($query) => $query->where('school_division', $division))
+            ->first();
+
+        $checker = $check?->checker;
+
+        return $check?->isChecked()
+            && $checker instanceof User
+            && $checker->canCheckWfpReport()
+            && $checker->canAccessSchool($schoolId)
+            && $checker->canAccessDivision($division)
+                ? $checker
+                : null;
+    }
+
+    /**
+     * The Budget Officer account behind a valid certification, while it still
+     * holds the role and division access that made the certification valid.
+     * Null when the amount is uncertified, the certifier account is gone, or
+     * its access has since been withdrawn.
+     */
+    public static function certifyingUser(
+        int $schoolId,
+        int $year,
+        ?string $division = SchoolDivision::ELEMENTARY,
+    ): ?User {
+        $allotment = SchoolAllotment::query()
+            ->with('certifier')
+            ->where('school_id', $schoolId)
+            ->where('year', $year)
+            ->when($division !== null, fn ($query) => $query->where('school_division', $division))
+            ->first();
+
+        $certifier = $allotment?->certifier;
+
+        return $allotment?->isCertified()
+            && $certifier instanceof User
+            && $certifier->canCertifyAllotments()
+            && $certifier->canAccessDivision($division)
+                ? $certifier
+                : null;
+    }
+
+    /**
+     * The current signatory status for the three required WFP checkpoints on a
+     * school's report: Bookkeeper check, Budget certification, and final WFP
+     * approval. The view reads this summary so the SH sees the same saved
+     * workflow state the export writes, without any frontend-only override.
+     *
+     * @return array<int, array{key: string, label: string, state: string, badge: string, name: ?string, position: ?string, date: ?\DateTimeInterface, pending_text: string, remarks: ?string}>
+     */
+    public static function signatoryStatuses(
+        ?int $schoolId,
+        int $year,
+        ?string $division = SchoolDivision::ELEMENTARY,
+        ?WfpPlan $plan = null,
+    ): array {
+        $check = $schoolId === null ? null : self::checking($schoolId, $year, $division);
+        $certification = $schoolId === null ? null : self::certification($schoolId, $year, $division);
+
+        $plan ??= $schoolId === null
+            ? null
+            : WfpPlan::query()
+                ->where('school_id', $schoolId)
+                ->when($division !== null, fn ($query) => $query->where('school_division', $division))
+                ->where('year', $year)
+                ->first();
+
+        $finalApproval = $plan?->finalApproval;
+        $latestReturn = $plan?->latestReturn;
+
+        return [
+            [
+                'key' => 'checking',
+                'label' => 'Checked as to the Correctness of Account Titles and Codes',
+                'state' => $check !== null ? 'checked' : 'pending',
+                'badge' => $check !== null ? 'Checked' : 'Pending',
+                'name' => $check['name'] ?? null,
+                'position' => $check['position'] ?? 'Senior Bookkeeper',
+                'date' => $check['checked_at'] ?? null,
+                'pending_text' => 'Pending — Senior Bookkeeper',
+                'remarks' => null,
+            ],
+            [
+                'key' => 'certification',
+                'label' => 'Certifying Availability of Allotment',
+                'state' => $certification !== null ? 'certified' : 'pending',
+                'badge' => $certification !== null ? 'Certified' : 'Pending',
+                'name' => $certification['name'] ?? null,
+                'position' => $certification['position'] ?? 'Budget Officer III',
+                'date' => $certification['certified_at'] ?? null,
+                'pending_text' => 'Pending — Budget Officer III',
+                'remarks' => null,
+            ],
+            [
+                'key' => 'approval',
+                'label' => 'Approved',
+                'state' => $plan?->isApproved() ? 'approved' : ($plan?->isReturned() ? 'returned' : 'pending'),
+                'badge' => $plan?->isApproved() ? 'Approved' : ($plan?->isReturned() ? 'Returned' : 'Pending'),
+                'name' => $finalApproval?->decidedBy?->name ?? $latestReturn?->decidedBy?->name,
+                'position' => $finalApproval?->decidedBy?->position ?? $latestReturn?->decidedBy?->position ?? 'Schools Division Superintendent',
+                'date' => $finalApproval?->decided_at ?? $latestReturn?->decided_at,
+                'pending_text' => 'Pending — Schools Division Superintendent',
+                'remarks' => $latestReturn?->remarks ?? $finalApproval?->remarks,
+            ],
         ];
     }
 

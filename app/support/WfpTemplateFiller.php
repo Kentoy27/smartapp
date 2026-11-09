@@ -487,9 +487,40 @@ class WfpTemplateFiller
     public static function approvalCells(string $workbookBytes, ?string $approver): array
     {
         $approver = trim((string) $approver);
-        $label = self::normalize((string) config('wfp.template.approval_label', 'Approved:'));
 
-        if ($approver === '' || $label === '') {
+        if ($approver === '') {
+            return [];
+        }
+
+        $block = self::signatureBlocks($workbookBytes)['superadmin'] ?? null;
+
+        return $block === null ? [] : [$block['name_cell'] => $approver];
+    }
+
+    /**
+     * Every printed sign-off block a filled workbook carries, keyed by stage
+     * (`bookkeeper`, `budget`, `superadmin`) — located from the sheet's own
+     * text rather than the template's row numbers, because the filler trims
+     * and shifts every row below the data band.
+     *
+     * Each stage is configured in config/wfp.php (`wfp.template.signatures`):
+     * the label locates the block's own wording, the title its designation,
+     * and the column pins where the block lives. A block is only reported when
+     * its designation sits in (or, failing the pin, anywhere near) its label —
+     * a matching phrase in the letterhead is never a sign-off block.
+     *
+     * The printed geometry is fixed by the form: the name sits two rows above
+     * the designation, and the signature row one row above that; the range
+     * handed to the stamper covers the signature row exactly (its bottom edge
+     * is the top of the designation row).
+     *
+     * @return array<string, array{stage: string, label: string, title: string, column: string, title_cell: string, name_cell: string, signature_cell: string, range: string, name_row: int, signature_row: int, title_row: int}>
+     */
+    public static function signatureBlocks(string $workbookBytes): array
+    {
+        $stages = (array) config('wfp.template.signatures', []);
+
+        if ($stages === []) {
             return [];
         }
 
@@ -502,56 +533,118 @@ class WfpTemplateFiller
 
         [$byRow] = self::gridByRow($parts[$sheetPath], self::sharedStrings($parts));
 
-        foreach ($byRow as $labelRow => $cells) {
-            foreach ($cells as $labelColumn => $text) {
-                if (self::normalize($text) !== $label) {
-                    continue;
-                }
+        $blocks = [];
 
-                $titleRow = self::approvalTitleRow($byRow, (int) $labelRow);
+        foreach ($stages as $stage => $definition) {
+            $block = self::signatureBlock($byRow, (string) $stage, (array) $definition);
 
-                if ($titleRow === null) {
-                    continue;
-                }
-
-                // The signature line sits between the name and the title:
-                // label / blank / name / signature / blank / title.
-                $nameRow = $titleRow - 2;
-
-                if ($nameRow <= (int) $labelRow) {
-                    continue;
-                }
-
-                return [strtoupper((string) $labelColumn).$nameRow => $approver];
+            if ($block !== null) {
+                $blocks[$stage] = $block;
             }
         }
 
-        return [];
+        return $blocks;
     }
 
     /**
-     * The row carrying the approval title ("Schools Division Superintendent")
-     * beneath the label, or null when the block is not there.
+     * One stage's block: which cells carry the signer's name and signature,
+     * and the range an image is stamped over.
      *
      * @param  array<int, array<string, string>>  $byRow
+     * @param  array<string, mixed>  $definition
+     * @return array{stage: string, label: string, title: string, column: string, title_cell: string, name_cell: string, signature_cell: string, range: string, name_row: int, signature_row: int, title_row: int}|null
      */
-    private static function approvalTitleRow(array $byRow, int $labelRow): ?int
+    private static function signatureBlock(array $byRow, string $stage, array $definition): ?array
     {
-        $title = self::normalize((string) config('wfp.template.approval_title', 'Schools Division Superintendent'));
+        $label = self::normalize((string) ($definition['label'] ?? ''));
+        $title = self::normalize((string) ($definition['title'] ?? ''));
+        $column = strtoupper(trim((string) ($definition['column'] ?? '')));
 
         if ($title === '') {
             return null;
         }
 
-        for ($row = $labelRow + 1; $row <= $labelRow + 12; $row++) {
-            foreach (($byRow[$row] ?? []) as $text) {
+        // The designation's rows, bottom-most first: the sign-off block is at
+        // the end of the form, while the same words may also be part of the
+        // letterhead up top.
+        $candidates = self::titleCandidates($byRow, $title, $column);
+
+        // A template revision may move the block to another column (the
+        // synthetic fixtures put it in A): the pin is a preference, not a wall.
+        if ($candidates === [] && $column !== '') {
+            $candidates = self::titleCandidates($byRow, $title, '');
+        }
+
+        foreach ($candidates as $candidate) {
+            $titleRow = $candidate['row'];
+            $nameRow = $titleRow - 2;
+            $signatureRow = $titleRow - 1;
+
+            if ($nameRow < 1 || $signatureRow < 1) {
+                continue;
+            }
+
+            // The block's label must read above its designation, in the same
+            // column. The Bookkeeper's label wraps over two rows, so the whole
+            // band is joined before matching.
+            if ($label !== '') {
+                $joined = '';
+
+                for ($row = max(1, $titleRow - 12); $row < $titleRow; $row++) {
+                    $joined .= (string) (($byRow[$row][$candidate['column']] ?? null) ?? '');
+                }
+
+                if (! str_contains(self::normalize($joined), $label)) {
+                    continue;
+                }
+            }
+
+            return [
+                'stage' => $stage,
+                'label' => (string) ($definition['label'] ?? ''),
+                'title' => (string) ($definition['title'] ?? ''),
+                'column' => $candidate['column'],
+                'title_cell' => $candidate['column'].$titleRow,
+                'name_cell' => $candidate['column'].$nameRow,
+                'signature_cell' => $candidate['column'].$signatureRow,
+                'range' => $candidate['column'].$signatureRow.':'.$candidate['column'].$titleRow,
+                'name_row' => $nameRow,
+                'signature_row' => $signatureRow,
+                'title_row' => $titleRow,
+            ];
+        }
+
+        return null;
+    }
+
+    /**
+     * The cells whose text carries one block's designation, bottom-most first.
+     * An empty `$column` searches every column; a pinned one only that column.
+     *
+     * @param  array<int, array<string, string>>  $byRow
+     * @return array<int, array{row: int, column: string}>
+     */
+    private static function titleCandidates(array $byRow, string $title, string $column): array
+    {
+        $candidates = [];
+
+        foreach ($byRow as $row => $cells) {
+            foreach ($cells as $cellColumn => $text) {
+                $cellColumn = strtoupper((string) $cellColumn);
+
+                if ($column !== '' && $cellColumn !== $column) {
+                    continue;
+                }
+
                 if (str_contains(self::normalize($text), $title)) {
-                    return $row;
+                    $candidates[] = ['row' => (int) $row, 'column' => $cellColumn];
                 }
             }
         }
 
-        return null;
+        usort($candidates, static fn (array $a, array $b): int => $b['row'] <=> $a['row']);
+
+        return $candidates;
     }
 
     /* ------------------------------------------------------------------

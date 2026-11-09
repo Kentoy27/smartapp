@@ -43,10 +43,18 @@ trait BuildsWfpTemplates
      *                                   the TOTAL row, shaped like the official
      *                                   template's (label, name, signature line,
      *                                   title)
+     * @param  bool  $withSignatureBlocks  add all four e-signature blocks
+     *                                     (School Head in B, Bookkeeper in O,
+     *                                     Budget in Z, Superadmin in AL), shaped like the
+     *                                     official form's sign-off band
      * @return string the workbook bytes
      */
-    private function wfpTemplateBytes(int $dataRows = 3, ?array $labels = null, bool $withApprovalBlock = false): string
-    {
+    private function wfpTemplateBytes(
+        int $dataRows = 3,
+        ?array $labels = null,
+        bool $withApprovalBlock = false,
+        bool $withSignatureBlocks = false,
+    ): string {
         $labels ??= $this->wfpHeaderLabels;
         $headerRow = 3;
         $firstData = $headerRow + 1;
@@ -85,6 +93,7 @@ trait BuildsWfpTemplates
         $rows .= '<row r="'.$totalRow.'">'.$totalCells.'</row>';
 
         $lastRow = $totalRow;
+        $dimensionCol = $lastCol;
 
         if ($withApprovalBlock) {
             // Mirrors the official template's rhythm: label, then three rows
@@ -105,11 +114,55 @@ trait BuildsWfpTemplates
             $lastRow = $titleRow;
         }
 
+        if ($withSignatureBlocks) {
+            // All three e-signature blocks, in the columns config/wfp.php
+            // pins (O, Z, AL), with the same rhythm as the approval block:
+            // label, then three rows down the name, signature one row lower,
+            // the designation five rows below the label. The Bookkeeper's
+            // label wraps over two rows, exactly as the official form prints
+            // it, so block discovery must join the band before matching.
+            $labelRow = $totalRow + 2;
+            $nameRow = $labelRow + 3;
+            $signatureRow = $labelRow + 4;
+            $titleRow = $labelRow + 5;
+
+            $cell = static function (string $ref, string $text, int $style = 5): string {
+                return '<c r="'.$ref.'" s="'.$style.'" t="inlineStr"><is><t xml:space="preserve">'
+                    .htmlspecialchars($text, ENT_XML1 | ENT_QUOTES, 'UTF-8')
+                    .'</t></is></c>';
+            };
+
+            $rows .= '<row r="'.$labelRow.'">'
+                .$cell('B'.$labelRow, 'Prepared by:')
+                .$cell('O'.$labelRow, 'Checked as the Correctness of ')
+                .$cell('Z'.$labelRow, 'Certifying Availability of Allotment:')
+                .$cell('AL'.$labelRow, 'Approved:')
+                .'</row>';
+            $rows .= '<row r="'.($labelRow + 1).'">'.$cell('O'.($labelRow + 1), 'Account Titles and Codes:').'</row>';
+            $rows .= '<row r="'.$nameRow.'"><c r="B'.$nameRow.'" s="5"/><c r="O'.$nameRow.'" s="5"/><c r="Z'.$nameRow.'" s="5"/><c r="AL'.$nameRow.'" s="5"/></row>';
+            $rows .= '<row r="'.$signatureRow.'"><c r="B'.$signatureRow.'" s="5"/><c r="O'.$signatureRow.'" s="5"/><c r="Z'.$signatureRow.'" s="5"/><c r="AL'.$signatureRow.'" s="5"/></row>';
+            $rows .= '<row r="'.$titleRow.'">'
+                .$cell('B'.$titleRow, 'School Principal I')
+                .$cell('O'.$titleRow, 'Senior Bookkeeper')
+                .$cell('Z'.$titleRow, 'Budget Officer ')
+                .$cell('AL'.$titleRow, 'Schools Division Superintendent', 1)
+                .'</row>';
+
+            $lastRow = $titleRow;
+            $dimensionCol = 'AL';
+        }
+
+        $signatureColumns = $withSignatureBlocks
+            ? '<col min="15" max="15" width="14" customWidth="1"/>'
+                .'<col min="26" max="26" width="20" customWidth="1"/>'
+                .'<col min="38" max="38" width="24" customWidth="1"/>'
+            : '';
+
         $sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             .'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
             .'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-            .'<dimension ref="A1:'.$lastCol.$lastRow.'"/>'
-            .'<cols><col min="2" max="2" width="30" customWidth="1"/></cols>'
+            .'<dimension ref="A1:'.$dimensionCol.$lastRow.'"/>'
+            .'<cols><col min="2" max="2" width="30" customWidth="1"/>'.$signatureColumns.'</cols>'
             .'<sheetData>'.$rows.'</sheetData>'
             .'<mergeCells count="1"><mergeCell ref="A1:M1"/></mergeCells>'
             .'</worksheet>';

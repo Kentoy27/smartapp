@@ -29,9 +29,19 @@ use Illuminate\Support\Str;
  *
  * Every figure comes from WfpAllotment — the same source the page reads — so
  * the download is the report that was on screen.
+ *
+ * With `$includeSignatures = false` the same form is produced without the
+ * signers' images; the printed names stay, because they are part of the form.
+ * A signature is only stamped when its workflow record is still valid and the
+ * account still holds the role and school/division access that made it so.
+ * The SDS approves on paper — there is no approval record — so that block
+ * stays blank in both modes.
  */
 final class WfpAllotmentXlsxExporter
 {
+    /** The XLSX content type, shared by both export routes. */
+    public const CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
     /* Cell styles, as indexes into the cellXfs below. */
     private const S_HEAD_LINE = 1;   // centred header line (Republic/Department…)
 
@@ -76,12 +86,27 @@ final class WfpAllotmentXlsxExporter
 
     private const MAX_WIDTHS = ['A' => 40.0, 'B' => 20.0, 'C' => self::SPACER_WIDTH, 'D' => 10.0, 'E' => 46.0, 'F' => 20.0, 'G' => 20.0, 'H' => 14.0];
 
+    /**
+     * Resolve the export's `signatures` query option to the flag the exporter
+     * takes. Null means the option was present but was neither "with" nor
+     * "without".
+     */
+    public static function includesSignatures(mixed $mode): ?bool
+    {
+        return match ($mode) {
+            'with' => true,
+            'without' => false,
+            default => null,
+        };
+    }
+
     /** Build the workbook's bytes. */
     public static function bytes(
         int $schoolId,
         int $year,
         ?User $preparedBy = null,
         ?string $division = SchoolDivision::ELEMENTARY,
+        bool $includeSignatures = true,
     ): string {
         $school = School::query()->with('district')->find($schoolId);
         $months = WfpAllotment::months($schoolId, $year, $division);
@@ -89,6 +114,16 @@ final class WfpAllotmentXlsxExporter
         $total = WfpAllotment::total($lines);
         $certification = WfpAllotment::certification($schoolId, $year, $division);
         $checking = WfpAllotment::checking($schoolId, $year, $division);
+
+        // The signer slots whose registered profile signature may be stamped:
+        // the School Head prepares, the Bookkeeper checks, the Budget Officer
+        // certifies. The SDS has no approval record for this report. Resolved
+        // only for a signed export, so an unsigned download does no extra work.
+        $signers = $includeSignatures ? [
+            'prepared' => $preparedBy,
+            'checked' => WfpAllotment::checkingUser($schoolId, $year, $division),
+            'certified' => WfpAllotment::certifyingUser($schoolId, $year, $division),
+        ] : [];
 
         /** @var array<int, array<string, array{style: int, kind: string, value: string|float|null}>> $cells */
         $cells = [];
@@ -211,47 +246,47 @@ final class WfpAllotmentXlsxExporter
 
         /* -------------------------------------------------------- signatures */
 
-        // Two clear rows under the longer of the two tables, so the form has
-        // its signing space whether the month column or the line items run
-        // longer.
-        $signatureRow = max($monthsTotalRow, $grandTotalRow) + 2;
+        // The form's four signing blocks, below the longer of the two tables.
+        // The three blank rows between a label and its printed name are the
+        // space a signature — wet or digital — goes in.
+        $labelRow = max($monthsTotalRow, $grandTotalRow) + 2;
 
-        $text($signatureRow, 'A', self::S_LABEL, 'Prepared by:', false);
-        $text($signatureRow, 'E', self::S_LABEL, 'Checked as to the Correctness of Account Titles and Codes:', false);
-        $text($signatureRow, 'G', self::S_LABEL, 'Certifying Availability of Allotment:', false);
-        $text($signatureRow, 'H', self::S_LABEL, 'Approved:', false);
+        $text($labelRow, 'A', self::S_LABEL, 'Prepared by:', false);
+        $text($labelRow, 'E', self::S_LABEL, 'Checked as to the Correctness of Account Titles and Codes:', false);
+        $text($labelRow, 'G', self::S_LABEL, 'Certifying Availability of Allotment:', false);
+        $text($labelRow, 'H', self::S_LABEL, 'Approved:', false);
 
-        $signatureRow += 2;
+        $nameRow = $labelRow + 4;
 
-        $text($signatureRow, 'A', self::S_LABEL_BOLD, mb_strtoupper($preparedBy?->name ?: (string) $preparedBy?->username), false);
+        $text($nameRow, 'A', self::S_LABEL_BOLD, mb_strtoupper($preparedBy?->name ?: (string) $preparedBy?->username), false);
         $text(
-            $signatureRow,
+            $nameRow,
             'E',
             $checking === null ? self::S_PLAIN : self::S_LABEL_BOLD,
             $checking === null ? '_________________' : mb_strtoupper($checking['name']),
             false
         );
         $text(
-            $signatureRow,
+            $nameRow,
             'G',
             $certification === null ? self::S_PLAIN : self::S_LABEL_BOLD,
             $certification === null ? '_________________' : mb_strtoupper($certification['name']),
             false
         );
-        $text($signatureRow, 'H', self::S_PLAIN, '_________________', false);
+        $text($nameRow, 'H', self::S_PLAIN, '_________________', false);
 
-        $signatureRow++;
+        $positionRow = $nameRow + 1;
 
-        $text($signatureRow, 'A', self::S_PLAIN, $preparedBy?->position ?: 'School Principal I', false);
-        $text($signatureRow, 'E', self::S_PLAIN, $checking['position'] ?? 'Senior Bookkeeper', false);
-        $text($signatureRow, 'G', self::S_PLAIN, $certification['position'] ?? 'Budget Officer III', false);
-        $text($signatureRow, 'H', self::S_PLAIN, 'Schools Division Superintendent', false);
+        $text($positionRow, 'A', self::S_PLAIN, $preparedBy?->position ?: 'School Principal I', false);
+        $text($positionRow, 'E', self::S_PLAIN, $checking['position'] ?? 'Senior Bookkeeper', false);
+        $text($positionRow, 'G', self::S_PLAIN, $certification['position'] ?? 'Budget Officer III', false);
+        $text($positionRow, 'H', self::S_PLAIN, 'Schools Division Superintendent', false);
 
         // The check and the certification are dated statements; the page
         // carries the same dates under each signer's name.
         if ($checking !== null) {
             $text(
-                $signatureRow + 1,
+                $positionRow + 1,
                 'E',
                 self::S_PLAIN,
                 'Checked '.$checking['checked_at']->format('M j, Y'),
@@ -261,7 +296,7 @@ final class WfpAllotmentXlsxExporter
 
         if ($certification !== null) {
             $text(
-                $signatureRow + 1,
+                $positionRow + 1,
                 'G',
                 self::S_PLAIN,
                 'Certified '.$certification['certified_at']->format('M j, Y'),
@@ -269,9 +304,17 @@ final class WfpAllotmentXlsxExporter
             );
         }
 
+        // The band above each printed name, column by column. The SDS block is
+        // never stamped: this report has no approval record.
+        $signatureRanges = [
+            'prepared' => 'A'.($labelRow + 1).':A'.$nameRow,
+            'checked' => 'E'.($labelRow + 1).':E'.$nameRow,
+            'certified' => 'G'.($labelRow + 1).':G'.$nameRow,
+        ];
+
         /* ----------------------------------------------------------- package */
 
-        return PurePhpZipWriter::create([
+        $bytes = PurePhpZipWriter::create([
             '[Content_Types].xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
                 .'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
                 .'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
@@ -304,17 +347,47 @@ final class WfpAllotmentXlsxExporter
 
             'xl/worksheets/sheet1.xml' => self::sheetXml($cells, $merges, $measured),
         ]);
+
+        if ($signers === []) {
+            return $bytes;
+        }
+
+        $stamps = [];
+
+        foreach ($signatureRanges as $slot => $range) {
+            $signer = $signers[$slot] ?? null;
+
+            if (! $signer instanceof User) {
+                continue;
+            }
+
+            $signature = $signer->signatureImage();
+
+            if ($signature === null) {
+                continue;
+            }
+
+            $stamps[] = [
+                'sheet' => 'xl/worksheets/sheet1.xml',
+                'range' => $range,
+                'bytes' => $signature['bytes'],
+                'extension' => $signature['extension'],
+                'name' => trim((string) ($signer->name ?: $signer->username)),
+            ];
+        }
+
+        return $stamps === [] ? $bytes : OpcrfSignatureStamper::stampManyAtRanges($bytes, $stamps);
     }
 
     /**
-     * The download's file name: one report per school per year.
+     * The download's file name: one report per school, year and mode.
      *
      * The School Head's own copy names only the year (it is their own school,
      * so there is nothing to disambiguate). The Budget office downloads the
      * same report for many schools, so it passes the school name and gets a
      * file per school rather than a folder of identical names.
      */
-    public static function downloadName(int $year, ?string $school = null): string
+    public static function downloadName(int $year, ?string $school = null, bool $includeSignatures = true): string
     {
         $name = sprintf('per-line-item-expenditure-%d', $year);
         $slug = $school === null ? '' : Str::slug($school);
@@ -323,7 +396,7 @@ final class WfpAllotmentXlsxExporter
             $name .= '-'.$slug;
         }
 
-        return $name.'.xlsx';
+        return $name.($includeSignatures ? '-signed' : '-unsigned').'.xlsx';
     }
 
     /* ------------------------------------------------------------ worksheet */

@@ -79,15 +79,25 @@
             'allocation' => $this->allocation,
             'certification' => $this->certification,
             'checking' => $checking,
-            // The Bookkeeper signs here; the Budget office only reads the
-            // status and never stands for the Bookkeeper's office.
+            'signatoryStatuses' => $signatoryStatuses,
+            // Bookkeeper and Budget sign their own separate blocks.
             'canCheck' => $canCheck,
+            'canCertify' => $this->canCertify(),
             'preparedBy' => $preparedBy,
             'schoolOptions' => $this->schoolOptions,
-            'exportUrl' => route('budget.per-line-item.export', [
+            'exportSignedUrl' => route('budget.per-line-item.export', [
                 'school' => $this->school->id,
                 'year' => $this->year,
+                'signatures' => 'with',
             ]),
+            'exportUnsignedUrl' => route('budget.per-line-item.export', [
+                'school' => $this->school->id,
+                'year' => $this->year,
+                'signatures' => 'without',
+            ]),
+            // The Bookkeeper's route to the plan to sign; null for the Budget
+            // office and while no plan has been generated.
+            'planUrl' => $planUrl,
         ])
 
         {{-- CHECK CONFIRMATION: the check is a statement the Bookkeeper
@@ -162,5 +172,66 @@
                 </div>
             </div>
         @endif
+    @endif
+
+    @if ($showCertificationModal && $this->canCertify() && $this->school)
+        <div
+            class="modal-backdrop is-open"
+            @click.self="$wire.closeCertificationModal()"
+            role="presentation"
+        >
+            <div
+                class="modal modal--confirmation"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="certifyReportTitle"
+                @click.stop
+            >
+                <div class="modal-head">
+                    <h2 id="certifyReportTitle">Certify Availability of Allotment</h2>
+                    <button
+                        type="button"
+                        class="modal-close"
+                        wire:click="closeCertificationModal"
+                        aria-label="Close"
+                        title="Close"
+                    >×</button>
+                </div>
+
+                <div class="modal-form">
+                    <p class="delete-modal-description">
+                        Certify that the allotment for <strong>{{ $this->school->name }}</strong>
+                        is available for CY {{ $this->year }}?
+                    </p>
+                    <p class="allotment-footnote">
+                        Signed as <strong>{{ auth()->user()->name ?: auth()->user()->username }}</strong>,
+                        {{ auth()->user()->position ?: 'Budget Officer III' }}.
+                        The report and its Excel export will name you as the certifying officer.
+                    </p>
+
+                    <div class="modal-actions">
+                        <button
+                            type="button"
+                            class="btn-ghost"
+                            wire:click="closeCertificationModal"
+                            wire:loading.attr="disabled"
+                            wire:target="certify"
+                        >Cancel</button>
+                        <button
+                            type="button"
+                            class="btn-primary"
+                            wire:click="certify"
+                            wire:loading.attr="disabled"
+                            wire:target="certify"
+                        >
+                            <span wire:loading.remove wire:target="certify">
+                                <x-icon name="check-check" :size="16" /> Sign certification
+                            </span>
+                            <span wire:loading wire:target="certify">Signing…</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
     @endif
 </div>

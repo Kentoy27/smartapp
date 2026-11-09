@@ -18,6 +18,9 @@
         <div class="memory-breadcrumb">
             @if (auth()->user()?->canApproveWfp())
                 <a href="{{ route('wfp.approvals.index') }}" wire:navigate.hover>WFP Final Approvals</a>
+            @elseif (auth()->user()?->canCheckLineItems())
+                {{-- Budget and Bookkeeper readers return to their checking pages. --}}
+                <a href="{{ route('budget.per-line-item.index') }}" wire:navigate.hover>Per Line Item Expenditure</a>
             @else
                 <a href="{{ route('wfp.matrices.index') }}" wire:navigate.hover>Monthly Expenditure Matrix</a>
             @endif
@@ -31,6 +34,56 @@
             · {{ $plan->items()->count() }} line(s) · {{ $this->flaggedCount }} to review
         </p>
     </div>
+
+    @if ($plan->school_id)
+        @livewire('wfp-signatory-actions', [
+            'schoolId' => $plan->school_id,
+            'year' => (int) $plan->year,
+        ], key('wfp-plan-signoffs-'.$plan->id))
+    @endif
+
+    @if (! empty($this->signatoryStatuses))
+        <section class="card wfp-signatory-statuses" aria-label="Signatory status for this WFP">
+            <div class="card-head">
+                <div class="card-title">Signatory Status</div>
+            </div>
+
+            <div class="wfp-signatory-statuses__list">
+                @foreach ($this->signatoryStatuses as $status)
+                    <div class="wfp-signatory-status">
+                        <div class="wfp-signatory-status__header">
+                            <span class="wfp-signatory-status__label">{{ $status['label'] }}</span>
+                            <span @class([
+                                'wfp-signatory-status__badge',
+                                'wfp-signatory-status__badge--pending' => ($status['state'] ?? 'pending') === 'pending',
+                                'wfp-signatory-status__badge--checked' => ($status['state'] ?? 'pending') === 'checked',
+                                'wfp-signatory-status__badge--certified' => ($status['state'] ?? 'pending') === 'certified',
+                                'wfp-signatory-status__badge--approved' => ($status['state'] ?? 'pending') === 'approved',
+                                'wfp-signatory-status__badge--returned' => ($status['state'] ?? 'pending') === 'returned',
+                            ])>{{ $status['badge'] }}</span>
+                        </div>
+
+                        @if (($status['state'] ?? 'pending') === 'pending')
+                            <div class="wfp-signatory-status__meta">{{ $status['pending_text'] ?? 'Pending' }}</div>
+                        @else
+                            @if (! empty($status['name']))
+                                <div class="wfp-signatory-status__meta">{{ $status['name'] }}</div>
+                            @endif
+                            @if (! empty($status['position']))
+                                <div class="wfp-signatory-status__meta">{{ $status['position'] }}</div>
+                            @endif
+                            @if (! empty($status['date']))
+                                <div class="wfp-signatory-status__meta">{{ $status['date']->format('M j, Y g:i A') }}</div>
+                            @endif
+                            @if (! empty($status['remarks']))
+                                <div class="wfp-signatory-status__remarks"><strong>Remarks:</strong> {{ $status['remarks'] }}</div>
+                            @endif
+                        @endif
+                    </div>
+                @endforeach
+            </div>
+        </section>
+    @endif
 
     @if ($errorMessage)
         <div class="ac-import-error mem-banner" role="alert">
@@ -223,14 +276,31 @@
             @endif
         </div>
 
-        <a
-            href="{{ route('wfp.plans.export', ['plan' => $plan->id]) }}"
-            class="btn-primary"
-            download
-        >
-            <x-icon name="download" :size="16" />
-            <span>Download {{ $templateName }}</span>
-        </a>
+        @if (auth()->user()?->canViewWfpSignoffs())
+            {{-- The signed copy uses only signers backed by existing WFP
+                 records and their registered profile signatures. --}}
+            <div
+                class="mem-actions__group"
+                x-data="{ missing: @js($this->missingSignatureLabels) }"
+            >
+                <a
+                    href="{{ route('wfp.plans.export', ['plan' => $plan->id]) }}"
+                    class="btn-primary"
+                    x-on:click.prevent="if (missing.length === 0 || window.confirm('These sections have no applicable registered e-signature and will remain unsigned: ' + missing.join('; ') + '. Continue with the available signatures?')) window.location.href = $el.href"
+                >
+                    <x-icon name="download" :size="16" />
+                    <span>Export with E-Signatures</span>
+                </a>
+                <a
+                    href="{{ route('wfp.plans.export', ['plan' => $plan->id, 'signatures' => 'without']) }}"
+                    class="btn-ghost"
+                    download
+                >
+                    <x-icon name="download" :size="16" />
+                    <span>Export without E-Signatures</span>
+                </a>
+            </div>
+        @endif
     </div>
 
     @forelse ($this->groups as $group)

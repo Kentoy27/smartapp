@@ -3,6 +3,9 @@
 namespace App\Livewire;
 
 use App\Models\User;
+use App\Models\WfpExportAudit;
+use App\Models\WfpPlan;
+use App\Support\WfpAllotment;
 use App\Support\WfpAccountCodeGenerator;
 use App\Support\WfpPlanExporter;
 use Illuminate\Support\Facades\Auth;
@@ -64,31 +67,37 @@ class WfpGenerateButton extends Component
      * Build the workbook and hand it to the browser as a download. A generation
      * problem is caught and shown as a toast instead of returning a bad file.
      */
-    public function download()
+    public function download(string $signatureMode = 'with')
     {
         abort_unless(Auth::user()?->canManageWfp(), 404);
+        abort_unless(in_array($signatureMode, ['with', 'without'], true), 404);
 
         $user = Auth::user();
+        abort_unless($user instanceof User, 404);
+
         $year = $this->downloadYear();
+        $includeSignatures = $signatureMode === 'with';
 
         try {
             // The school's own matrices win: that is the plan the SH has been
             // working in, and it is what the form is meant to hold. The year
             // is the one picked in the select, never merely "the newest".
-            $plan = WfpPlanExporter::exportableFor($user instanceof User ? $user : null, $year);
+            $plan = WfpPlanExporter::exportableFor($user, $year);
 
             if ($plan !== null) {
-                $bytes = WfpPlanExporter::bytes($plan);
-                $name = WfpAccountCodeGenerator::downloadName($user instanceof User ? $user : null, $plan->year);
+                $bytes = WfpPlanExporter::bytes($plan, $includeSignatures, $user);
+                $year = (int) $plan->year;
             } else {
-                $bytes = WfpAccountCodeGenerator::bytes($user instanceof User ? $user : null, $year);
-                $name = WfpAccountCodeGenerator::downloadName($user instanceof User ? $user : null, $year);
+                $bytes = WfpAccountCodeGenerator::bytes($user, $year);
             }
         } catch (RuntimeException $e) {
             $this->errorMessage = $e->getMessage();
 
             return null;
         }
+
+        WfpExportAudit::record($user, $plan, $year, $includeSignatures);
+        $name = self::downloadName($user, $year, $includeSignatures);
 
         return response()->streamDownload(
             fn () => print ($bytes),
@@ -125,6 +134,8 @@ class WfpGenerateButton extends Component
         // The caption is keyed off the year that resolved; forget it so the
         // render reads it again for the year that was picked.
         unset($this->planYear);
+        unset($this->missingSignatureLabels);
+        unset($this->signatoryStatuses);
     }
 
     /**
@@ -176,6 +187,44 @@ class WfpGenerateButton extends Component
             Auth::user(),
             $this->year === '' ? null : (int) $this->year,
         );
+    }
+
+    /**
+     * The selected year's current plan, without creating or changing it.
+     * A blank form has no recorded signatures to include.
+     */
+    #[Computed]
+    public function missingSignatureLabels(): array
+    {
+        $user = Auth::user();
+
+        if (! $user instanceof User) {
+            return [];
+        }
+
+        $plan = WfpPlanExporter::existingFor($user, $this->downloadYear());
+
+        return WfpPlanExporter::missingSignatureLabels($plan, $user);
+    }
+
+    #[Computed]
+    public function signatoryStatuses(): array
+    {
+        $user = Auth::user();
+
+        return WfpAllotment::signatoryStatuses(
+            $user?->school_id,
+            $this->downloadYear(),
+            $user?->activeDivision(),
+        );
+    }
+
+    private static function downloadName(User $user, int $year, bool $includeSignatures): string
+    {
+        $original = WfpAccountCodeGenerator::downloadName($user, $year);
+        $suffix = $includeSignatures ? '_Signed.xlsx' : '_Unsigned.xlsx';
+
+        return substr($original, 0, -5).$suffix;
     }
 
     public function render()

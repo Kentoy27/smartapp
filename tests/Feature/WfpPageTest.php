@@ -99,6 +99,14 @@ class WfpPageTest extends TestCase
         ]);
     }
 
+    private function exportName(User $user, ?int $year = null, bool $signed = true): string
+    {
+        $name = WfpAccountCodeGenerator::downloadName($user, $year);
+        $suffix = $signed ? '_Signed.xlsx' : '_Unsigned.xlsx';
+
+        return substr($name, 0, -5).$suffix;
+    }
+
     /**
      * One matrix for the given year carrying one line, written the way the app
      * writes a line: the total is computed server-side, never taken from a
@@ -136,7 +144,8 @@ class WfpPageTest extends TestCase
             ->get(route('wfp.index'))
             ->assertOk()
             ->assertSee('Work and Financial Plan')
-            ->assertSee('Generate and Download Work and Financial Plan');
+            ->assertSee('Generate and Download WFP (With E-Signatures)')
+            ->assertSee('Generate and Download WFP (Without E-Signatures)');
     }
 
     public function test_guests_are_redirected_to_login(): void
@@ -144,11 +153,13 @@ class WfpPageTest extends TestCase
         $this->get(route('wfp.index'))->assertRedirect(route('login'));
     }
 
-    public function test_superadmins_cannot_open_the_wfp_page(): void
+    public function test_superadmins_can_open_the_wfp_signoff_queue(): void
     {
         $this->actingAs($this->superadmin())
             ->get(route('wfp.index'))
-            ->assertNotFound();
+            ->assertOk()
+            ->assertSee('Work and Financial Plans')
+            ->assertSee('Plans in your scope');
     }
 
     public function test_viewers_cannot_open_the_wfp_page(): void
@@ -172,7 +183,7 @@ class WfpPageTest extends TestCase
         config(['wfp.template_file' => $name]);
 
         try {
-            $expected = WfpAccountCodeGenerator::downloadName($head);
+            $expected = $this->exportName($head);
 
             Livewire::actingAs($head)
                 ->test(WfpGenerateButton::class)
@@ -259,7 +270,7 @@ class WfpPageTest extends TestCase
         $component = Livewire::actingAs($head)->test(WfpGenerateButton::class)->call('download');
 
         // Still named for the school and the year the plan belongs to.
-        $component->assertFileDownloaded(WfpAccountCodeGenerator::downloadName($head, 2026));
+        $component->assertFileDownloaded($this->exportName($head, 2026));
 
         $bytes = base64_decode((string) data_get($component->effects, 'download.content'));
         $sheet = $this->wfpSheetXml($bytes);
@@ -350,7 +361,7 @@ class WfpPageTest extends TestCase
             ->test(WfpGenerateButton::class)
             ->set('year', '2025')
             ->call('download')
-            ->assertFileDownloaded(WfpAccountCodeGenerator::downloadName($head, 2025));
+            ->assertFileDownloaded($this->exportName($head, 2025));
 
         // Only the picked year's plan was generated.
         $plan = WfpPlan::query()->where('school_id', $head->school_id)->where('year', 2025)->firstOrFail();
@@ -420,7 +431,7 @@ class WfpPageTest extends TestCase
         Livewire::actingAs($this->schoolHead())
             ->test(WfpMyUploadsList::class)
             ->assertSee('No WFP uploads yet.')
-            ->assertDontSee('Download');
+            ->assertDontSee('title="Download your WFP"', false);
     }
 
     public function test_a_non_school_head_cannot_reach_the_uploads_list(): void

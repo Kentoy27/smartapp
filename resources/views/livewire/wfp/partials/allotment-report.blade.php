@@ -19,12 +19,18 @@
        $certification ?array    the Budget office's certification
        $checking      ?array    the Bookkeeper's check, or null while unchecked
        $canCheck      bool      whether the viewer may give the check (Bookkeeper)
+       $canCertify    bool      whether the viewer may certify the allotment (Budget)
        $preparedBy    ?User     the school's School Head
        $schoolOptions null|Collection  the Budget office's picker menu — the
                                    roster narrowed by the component's
                                    `schoolSearch` box; null on the School
                                    Head's copy, where the picker is hidden
-       $exportUrl     ?string   the .xlsx download, or null when there is none
+       $exportSignedUrl   ?string  the .xlsx download with e-signatures, or null
+       $exportUnsignedUrl ?string  the .xlsx download without e-signatures, or null
+       $planUrl       ?string   the Bookkeeper's route to the school's
+                                   generated WFP — where its correctness block
+                                   is signed; null on every other copy and
+                                   while no plan has been generated
 
      The picker (Budget office's copy only) reads `$schoolId` — the school on
      screen, for the check mark — and drives the component's chooseSchool() /
@@ -105,6 +111,49 @@
         </p>
     @endif
 </section>
+
+@if (! empty($signatoryStatuses ?? []))
+    <section class="card wfp-signatory-statuses" aria-label="Signatory status report">
+        <div class="card-head">
+            <div class="card-title">Signatory Status</div>
+        </div>
+
+        <div class="wfp-signatory-statuses__list">
+            @foreach ($signatoryStatuses as $status)
+                <div class="wfp-signatory-status">
+                    <div class="wfp-signatory-status__header">
+                        <span class="wfp-signatory-status__label">{{ $status['label'] }}</span>
+                        <span @class([
+                            'wfp-signatory-status__badge',
+                            'wfp-signatory-status__badge--pending' => ($status['state'] ?? 'pending') === 'pending',
+                            'wfp-signatory-status__badge--checked' => ($status['state'] ?? 'pending') === 'checked',
+                            'wfp-signatory-status__badge--certified' => ($status['state'] ?? 'pending') === 'certified',
+                            'wfp-signatory-status__badge--approved' => ($status['state'] ?? 'pending') === 'approved',
+                            'wfp-signatory-status__badge--returned' => ($status['state'] ?? 'pending') === 'returned',
+                        ])>{{ $status['badge'] }}</span>
+                    </div>
+
+                    @if (($status['state'] ?? 'pending') === 'pending')
+                        <div class="wfp-signatory-status__meta">{{ $status['pending_text'] ?? 'Pending' }}</div>
+                    @else
+                        @if (! empty($status['name']))
+                            <div class="wfp-signatory-status__meta">{{ $status['name'] }}</div>
+                        @endif
+                        @if (! empty($status['position']))
+                            <div class="wfp-signatory-status__meta">{{ $status['position'] }}</div>
+                        @endif
+                        @if (! empty($status['date']))
+                            <div class="wfp-signatory-status__meta">{{ $status['date']->format('M j, Y g:i A') }}</div>
+                        @endif
+                        @if (! empty($status['remarks']))
+                            <div class="wfp-signatory-status__remarks"><strong>Remarks:</strong> {{ $status['remarks'] }}</div>
+                        @endif
+                    @endif
+                </div>
+            @endforeach
+        </div>
+    </section>
+@endif
 
 <div class="card">
     <div class="card-head users-toolbar wfp-allotment-toolbar">
@@ -219,17 +268,30 @@
             </button>
 
             {{-- The same report as an .xlsx, with its columns auto-fitted to
-                 the figures. A plain link, not a Livewire action: the target is
+                 the figures. Plain links, not Livewire actions: the target is
                  a file download, and there is no page to morph into. The year
-                 the reader is on travels with it. --}}
-            @if ($exportUrl)
+                 the reader is on travels with each one. The signed copy stamps
+                 the registered profile signatures of the workflow signers; the
+                 unsigned copy keeps the printed form for wet signing. --}}
+            @if ($exportSignedUrl)
                 <a
                     class="ac-import-btn"
-                    href="{{ $exportUrl }}"
-                    title="Download this report as Excel (.xlsx)"
+                    href="{{ $exportSignedUrl }}"
+                    title="Download this report as Excel with the signers’ e-signatures"
                 >
                     <x-icon name="file-spreadsheet" :size="16" />
-                    <span>Download Excel</span>
+                    <span>Export with E-Signatures</span>
+                </a>
+            @endif
+
+            @if ($exportUnsignedUrl)
+                <a
+                    class="ac-import-btn"
+                    href="{{ $exportUnsignedUrl }}"
+                    title="Download this report as Excel without e-signatures, for wet signing"
+                >
+                    <x-icon name="file-spreadsheet" :size="16" />
+                    <span>Export without E-Signatures</span>
                 </a>
             @endif
         </div>
@@ -368,8 +430,22 @@
                             : 'Check this report as to the correctness of its account titles and codes' }}"
                     >
                         <x-icon name="check-check" :size="14" />
-                        <span>{{ $checking ? 'Re-check' : 'Check report' }}</span>
+                        <span>{{ $checking ? 'Re-sign check' : 'Sign check' }}</span>
                     </button>
+
+                    {{-- The electronic sign-off is given on the plan page, so
+                         the report offers the way there for the Bookkeeper. --}}
+                    @if (($planUrl ?? null) !== null)
+                        <a
+                            class="allotment-certify"
+                            href="{{ $planUrl }}"
+                            wire:navigate.hover
+                            title="Open the generated WFP to sign its correctness block"
+                        >
+                            <x-icon name="file-spreadsheet" :size="14" />
+                            <span>Open WFP to sign</span>
+                        </a>
+                    @endif
                 @endif
             </div>
 
@@ -385,6 +461,20 @@
                 @else
                     <span class="wfp-allotment-signatory__name">_________________</span>
                     <span class="wfp-allotment-signatory__role">Budget Officer III</span>
+                @endif
+
+                @if (($canCertify ?? false) && ! $certification)
+                    <button
+                        type="button"
+                        class="allotment-certify"
+                        wire:click="openCertificationModal"
+                        wire:loading.attr="disabled"
+                        wire:target="openCertificationModal"
+                        title="Sign that this school's allotment is available"
+                    >
+                        <x-icon name="check-check" :size="14" />
+                        <span>Sign certification</span>
+                    </button>
                 @endif
             </div>
 
