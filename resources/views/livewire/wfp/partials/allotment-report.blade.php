@@ -257,7 +257,7 @@
             {{-- The report is a printed form, so printing it is the action:
                  the browser's own dialog is the one that puts the letterhead
                  on paper. --}}
-            <button
+            {{-- <button
                 type="button"
                 class="ac-import-btn"
                 onclick="window.print()"
@@ -265,7 +265,7 @@
             >
                 <x-icon name="printer" :size="16" />
                 <span>Print</span>
-            </button>
+            </button> --}}
 
             {{-- The same report as an .xlsx, with its columns auto-fitted to
                  the figures. Plain links, not Livewire actions: the target is

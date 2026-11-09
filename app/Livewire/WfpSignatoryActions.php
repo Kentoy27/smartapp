@@ -4,6 +4,7 @@ namespace App\Livewire;
 
 use App\Models\School;
 use App\Models\User;
+use App\Models\WfpPlan;
 use App\Support\WfpAllotment;
 use App\Support\WfpReportSignoffs;
 use Illuminate\Support\Facades\Auth;
@@ -18,6 +19,13 @@ class WfpSignatoryActions extends Component
 
     #[Locked]
     public int $year = 0;
+
+    /**
+     * Table-cell mode: the index and plan lists render this component inside
+     * a narrow column, so it shows the three checkpoints as small pills plus
+     * the sign buttons instead of the full card panel.
+     */
+    public bool $compact = false;
 
     public ?string $successMessage = null;
 
@@ -67,9 +75,21 @@ class WfpSignatoryActions extends Component
             return;
         }
 
-        $this->successMessage = 'Signed the account-title and code check for CY '.$this->year.'.';
+        $submitted = false;
+        $budgetOfficer = WfpAllotment::certifyingUser($this->schoolId, $this->year, $user->activeDivision());
+
+        if ($budgetOfficer instanceof User) {
+            $submitted = $this->submitPlanIfReady($budgetOfficer);
+        }
+
+        $this->successMessage = $submitted
+            ? 'WFP submitted to the Schools Division Superintendent for final approval after the Bookkeeper check.'
+            : 'Signed the account-title and code check for CY '.$this->year.'.';
         $this->errorMessage = null;
         $this->dispatch('wfp-signoff-updated', schoolId: $this->schoolId, year: $this->year);
+        if ($submitted) {
+            $this->dispatch('wfp-plan-submitted');
+        }
     }
 
     public function signCertification(): void
@@ -85,9 +105,65 @@ class WfpSignatoryActions extends Component
             return;
         }
 
-        $this->successMessage = 'Signed the allotment certification for CY '.$this->year.'.';
+        $submitted = $this->submitPlanIfReady($user);
+
+        $this->successMessage = $submitted
+            ? 'WFP submitted to the Schools Division Superintendent for final approval after the Budget certification.'
+            : 'Signed the allotment certification for CY '.$this->year.'.';
         $this->errorMessage = null;
         $this->dispatch('wfp-signoff-updated', schoolId: $this->schoolId, year: $this->year);
+        if ($submitted) {
+            $this->dispatch('wfp-plan-submitted');
+        }
+    }
+
+    public function submitForApproval(): void
+    {
+        $user = $this->viewer();
+        abort_unless($user->canCertifyAllotments(), 404);
+
+        $plan = WfpPlan::query()
+            ->where('school_id', $this->schoolId)
+            ->where('school_division', $user->activeDivision())
+            ->where('year', $this->year)
+            ->firstOrFail();
+
+        try {
+            $plan->submitForApprovalByBudget($user);
+        } catch (RuntimeException $exception) {
+            $this->errorMessage = $exception->getMessage();
+
+            return;
+        }
+
+        $this->successMessage = 'Submitted '.$plan->fiscalYearLabel().' for the Schools Division Superintendent’s final approval.';
+        $this->errorMessage = null;
+        $this->dispatch('wfp-plan-submitted');
+    }
+
+    private function submitPlanIfReady(User $budgetOfficer): bool
+    {
+        $plan = WfpPlan::query()
+            ->where('school_id', $this->schoolId)
+            ->where('school_division', $budgetOfficer->activeDivision())
+            ->where('year', $this->year)
+            ->first();
+
+        if (
+            $plan === null
+            || ! $plan->isEditable()
+            || ! $plan->items()->exists()
+            || $plan->isOutOfDate()
+            || ! $plan->hasBudgetReview()
+            || WfpAllotment::checkingUser($this->schoolId, $this->year, $budgetOfficer->activeDivision()) === null
+            || WfpAllotment::certifyingUser($this->schoolId, $this->year, $budgetOfficer->activeDivision()) === null
+        ) {
+            return false;
+        }
+
+        $plan->submitForApprovalByBudget($budgetOfficer);
+
+        return true;
     }
 
     public function clearMessage(): void
@@ -105,11 +181,24 @@ class WfpSignatoryActions extends Component
         $certification = WfpAllotment::certification($this->schoolId, $this->year, $division);
         $hasLines = WfpAllotment::lineItems($this->schoolId, $this->year, $division) !== [];
         $hasAllotment = WfpAllotment::allotment($this->schoolId, $this->year, $division) !== null;
+        $plan = WfpPlan::query()
+            ->where('school_id', $this->schoolId)
+            ->where('school_division', $division)
+            ->where('year', $this->year)
+            ->first();
+        $canSubmit = $user->canCertifyAllotments()
+            && $plan !== null
+            && $plan->isEditable()
+            && $plan->items()->exists()
+            && ! $plan->isOutOfDate()
+            && $plan->hasBudgetReview();
 
         return view('livewire.wfp.signatory-actions', [
             'statuses' => $statuses,
             'canCheck' => $user->canCheckWfpReport() && $hasLines,
             'canCertify' => $user->canCertifyAllotments() && $hasAllotment && $certification === null,
+            'canSubmit' => $canSubmit,
+            'hasSubmittablePlan' => $user->canCertifyAllotments() && $plan?->isEditable() === true,
             'checking' => $checking,
             'certification' => $certification,
         ]);

@@ -17,10 +17,32 @@
      Nothing here polls. A poll re-morphs the whole nav on a timer, which
      replaces the very row under the pointer mid-click and discards the
      click; the counts on this component are already refreshed by events. --}}
-<nav class="sidebar-nav" aria-label="Main navigation">
-    @php($currentSection = null)
+<div class="sidebar-main">
+    @if (Auth::user()->canManageAllotments() && Auth::user()->canSwitchDivision())
+        <form method="POST" action="{{ route('division.switch') }}" class="sidebar-division-switcher" id="divisionSwitcher">
+            @csrf
+            <div class="sidebar-division-switcher-label">Division</div>
+            <div class="sidebar-division-options" role="group" aria-label="Financial division">
+                @foreach (Auth::user()->authorizedDivisions() as $divisionOption)
+                    <button
+                        type="submit"
+                        name="division"
+                        value="{{ $divisionOption }}"
+                        class="sidebar-division-option{{ $divisionOption === Auth::user()->activeDivision() ? ' is-active' : '' }}"
+                        aria-pressed="{{ $divisionOption === Auth::user()->activeDivision() ? 'true' : 'false' }}"
+                        title="Switch to {{ \App\Support\SchoolDivision::label($divisionOption) }}"
+                    >
+                        {{ \App\Support\SchoolDivision::label($divisionOption) }}
+                    </button>
+                @endforeach
+            </div>
+        </form>
+    @endif
 
-    @foreach ($this->items as $item)
+    <nav class="sidebar-nav" aria-label="Main navigation">
+        @php($currentSection = null)
+
+        @foreach ($this->items as $item)
         @if (($item['section'] ?? null) !== $currentSection)
             <div class="nav-section"><span>{{ $item['section'] }}</span></div>
             @php($currentSection = $item['section'] ?? null)
@@ -31,10 +53,13 @@
                 {{-- An `active` pattern marks the whole family of pages the
                      group holds (the WFP group lights up on any wfp.* page);
                      without one, the group's own route is used. --}}
+                @php($groupIsActive = request()->routeIs($item['active'] ?? $item['route']) && (! isset($item['division']) || $item['division'] === Auth::user()->activeDivision()))
+                @php($groupAction = isset($item['division']) ? 'selectWfpDivision' : 'toggleGroup')
+                @php($groupActionValue = $item['division'] ?? $item['path'])
                 <button
                     type="button"
-                    class="nav-item nav-item--toggle{{ request()->routeIs($item['active'] ?? $item['route']) ? ' active' : '' }}"
-                    wire:click="toggleGroup('{{ $item['path'] }}')"
+                    class="nav-item nav-item--toggle{{ $groupIsActive ? ' active' : '' }}"
+                    wire:click="{{ $groupAction }}('{{ $groupActionValue }}')"
                     aria-expanded="{{ isset($openGroups[$item['path']]) ? 'true' : 'false' }}"
                     aria-controls="sidebar-group-{{ $item['path'] }}"
                     wire:key="sidebar-{{ $item['path'] }}"
@@ -107,5 +132,6 @@
                 @endisset
             </a>
         @endif
-    @endforeach
-</nav>
+        @endforeach
+    </nav>
+</div>

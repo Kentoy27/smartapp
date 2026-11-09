@@ -216,27 +216,36 @@ class SchoolDivisionSeparationTest extends TestCase
         $this->assertFalse($head->canAccessDivision('SENIOR_HIGH'));
     }
 
-    public function test_the_top_navigation_lists_every_assigned_division(): void
+    public function test_the_sidebar_lists_a_wfp_group_for_each_assigned_division_without_a_switcher(): void
     {
         $school = $this->school('Integrated School');
-        $this->offer($school, ['ELEMENTARY', 'JUNIOR_HIGH', 'SENIOR_HIGH']);
+        $this->offer($school, ['JUNIOR_HIGH', 'SENIOR_HIGH']);
 
-        $head = $this->schoolHead($school, 'JUNIOR_HIGH', ['ELEMENTARY', 'JUNIOR_HIGH', 'SENIOR_HIGH']);
+        $head = $this->schoolHead($school, 'JUNIOR_HIGH', ['JUNIOR_HIGH', 'SENIOR_HIGH']);
 
         $this->actingAs($head)->get(route('home'))
             ->assertOk()
-            ->assertSee('id="divisionSwitcher"', false)
-            ->assertSee('value="ELEMENTARY"', false)
-            ->assertSee('value="JUNIOR_HIGH"', false)
-            ->assertSee('value="SENIOR_HIGH"', false);
+            ->assertDontSee('id="divisionSwitcher"', false)
+            ->assertSee('WFP — Junior High')
+            ->assertSee('WFP — Senior High');
 
-        // A single-division account gets no switcher, so no other division
-        // can be reached from the header either.
+        $component = Livewire::actingAs($head)->test(Sidebar::class);
+        $wfpGroups = collect($component->instance()->items())->where('division')->values();
+        $this->assertSame(
+            ['JUNIOR_HIGH', 'SENIOR_HIGH'],
+            $wfpGroups->pluck('division')->all(),
+        );
+
+        $component->call('selectWfpDivision', 'SENIOR_HIGH');
+        $this->assertSame('SENIOR_HIGH', $head->activeDivision());
+
+        // A single-division account keeps the original unsuffixed WFP group.
         $jhsOnly = $this->schoolHead($school, 'JUNIOR_HIGH', ['JUNIOR_HIGH']);
 
         $this->actingAs($jhsOnly)->get(route('home'))
             ->assertOk()
-            ->assertDontSee('id="divisionSwitcher"', false);
+            ->assertDontSee('id="divisionSwitcher"', false)
+            ->assertSee('WFP');
     }
 
     public function test_a_division_the_school_does_not_offer_is_rejected(): void
@@ -633,7 +642,7 @@ class SchoolDivisionSeparationTest extends TestCase
         $this->assertSame('SENIOR_HIGH', $head->activeDivision());
     }
 
-    public function test_the_division_switcher_is_shown_to_school_heads_and_division_wide_allotment_managers(): void
+    public function test_school_heads_use_division_specific_wfp_groups_and_managers_keep_the_switcher(): void
     {
         $school = $this->school();
         $head = $this->schoolHead($school, 'JUNIOR_HIGH', ['JUNIOR_HIGH', 'SENIOR_HIGH']);
@@ -641,7 +650,10 @@ class SchoolDivisionSeparationTest extends TestCase
         $this->actingAs($head)
             ->get(route('home'))
             ->assertOk()
-            ->assertSee('id="divisionSwitcher"', false);
+            ->assertDontSee('id="divisionSwitcher"', false)
+            ->assertSee('WFP — Junior High')
+            ->assertSee('WFP — Senior High')
+            ->assertDontSee('<select id="divisionSwitcher"', false);
 
         foreach ([
             User::factory()->create(['role' => 'budget', 'is_superadmin' => false]),

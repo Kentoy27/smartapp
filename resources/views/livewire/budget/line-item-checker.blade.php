@@ -123,6 +123,7 @@
                                     @livewire('wfp-signatory-actions', [
                                         'schoolId' => $school->id,
                                         'year' => (int) $this->year,
+                                        'compact' => true,
                                     ], key('monthly-signoffs-'.$school->id.'-'.$this->year))
                                 </td>
 

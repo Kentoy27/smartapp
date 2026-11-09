@@ -20,7 +20,7 @@
             <span class="viewer-submission-card__link">View submitted AIPs <span aria-hidden="true">→</span></span>
         </a>
         <a class="viewer-submission-card viewer-submission-card--opcrf" href="{{ route('opcrf.index') }}" wire:navigate.hover>
-            <span class="viewer-submission-card__icon"><x-icon name="clipboard-list" :size="19" /></span>
+            <span class="viewer-submission-card__icon"><x-icon name="eye" :size="19" /></span>
             <span class="viewer-submission-card__label">OPCRF Review</span>
             <strong>{{ number_format($stats['opcrf']) }}</strong>
             <span class="viewer-submission-card__link">View submitted OPCRFs <span aria-hidden="true">→</span></span>

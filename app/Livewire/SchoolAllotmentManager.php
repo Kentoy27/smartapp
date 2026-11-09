@@ -59,10 +59,12 @@ class SchoolAllotmentManager extends Component
     private const BULK_PREVIEW_LIMIT = 200;
 
     /**
-     * The slices the school table can show. 'all' is the default; the others
-     * are the questions the Budget office actually asks of a division's
-     * roster — who has a School Head to consume the money, who is still
-     * missing an allotment, and whose is already set.
+     * The slices the school table can show. 'with_head' is the default — the
+     * roster opens on the schools that can actually consume the money, so a
+     * school whose School Head does not work this division is not rendered.
+     * The others are the questions the Budget office asks of a division's
+     * roster — everyone including the headless ('all'), who is still missing
+     * an allotment, and whose is already set.
      */
     private const SCHOOL_FILTERS = ['all', 'with_head', 'without_allotment', 'with_allotment'];
 
@@ -73,11 +75,14 @@ class SchoolAllotmentManager extends Component
     public string $search = '';
 
     /**
-     * Which slice of the division's schools the table shows: every school
-     * ('all'), the ones a School Head works in this division ('with_head'),
-     * or the ones still missing an amount ('without_allotment').
+     * Which slice of the division's schools the table shows: the ones a
+     * School Head works in this division ('with_head', the default — a school
+     * with no head in the division has no one to consume the money, so it
+     * stays off the roster until one is assigned), every school including the
+     * headless ('all'), or the ones still missing an amount
+     * ('without_allotment').
      */
-    public string $schoolFilter = 'all';
+    public string $schoolFilter = 'with_head';
 
     public int $perPage = 25;
 

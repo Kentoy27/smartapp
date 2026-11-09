@@ -363,18 +363,21 @@ class SchoolAllotmentTest extends TestCase
             ->test(SchoolAllotmentManager::class)
             ->set('year', '2026');
 
-        // Every school by default.
+        // The roster opens on the schools a School Head works in this
+        // division — the ones that can actually consume the money. A school
+        // with no head in the division is not rendered.
         $component
-            ->assertSee('Alpha Allotment School')
-            ->assertSee('Beta Allotment School')
-            ->assertSee('Gamma Headless School');
-
-        // Only the schools a School Head works in this division.
-        $component
-            ->set('schoolFilter', 'with_head')
+            ->assertSet('schoolFilter', 'with_head')
             ->assertSee('Alpha Allotment School')
             ->assertSee('Beta Allotment School')
             ->assertDontSee('Gamma Headless School');
+
+        // "All schools" is the explicit opt-in that includes the headless.
+        $component
+            ->set('schoolFilter', 'all')
+            ->assertSee('Alpha Allotment School')
+            ->assertSee('Beta Allotment School')
+            ->assertSee('Gamma Headless School');
 
         // Only the schools still missing an amount.
         $component
@@ -399,6 +402,33 @@ class SchoolAllotmentTest extends TestCase
             ->test(SchoolAllotmentManager::class)
             ->set('schoolFilter', 'anything-else')
             ->assertSet('schoolFilter', 'all');
+    }
+
+    public function test_switching_the_division_re_scopes_the_roster_to_its_school_heads(): void
+    {
+        $district = District::create(['name' => 'Switch District']);
+        $withHead = School::create(['district_id' => $district->id, 'name' => 'Alpha NHS']);
+        School::create(['district_id' => $district->id, 'name' => 'Gamma Headless NHS']);
+
+        User::factory()->create([
+            'role' => 'user',
+            'is_superadmin' => false,
+            'school_id' => $withHead->id,
+            'school_level' => 'HIGH_SCHOOL',
+            'school_sublevel' => 'JUNIOR_HIGH',
+            'division_access' => ['JUNIOR_HIGH'],
+        ]);
+
+        // The Budget officer switches to the Junior High division: the roster
+        // renders only the schools whose School Head works that division — a
+        // headless school is not rendered.
+        session(['active_school_division' => 'JUNIOR_HIGH']);
+
+        Livewire::actingAs($this->budgetOfficer())
+            ->test(SchoolAllotmentManager::class)
+            ->assertSet('schoolFilter', 'with_head')
+            ->assertSee('Alpha NHS')
+            ->assertDontSee('Gamma Headless NHS');
     }
 
     public function test_the_download_carries_the_filtered_roster_with_its_division_column(): void

@@ -252,7 +252,7 @@ class User extends Authenticatable
         return $this->defaultDivision();
     }
 
-    /** Whether the header should offer a division selector. */
+    /** Whether this account can choose among multiple financial divisions. */
     public function canSwitchDivision(): bool
     {
         return count($this->authorizedDivisions()) > 1;

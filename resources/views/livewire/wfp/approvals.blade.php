@@ -151,6 +151,21 @@
                                 @endif
                             </td>
                             <td class="users-actions-col">
+                                @if ($plan->isPendingApproval())
+                                    <button
+                                        type="button"
+                                        class="users-action"
+                                        wire:click="approveFromQueue({{ $plan->id }})"
+                                        wire:confirm="Sign and approve {{ $plan->school?->name ?? 'this school' }}’s {{ $plan->fiscalYearLabel() }} WFP? This final sign-off cannot be undone."
+                                        wire:loading.attr="disabled"
+                                        wire:target="approveFromQueue"
+                                    >
+                                        <span class="users-action-inner">
+                                            <x-icon name="check-check" :size="14" />
+                                            <span>Sign &amp; approve</span>
+                                        </span>
+                                    </button>
+                                @endif
                                 <button type="button" class="users-action" wire:click="openReview({{ $plan->id }})">
                                     <span class="users-action-inner">
                                         <x-icon name="eye" :size="14" />
@@ -168,7 +183,9 @@
                         </tr>
                     @empty
                         <tr>
-                            <td class="table-empty" colspan="7">No WFPs match these filters.</td>
+                            <td class="table-empty" colspan="7">
+                                No submitted WFPs match these filters. Schools appear here after a School Head submits a plan for final approval; this queue is not a school directory, and Superadmin accounts are not assigned to a single school.
+                            </td>
                         </tr>
                     @endforelse
                 </tbody>

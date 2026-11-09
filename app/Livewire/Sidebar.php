@@ -53,12 +53,13 @@ class Sidebar extends Component
     {
         abort_unless(Auth::check(), 404);
 
-        // The WFP group opens on arrival: its three pages — the Monthly
-        // Expenditure Matrix, the plan generated from it, and the annual
-        // allotment report it adds up to — are one click away rather than
-        // hidden behind a disclosure to find first. It collapses like any
-        // other group once the reader says so.
-        $this->openGroups['wfp'] = true;
+        // The active WFP division opens on arrival; dual-division School
+        // Heads get one group per division.
+        $user = Auth::user();
+        $wfpPath = $user?->canAccessWfp() && $user->canSwitchDivision()
+            ? 'wfp-'.strtolower($user->activeDivision())
+            : 'wfp';
+        $this->openGroups[$wfpPath] = true;
 
         if (!request()->routeIs('mov.index')) {
             return;
@@ -462,7 +463,7 @@ class Sidebar extends Component
                     'label' => 'OPCRF',
                     'route' => Auth::user()?->canReviewAllOpcrfSubmissions() ? 'opcrf.review' : 'opcrf.index',
                     'path' => Auth::user()?->canReviewAllOpcrfSubmissions() ? 'opcrf-review' : 'opcrf',
-                    'icon' => Auth::user()?->canReviewAllOpcrfSubmissions() ? 'eye' : 'clipboard-list',
+                    'icon' => Auth::user()?->canReviewAllOpcrfSubmissions() ? 'eye' : 'eye',
                     'section' => 'Files',
                     'order' => 10,
                 ];
@@ -541,17 +542,7 @@ class Sidebar extends Component
             // plain links one level down (no tree of their own), and the
             // group opens by default (see mount()).
             if (Auth::user()?->canAccessWfp()) {
-                $items[] = [
-                    'label' => 'WFP',
-                    'route' => 'wfp.index',
-                    // Highlighted by any WFP page, not only the plans page —
-                    // the group is where every one of them lives.
-                    'active' => 'wfp.*',
-                    'path' => 'wfp',
-                    'icon' => 'chart-column',
-                    'section' => 'Files',
-                    'order' => 11,
-                    'children' => [
+                $children = [
                         // The matrix is where the lines are entered: the
                         // source of truth, so it comes first.
                         [
@@ -579,21 +570,44 @@ class Sidebar extends Component
                             'url' => route('wfp.index'),
                             'route' => 'wfp.index',
                         ],
-                    ],
-                ];
+                    ];
+
+                $divisions = Auth::user()->authorizedDivisions();
+                $hasMultipleDivisions = count($divisions) > 1;
+
+                foreach ($divisions as $division) {
+                    $suffix = SchoolDivision::sidebarSuffix($division);
+                    $divisionChildren = $children;
+
+                    foreach ($divisionChildren as &$child) {
+                        $child['label'] .= $suffix;
+                    }
+                    unset($child);
+
+                    $items[] = [
+                        'label' => 'WFP'.$suffix,
+                        'route' => 'wfp.index',
+                        'active' => 'wfp.*',
+                        'path' => $hasMultipleDivisions ? 'wfp-'.strtolower($division) : 'wfp',
+                        'division' => $division,
+                        'icon' => 'chart-column',
+                        'section' => 'Files',
+                        'order' => 11,
+                        'children' => $divisionChildren,
+                    ];
+                }
             }
         }
 
-        // A High School account's financial destinations say which division
-        // they lead to ("— Junior High", "— Senior High"); Elementary's
-        // labels carry no suffix, so its navigation is exactly as it was.
+        // Budget users share a single navigation group, so its financial
+        // destinations follow the division selected in the sidebar switcher.
         $suffix = SchoolDivision::sidebarSuffix(
             Auth::user()?->activeDivision() ?? SchoolDivision::ELEMENTARY,
         );
 
         if ($suffix !== '') {
             foreach ($items as $index => $item) {
-                if (($item['path'] ?? null) === 'wfp') {
+                if (($item['path'] ?? null) === 'wfp' && ! isset($item['division'])) {
                     $items[$index]['label'] = ($item['label'] ?? '') . $suffix;
                 }
 
@@ -637,6 +651,24 @@ class Sidebar extends Component
         } else {
             $this->openGroups = [$path => true];
         }
+    }
+
+    public function selectWfpDivision(string $division): void
+    {
+        $user = Auth::user();
+        abort_unless($user?->canAccessWfp() && $user->canAccessDivision($division), 404);
+
+        $path = $user->canSwitchDivision() ? 'wfp-'.strtolower($division) : 'wfp';
+
+        if ($user->activeDivision() === $division && isset($this->openGroups[$path])) {
+            unset($this->openGroups[$path]);
+
+            return;
+        }
+
+        session(['active_school_division' => $division]);
+        unset($this->items);
+        $this->openGroups = [$path => true];
     }
 
     /**

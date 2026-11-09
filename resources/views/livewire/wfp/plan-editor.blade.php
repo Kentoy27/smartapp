@@ -33,6 +33,15 @@
             <span class="mem-status mem-status--{{ $plan->status }}">{{ $plan->statusLabel() }}</span>
             · {{ $plan->items()->count() }} line(s) · {{ $this->flaggedCount }} to review
         </p>
+        @if (auth()->user()?->canApproveWfp() && $plan->isPendingApproval())
+            <a
+                class="btn-primary"
+                href="{{ route('wfp.approvals.index', ['plan' => $plan->id]) }}"
+                wire:navigate
+            >
+                Review &amp; Sign WFP
+            </a>
+        @endif
     </div>
 
     @if ($plan->school_id)

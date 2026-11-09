@@ -62,6 +62,7 @@
                                     @livewire('wfp-signatory-actions', [
                                         'schoolId' => $plan->school_id,
                                         'year' => (int) $plan->year,
+                                        'compact' => true,
                                     ], key('wfp-plan-signoffs-'.$plan->id))
                                 </td>
                                 <td class="users-actions-col">

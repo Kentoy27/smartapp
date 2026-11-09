@@ -53,6 +53,13 @@ class WfpApprovals extends Component
     public function mount(): void
     {
         abort_unless(Auth::user()?->canApproveWfp(), 404);
+
+        $requestedPlan = request()->query('plan');
+
+        if ($requestedPlan !== null) {
+            abort_unless(is_string($requestedPlan) && ctype_digit($requestedPlan), 404);
+            $this->openReview((int) $requestedPlan);
+        }
     }
 
     public function updated(string $property): void
@@ -272,6 +279,23 @@ class WfpApprovals extends Component
             $plan->markApproved($user, $remarks !== '' ? $remarks : null);
         } catch (RuntimeException $e) {
             $this->errorMessage = $e->getMessage();
+
+            return;
+        }
+
+        $this->afterDecision('WFP approved and signed off.');
+    }
+
+    public function approveFromQueue(int $planId): void
+    {
+        $user = $this->reviewer();
+        $plan = WfpPlan::query()->inApprovalQueue()->findOrFail($planId);
+        abort_unless($plan->isPendingApproval(), 404);
+
+        try {
+            $plan->markApproved($user);
+        } catch (RuntimeException $exception) {
+            $this->errorMessage = $exception->getMessage();
 
             return;
         }

@@ -6,6 +6,7 @@ use App\Livewire\MemEditor;
 use App\Livewire\Sidebar;
 use App\Livewire\WfpApprovals;
 use App\Livewire\WfpPlanEditor;
+use App\Livewire\WfpSignatoryActions;
 use App\Models\District;
 use App\Models\MonthlyExpenditureItem;
 use App\Models\MonthlyExpenditureMatrix;
@@ -91,7 +92,13 @@ class WfpApprovalTest extends TestCase
     /** Budget's two sign-offs: the Bookkeeper's check and the Budget certification. */
     private function budgetReview(WfpPlan $plan): void
     {
-        $bookkeeper = User::factory()->create(['role' => 'bookkeeper', 'is_superadmin' => false, 'name' => 'Bella Bookkeeper']);
+        $bookkeeper = User::factory()->create([
+            'role' => 'bookkeeper',
+            'is_superadmin' => false,
+            'name' => 'Bella Bookkeeper',
+            'school_id' => $plan->school_id,
+        ]);
+        $bookkeeper->syncAssignedSchools([$plan->school_id]);
         $budget = User::factory()->create(['role' => 'budget', 'is_superadmin' => false, 'name' => 'Lyn Budget']);
 
         WfpReportCheck::updateOrCreate(
@@ -262,6 +269,143 @@ class WfpApprovalTest extends TestCase
         $this->assertSame(WfpApproval::DECISION_APPROVED, $approval->decision);
         $this->assertSame('Certified and approved.', $approval->remarks);
         $this->assertSame($superadmin->id, $approval->decided_by);
+    }
+
+    public function test_the_superadmin_can_sign_and_approve_directly_from_the_queue(): void
+    {
+        $sh = $this->schoolHead();
+        $plan = $this->pendingPlan($sh);
+        $superadmin = $this->superadmin();
+
+        Livewire::actingAs($superadmin)
+            ->test(WfpApprovals::class)
+            ->assertSee('Sign &amp; approve', false)
+            ->call('approveFromQueue', $plan->id)
+            ->assertSet('successMessage', 'WFP approved and signed off.');
+
+        $this->assertSame(WfpPlan::STATUS_FINALIZED, $plan->fresh()->status);
+        $this->assertDatabaseHas('wfp_approvals', [
+            'wfp_plan_id' => $plan->id,
+            'decision' => WfpApproval::DECISION_APPROVED,
+            'decided_by' => $superadmin->id,
+        ]);
+    }
+
+    public function test_the_budget_officer_can_submit_a_fully_reviewed_plan_from_signatory_actions(): void
+    {
+        $sh = $this->schoolHead();
+        $plan = $this->generatedPlan($sh);
+        $this->budgetReview($plan);
+        $budget = User::query()->where('role', 'budget')->firstOrFail();
+
+        Livewire::actingAs($budget)
+            ->test(\App\Livewire\WfpSignatoryActions::class, [
+                'schoolId' => $plan->school_id,
+                'year' => $plan->year,
+            ])
+            ->assertSee('Submit to Superadmin')
+            ->call('submitForApproval')
+            ->assertSet(
+                'successMessage',
+                'Submitted '.$plan->fiscalYearLabel().' for the Schools Division Superintendent’s final approval.',
+            );
+
+        $submitted = $plan->fresh();
+        $this->assertSame(WfpPlan::STATUS_PENDING_APPROVAL, $submitted->status);
+        $this->assertSame($budget->id, $submitted->submitted_by);
+        $this->assertNotNull($submitted->submitted_at);
+        $this->assertDatabaseCount('wfp_approvals', 0);
+    }
+
+    public function test_budget_certification_automatically_submits_when_the_bookkeeper_has_already_checked(): void
+    {
+        $sh = $this->schoolHead();
+        $plan = $this->generatedPlan($sh);
+        $bookkeeper = User::factory()->create([
+            'role' => 'bookkeeper',
+            'is_superadmin' => false,
+            'school_id' => $plan->school_id,
+        ]);
+        $bookkeeper->syncAssignedSchools([$plan->school_id]);
+        WfpReportCheck::create([
+            'school_id' => $plan->school_id,
+            'school_division' => $plan->schoolDivision(),
+            'year' => $plan->year,
+            'checked_by' => $bookkeeper->id,
+            'checked_at' => now(),
+        ]);
+        $allotment = SchoolAllotment::create([
+            'school_id' => $plan->school_id,
+            'school_division' => $plan->schoolDivision(),
+            'year' => $plan->year,
+            'amount' => 50000,
+        ]);
+
+        $budget = User::factory()->create(['role' => 'budget', 'is_superadmin' => false]);
+        Livewire::actingAs($budget)
+            ->test(WfpSignatoryActions::class, ['schoolId' => $plan->school_id, 'year' => $plan->year])
+            ->call('signCertification')
+            ->assertSet(
+                'successMessage',
+                'WFP submitted to the Schools Division Superintendent for final approval after the Budget certification.',
+            );
+
+        $this->assertSame(WfpPlan::STATUS_PENDING_APPROVAL, $plan->fresh()->status);
+        $this->assertSame($budget->id, $plan->fresh()->submitted_by);
+        $this->assertNotNull($allotment->fresh()->certified_at);
+    }
+
+    public function test_bookkeeper_check_automatically_submits_when_budget_has_already_certified(): void
+    {
+        $sh = $this->schoolHead();
+        $plan = $this->generatedPlan($sh);
+        $bookkeeper = User::factory()->create([
+            'role' => 'bookkeeper',
+            'is_superadmin' => false,
+            'school_id' => $plan->school_id,
+        ]);
+        $bookkeeper->syncAssignedSchools([$plan->school_id]);
+        $budget = User::factory()->create(['role' => 'budget', 'is_superadmin' => false]);
+        SchoolAllotment::create([
+            'school_id' => $plan->school_id,
+            'school_division' => $plan->schoolDivision(),
+            'year' => $plan->year,
+            'amount' => 50000,
+            'certified_by' => $budget->id,
+            'certified_at' => now(),
+        ]);
+
+        Livewire::actingAs($bookkeeper)
+            ->test(WfpSignatoryActions::class, ['schoolId' => $plan->school_id, 'year' => $plan->year])
+            ->call('signCheck')
+            ->assertSet(
+                'successMessage',
+                'WFP submitted to the Schools Division Superintendent for final approval after the Bookkeeper check.',
+            );
+
+        $this->assertSame(WfpPlan::STATUS_PENDING_APPROVAL, $plan->fresh()->status);
+        $this->assertSame($budget->id, $plan->fresh()->submitted_by);
+        $this->assertDatabaseHas('wfp_report_checks', [
+            'school_id' => $plan->school_id,
+            'year' => $plan->year,
+            'checked_by' => $bookkeeper->id,
+        ]);
+    }
+
+    public function test_direct_queue_signing_refuses_a_plan_without_current_budget_review(): void
+    {
+        $sh = $this->schoolHead();
+        $plan = $this->pendingPlan($sh);
+
+        WfpReportCheck::query()->where('school_id', $plan->school_id)->delete();
+
+        Livewire::actingAs($this->superadmin())
+            ->test(WfpApprovals::class)
+            ->call('approveFromQueue', $plan->id)
+            ->assertSet('errorMessage', fn ($message) => $message !== null);
+
+        $this->assertSame(WfpPlan::STATUS_PENDING_APPROVAL, $plan->fresh()->status);
+        $this->assertDatabaseCount('wfp_approvals', 0);
     }
 
     public function test_a_second_decision_on_the_same_submission_is_refused(): void
@@ -610,8 +754,14 @@ class WfpApprovalTest extends TestCase
                 ->assertOk();
 
             $component = Livewire::actingAs($superadmin)->test(WfpPlanEditor::class, ['plan' => $plan]);
-            $component->assertOk();
+            $component->assertOk()->assertSee('Review & Sign WFP');
             $this->assertFalse($component->instance()->canEdit());
+
+            $this->actingAs($superadmin)
+                ->get(route('wfp.approvals.index', ['plan' => $plan->id]))
+                ->assertOk()
+                ->assertSee('Sign & approve WFP')
+                ->assertSee($sh->school->name);
 
             // Every write action keeps the SH-only gate.
             Livewire::actingAs($superadmin)->test(WfpPlanEditor::class, ['plan' => $plan])

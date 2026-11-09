@@ -294,9 +294,9 @@ class WfpPlan extends Model
     /* -------------------------------------------------------- transitions */
 
     /**
-     * The SH files the plan for the Superadmin's final decision. Budget must
-     * already have certified the allotment and checked the account titles and
-     * codes, and the plan must still match the MEM it was generated from.
+     * The SH may file the plan for the Superadmin's final decision. Budget
+     * may also submit it when its certification and the Bookkeeper's check
+     * are both recorded. The plan must still match the MEM it came from.
      */
     public function submitForApproval(User $owner): void
     {
@@ -304,6 +304,30 @@ class WfpPlan extends Model
             throw new RuntimeException('Only the owning School Head may submit this WFP.');
         }
 
+        $this->fileForFinalApproval($owner);
+    }
+
+    /**
+     * The Budget Officer may file the School Head's current plan after both
+     * Budget sign-offs are recorded. The Officer submits it on the school's
+     * behalf but does not become its owner or gain write access.
+     */
+    public function submitForApprovalByBudget(User $budgetOfficer): void
+    {
+        if (
+            ! $budgetOfficer->canCertifyAllotments()
+            || $this->school_id === null
+            || ! $budgetOfficer->canAccessDivision($this->schoolDivision())
+            || ! $budgetOfficer->canAccessSchool((int) $this->school_id)
+        ) {
+            throw new RuntimeException('Only the Budget Officer for this school division may submit this WFP.');
+        }
+
+        $this->fileForFinalApproval($budgetOfficer);
+    }
+
+    private function fileForFinalApproval(User $submitter): void
+    {
         if (! $this->isEditable()) {
             throw new RuntimeException('This WFP is no longer editable.');
         }
@@ -322,7 +346,7 @@ class WfpPlan extends Model
 
         $this->forceFill([
             'status' => self::STATUS_PENDING_APPROVAL,
-            'submitted_by' => $owner->id,
+            'submitted_by' => $submitter->id,
             'submitted_at' => now(),
             // A pending plan never carries a prior approval.
             'approved_by' => null,

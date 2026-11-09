@@ -97,6 +97,7 @@ class WfpGenerationTest extends TestCase
         $matrix = $this->matrixWithLine($sh);
 
         $component = Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->assertSee('Generate WFP Plan')
             ->call('generateWfp');
 
         $plan = WfpPlan::firstOrFail();
@@ -112,6 +113,30 @@ class WfpGenerationTest extends TestCase
         $this->assertEquals(2500.0, (float) $wfp->financial_target);
         $this->assertTrue($wfp->needs_review);
         $this->assertContains('major_output', $wfp->review_fields);
+    }
+
+    public function test_the_school_head_can_generate_then_submit_a_plan_after_budget_review(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixWithLine($sh);
+
+        $component = Livewire::actingAs($sh)
+            ->test(MemEditor::class, ['matrix' => $matrix])
+            ->assertSee('Generate WFP Plan')
+            ->call('generateWfp');
+
+        $plan = WfpPlan::query()->where('school_id', $sh->school_id)->firstOrFail();
+        $component->assertRedirect(route('wfp.plans.edit', ['plan' => $plan->id]));
+
+        $this->budgetReview($plan);
+
+        Livewire::actingAs($sh)
+            ->test(WfpPlanEditor::class, ['plan' => $plan->fresh()])
+            ->assertSee('Submit for final approval')
+            ->call('submitForApproval')
+            ->assertSet('successMessage', 'Submitted for the Schools Division Superintendent\'s final approval.');
+
+        $this->assertSame(WfpPlan::STATUS_PENDING_APPROVAL, $plan->fresh()->status);
     }
 
     public function test_an_empty_matrix_refuses_to_generate(): void

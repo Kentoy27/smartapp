@@ -9,7 +9,7 @@
     {{-- The version is bumped whenever dashboard.css changes: browsers that
          cached an older copy keep painting the stale sheet at the same URL,
          which is why a broken stylesheet can survive a fresh deploy. --}}
-    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=50">
+    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=51">
     <title>@yield('title', 'Dashboard — SmartApp')</title>
     <script>
         /* Apply the saved theme before first paint to avoid a flash.
@@ -138,32 +138,6 @@
             align-items: center;
             gap: 16px;
             margin-left: auto;
-        }
-
-        /* The financial division the account is working in: only rendered for
-           an account authorized for more than one division (a High School
-           account with access to both, or a division-wide overseer). */
-        .division-switcher {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 0.75rem;
-            color: var(--text-faint);
-        }
-
-        .division-switcher select {
-            font: inherit;
-            color: var(--text-strong);
-            background: var(--bg-panel);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 5px 8px;
-            cursor: pointer;
-        }
-
-        .division-switcher select:focus-visible {
-            outline: 2px solid var(--primary);
-            outline-offset: 2px;
         }
 
         .header .user-info .avatar {
@@ -591,6 +565,68 @@
             overflow-y: auto;
             overscroll-behavior: contain;
             scrollbar-width: thin;
+        }
+
+        .sidebar-main {
+            display: flex;
+            flex: 1;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .sidebar-division-switcher {
+            flex-shrink: 0;
+            padding: 8px 14px 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .sidebar-division-switcher-label {
+            margin-bottom: 6px;
+            color: var(--text-faint);
+            font-size: 0.6875rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .sidebar-division-options {
+            display: grid;
+            gap: 3px;
+        }
+
+        .sidebar-division-option {
+            width: 100%;
+            padding: 7px 10px;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            background: transparent;
+            color: var(--text-muted);
+            font: inherit;
+            font-size: 0.8125rem;
+            text-align: left;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s, border-color 0.15s;
+        }
+
+        .sidebar-division-option:hover {
+            background: var(--bg-hover);
+            color: var(--text-strong);
+        }
+
+        .sidebar-division-option.is-active {
+            border-color: color-mix(in srgb, var(--primary) 18%, transparent);
+            background: color-mix(in srgb, var(--primary) 12%, transparent);
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        .sidebar-division-option:focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: 2px;
+        }
+
+        .layout.collapsed .sidebar-division-switcher {
+            display: none;
         }
 
         /* THE EMPTY CATALOGUE NOTE: the one thing the dropdown says when the
@@ -7766,25 +7802,6 @@
                              signature dialog without each page carrying them. --}}
                         <livewire:profile.update-profile />
                         <livewire:profile.digital-signature-modal />
-                    @endauth
-
-                    {{-- School Heads switch their own workspace; the Budget
-                         office and administrators switch the division they
-                         are managing. --}}
-                    @auth
-                        @if ((Auth::user()->canAccessWfp() || Auth::user()->canManageAllotments()) && Auth::user()->canSwitchDivision())
-                            <form method="POST" action="{{ route('division.switch') }}" class="division-switcher">
-                                @csrf
-                                <label for="divisionSwitcher" class="division-switcher-label">Division</label>
-                                <select id="divisionSwitcher" name="division" onchange="this.form.submit()" title="The financial division you are working in">
-                                    @foreach (Auth::user()->authorizedDivisions() as $divisionOption)
-                                        <option value="{{ $divisionOption }}" @selected($divisionOption === Auth::user()->activeDivision())>
-                                            {{ \App\Support\SchoolDivision::label($divisionOption) }}
-                                        </option>
-                                    @endforeach
-                                </select>
-                            </form>
-                        @endif
                     @endauth
 
                     <button type="button" class="theme-toggle" id="themeToggle" title="Toggle light/dark mode" aria-label="Toggle light/dark mode">

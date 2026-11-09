@@ -50,7 +50,7 @@ class SidebarWfpNavTest extends TestCase
     {
         Livewire::actingAs($this->schoolHead())
             ->test(Sidebar::class)
-            ->call('toggleGroup', 'wfp')
+            ->call('selectWfpDivision', 'ELEMENTARY')
             ->assertSee('aria-expanded="false"', false)
             ->assertDontSee(route('wfp.matrices.index'), false);
     }

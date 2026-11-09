@@ -238,6 +238,21 @@
                {{-- The template and the CSV import exist to bring lines in —
                     writing work, so only a writing account is offered them. --}}
                 @if ($this->canEdit())
+                    @if ($items !== [])
+                        <button
+                            type="button"
+                            class="users-add-btn"
+                            wire:click="generateWfp"
+                            wire:loading.attr="disabled"
+                            wire:target="generateWfp"
+                            title="Generate or update the annual WFP from this year's Monthly Expenditure Matrices"
+                        >
+                            <x-icon name="file-spreadsheet" :size="16" />
+                            <span wire:loading.remove wire:target="generateWfp">Generate WFP Plan</span>
+                            <span wire:loading wire:target="generateWfp">Generating…</span>
+                        </button>
+                    @endif
+
                     <a
                         href="{{ route('wfp.matrices.template') }}"
                         class="ac-import-btn"

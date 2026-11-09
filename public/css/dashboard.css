@@ -482,7 +482,8 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
 }
 
 .staff-dashboard-panel--wfp .wfp-generate__controls .opcr-download-btn {
-    flex: 1 1 100%;
+    flex: 0 0 auto;
+    width: 100%;
     min-width: 0;
     max-width: 100%;
     justify-content: center;
@@ -1687,9 +1688,34 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
 .wfp-signatory-status__badge--certified { background: #dbeafe; color: #1d4ed8; }
 .wfp-signatory-status__badge--approved { background: #dcfce7; color: #166534; }
 .wfp-signatory-status__badge--returned { background: #fef3c7; color: #92400e; }
+[data-theme="dark"] .wfp-signatory-status__badge--checked,
+[data-theme="dark"] .wfp-signatory-status__badge--approved { background: rgba(34, 197, 94, 0.16); color: #4ade80; }
+[data-theme="dark"] .wfp-signatory-status__badge--certified { background: rgba(59, 130, 246, 0.18); color: #93c5fd; }
+[data-theme="dark"] .wfp-signatory-status__badge--returned { background: rgba(251, 191, 36, 0.16); color: #fbbf24; }
 .wfp-signatory-status__meta { color: var(--text-muted); font-size: 0.75rem; line-height: 1.5; }
 .wfp-signatory-status__remarks { margin-top: 2px; color: var(--text-muted); font-size: 0.75rem; line-height: 1.5; }
 .wfp-signatory-status__remarks strong { color: var(--text-strong); }
+
+/* The table-cell variant (index rows' Sign-offs column): a narrow stack of
+   state pills and the sign buttons, right-aligned like the cell's actions.
+   The full panel above is too wide for a column, which spilled it across
+   the neighbouring cells. */
+.wfp-signatory-inline { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 6px; max-width: 100%; }
+.wfp-signatory-inline__pills { display: flex; align-items: center; justify-content: flex-end; gap: 4px; max-width: 100%; }
+.wfp-signatory-inline__pill { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px; background: var(--bg-muted); color: var(--text-muted); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.02em; white-space: nowrap; cursor: default; }
+.wfp-signatory-inline__pill svg { flex-shrink: 0; }
+.wfp-signatory-inline__pill--done { background: #dcfce7; color: #166534; }
+.wfp-signatory-inline__pill--returned { background: #fef3c7; color: #92400e; }
+[data-theme="dark"] .wfp-signatory-inline__pill--done { background: rgba(34, 197, 94, 0.16); color: #4ade80; }
+[data-theme="dark"] .wfp-signatory-inline__pill--returned { background: rgba(251, 191, 36, 0.16); color: #fbbf24; }
+.wfp-signatory-inline__msg { display: flex; align-items: center; gap: 6px; margin: 0; padding: 6px 10px; border-radius: 8px; background: var(--primary-soft); color: var(--primary-strong); font-size: 0.75rem; line-height: 1.45; text-align: right; }
+.wfp-signatory-inline__msg--error { background: var(--danger-soft); color: var(--danger); }
+.wfp-signatory-inline .allotment-certify { align-self: flex-end; }
+/* The cell's column is narrow: let the pill row wrap onto a second line
+   instead of pushing the table wider. */
+@media (max-width: 900px) {
+    .wfp-signatory-inline__pills { flex-wrap: wrap; justify-content: flex-end; }
+}
 
 .mem-banner { display: flex; align-items: center; gap: 8px; margin: 0 0 16px; }
 /* Adding a year is a server round-trip: while it runs the table dims and a
@@ -2108,6 +2134,9 @@ body.sorting .mem-drag-handle { cursor: grabbing; }
 .staff-dashboard-panel--wfp .wfp-generate__exports {
     width: 100%;
     flex-direction: column;
+    /* A column stack must not wrap: two exports wrap into a second column and
+       push each other out of the card if their main-axis basis is a height. */
+    flex-wrap: nowrap;
     align-items: stretch;
 }
 

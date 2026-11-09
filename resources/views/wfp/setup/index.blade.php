@@ -40,7 +40,7 @@
                     wire:navigate
                 >
                     <div class="wfp-setup__card-icon">
-                        <x-icon name="clipboard-list" :size="24" />
+                        <x-icon name="eye" :size="24" />
                     </div>
                     <div class="wfp-setup__card-body">
                         <h3>Activity Templates</h3>

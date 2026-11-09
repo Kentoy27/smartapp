@@ -31,7 +31,9 @@
             This page sets the <strong>{{ $divisionLabel }}</strong> allotments for
             CY {{ $this->year }}. A school’s Elementary, Junior High School and
             Senior High School allotments are separate — switch the division from
-            the top bar to work another one.
+            the top bar to work another one. The table lists the schools whose
+            School Head works this division; choose “All schools” under Show to
+            include the ones with no School Head yet.
         </p>
     </div>
 

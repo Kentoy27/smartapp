@@ -500,6 +500,7 @@ class BookkeeperRoleTest extends TestCase
         Livewire::actingAs($budget)
             ->test(BudgetLineItemChecker::class)
             ->assertSee('Sign certification')
+            ->assertSee('Submit to Superadmin')
             ->assertDontSee('Sign check');
 
         Livewire::actingAs($bookkeeper)
@@ -510,11 +511,13 @@ class BookkeeperRoleTest extends TestCase
         Livewire::actingAs($budget)
             ->test(WfpManager::class)
             ->assertSee('Sign certification')
+            ->assertSee('Submit to Superadmin')
             ->assertDontSee('Sign check');
 
         Livewire::actingAs($bookkeeper)
             ->test(WfpSignatoryActions::class, ['schoolId' => $head->school_id, 'year' => 2026])
             ->assertSee('Sign check')
+            ->assertDontSee('Submit to Superadmin')
             ->assertDontSee('Sign certification')
             ->call('signCheck')
             ->assertSee('Bella Bookkeeper');
@@ -528,6 +531,11 @@ class BookkeeperRoleTest extends TestCase
         Livewire::actingAs($bookkeeper)
             ->test(WfpSignatoryActions::class, ['schoolId' => $head->school_id, 'year' => 2026])
             ->call('signCertification')
+            ->assertNotFound();
+
+        Livewire::actingAs($bookkeeper)
+            ->test(WfpSignatoryActions::class, ['schoolId' => $head->school_id, 'year' => 2026])
+            ->call('submitForApproval')
             ->assertNotFound();
 
         Livewire::actingAs($budget)

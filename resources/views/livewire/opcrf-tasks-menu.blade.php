@@ -19,7 +19,7 @@
         aria-label="{{ $revisionCount > 0 ? $revisionCount.' OPCRF'.($revisionCount === 1 ? '' : 's').' requiring revision' : 'Revision tasks' }}"
         title="Revision tasks"
     >
-        <x-icon name="clipboard-list" :size="19" />
+        <x-icon name="eye" :size="19" />
         <span class="opcrf-taskbar-trigger-label">Tasks</span>
         @if ($revisionCount > 0)
             <span class="opcrf-taskbar-badge" aria-hidden="true">{{ $revisionCount > 9 ? '9+' : $revisionCount }}</span>
