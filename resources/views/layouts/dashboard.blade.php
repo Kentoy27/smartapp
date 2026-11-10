@@ -9,7 +9,7 @@
     {{-- The version is bumped whenever dashboard.css changes: browsers that
          cached an older copy keep painting the stale sheet at the same URL,
          which is why a broken stylesheet can survive a fresh deploy. --}}
-    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=51">
+    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=59">
     <title>@yield('title', 'Dashboard — SmartApp')</title>
     <script>
         /* Apply the saved theme before first paint to avoid a flash.
@@ -1175,8 +1175,9 @@
 
         .users-footer {
             display: flex;
+            flex-wrap: wrap;
             align-items: center;
-            gap: 16px;
+            gap: 10px 16px;
             margin-top: 14px;
             font-size: 0.8125rem;
             color: var(--text-muted);
@@ -1208,7 +1209,33 @@
 
         .users-pagination {
             display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
             gap: 6px;
+            max-width: 100%;
+        }
+
+        @media (max-width: 480px) {
+            .users-count {
+                flex: 1 0 100%;
+                margin-left: 0;
+                text-align: center;
+            }
+
+            .users-pagination {
+                width: 100%;
+                justify-content: center;
+                gap: 4px;
+            }
+
+            .users-page-btn {
+                min-width: 30px;
+                padding: 5px 7px;
+            }
+
+            .users-pagination .users-page-btn:not(.is-current):not([aria-label]) {
+                display: none;
+            }
         }
 
         /* ---------- ADD USER BUTTON + MODAL ---------- */
@@ -8491,5 +8518,6 @@
             });
         })();
     </script>
+    <script src="{{ public_asset('js/sip-pdf-preview.js') }}?v=1"></script>
 </body>
 </html>

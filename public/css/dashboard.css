@@ -1269,13 +1269,16 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
 
 /* Visually hidden but read aloud — used on empty table headers. */
 .sr-only {
-    position: absolute;
+    position: fixed;
+    top: 0;
+    left: 0;
     width: 1px;
     height: 1px;
     padding: 0;
-    margin: -1px;
+    margin: 0;
     overflow: hidden;
     clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
     white-space: nowrap;
     border: 0;
 }
@@ -1474,16 +1477,23 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
 .users-action:hover { border-color: var(--primary); color: var(--primary); }
 .users-action--danger:hover { border-color: var(--danger); color: var(--danger); }
 .users-action:disabled { opacity: 0.5; cursor: wait; }
-.users-footer { display: flex; align-items: center; gap: 16px; margin-top: 14px; font-size: 0.8125rem; color: var(--text-muted); }
+.users-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-top: 14px; font-size: 0.8125rem; color: var(--text-muted); }
 .users-count { margin-left: auto; }
 .users-live-indicator { display: inline-flex; align-items: center; gap: 6px; visibility: hidden; }
 .users-live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); animation: live-pulse 1s ease-in-out infinite; }
-.users-pagination { display: flex; gap: 6px; }
+.users-pagination { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 100%; }
 @keyframes live-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
 .users-page-btn { min-width: 28px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-elevated); color: var(--text); font: inherit; font-size: 0.8125rem; cursor: pointer; text-align: center; }
 .users-page-btn:hover { border-color: var(--primary); color: var(--primary); }
 .users-page-btn.is-current { background: var(--primary); border-color: var(--primary); color: #fff; cursor: default; }
 .users-page-btn.is-disabled { opacity: 0.45; cursor: default; }
+
+@media (max-width: 480px) {
+    .users-count { flex: 1 0 100%; margin-left: 0; text-align: center; }
+    .users-pagination { width: 100%; justify-content: center; gap: 4px; }
+    .users-page-btn { min-width: 30px; padding: 5px 7px; }
+    .users-pagination .users-page-btn:not(.is-current):not([aria-label]) { display: none; }
+}
 
 .modal-backdrop { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55); z-index: 300; display: none; align-items: center; justify-content: center; padding: 16px; }
 .modal-backdrop.is-open { display: flex; animation: backdrop-in 0.15s ease; }
@@ -1627,6 +1637,69 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
     .header .user-info { gap: 10px; }
     .header .user-info .name { display: none; }
     .role-picker { grid-template-columns: 1fr; }
+}
+
+.sip-toolbar { flex-wrap: wrap; }
+.sip-search { flex: 1 1 260px; max-width: 420px; }
+.sip-search input { width: 100%; min-height: 40px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated); color: var(--text); font: inherit; font-size: 0.875rem; }
+.sip-search input:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
+.sip-table-count { color: var(--text-muted); font-size: 0.8125rem; }
+.sip-bulk-upload-trigger { display: inline-flex; align-items: center; justify-content: center; gap: 7px; white-space: nowrap; }
+.modal.sip-bulk-upload-modal { display: flex; flex-direction: column; width: min(720px, 94vw); max-width: min(720px, 94vw); max-height: 90vh; overflow: hidden; }
+.sip-bulk-upload-modal .modal-head { flex: 0 0 auto; padding: 18px 22px; border-bottom: 1px solid var(--border); }
+.sip-bulk-upload-modal .modal-form { min-width: 0; overflow-y: auto; }
+.sip-bulk-upload-rows { display: grid; gap: 14px; }
+.sip-bulk-upload-row { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) auto; align-items: end; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 8px; }
+.sip-bulk-upload-row .field { min-width: 0; }
+.sip-bulk-upload-row select,
+.sip-bulk-upload-row input[type="file"] { display: block; width: 100%; min-width: 0; min-height: 40px; }
+.sip-bulk-upload-row select { width: 100%; min-width: 0; min-height: 40px; }
+.sip-bulk-upload-row input[type="file"] { padding: 8px; border: 1px dashed color-mix(in srgb, var(--primary) 35%, var(--border)); border-radius: 8px; background: var(--bg-elevated); color: var(--text); font: inherit; font-size: 0.8125rem; cursor: pointer; }
+.sip-bulk-upload-row input[type="file"]:hover { border-color: var(--primary); background: var(--primary-soft); }
+.sip-bulk-upload-row input[type="file"]::file-selector-button { margin-right: 10px; padding: 7px 10px; border: 0; border-radius: 6px; background: var(--primary); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+.sip-bulk-upload-row input[type="file"]::file-selector-button:hover { background: var(--primary-strong); }
+.sip-bulk-upload-row input[type="file"]:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.sip-bulk-upload-remove { min-height: 40px; }
+.sip-bulk-upload-add { margin-top: 12px; }
+.sip-bulk-upload-modal .modal-actions { margin-top: 18px; }
+.sip-table { min-width: 850px; }
+.sip-row-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.sip-row-actions .users-action,
+.sip-row-actions .btn-ghost { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.sip-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; }
+.sip-pagination__actions { display: flex; gap: 8px; }
+.sip-pagination__actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+.sip-table-component .modal-form > p { margin-bottom: 14px; line-height: 1.5; }
+.modal.sip-preview-modal { display: flex; flex-direction: column; width: min(1100px, 96vw); max-width: none; height: min(900px, 92vh); max-height: 92vh; overflow: hidden; }
+.sip-preview-modal__head { flex: 0 0 auto; gap: 16px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+.sip-preview-modal__head h2 { overflow-wrap: anywhere; }
+.sip-preview-modal__head p { margin-top: 3px; color: var(--text-muted); font-size: 0.8125rem; overflow-wrap: anywhere; }
+.sip-preview-modal__actions { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; }
+.sip-preview-modal__actions .btn-ghost { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.sip-preview-modal__frame { flex: 1 1 auto; width: 100%; min-height: 0; border: 0; background: var(--bg-panel); }
+.sip-pdf-preview { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; background: #334155; }
+.sip-pdf-preview__status { flex: 0 0 auto; padding: 10px 16px; color: #fff; background: #1e293b; text-align: center; }
+.sip-pdf-preview__status--error { color: #fecaca; }
+.sip-pdf-preview__viewport { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 18px; }
+.sip-pdf-preview__pages { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+.sip-pdf-preview__page { display: flex; min-height: 160px; width: min(100%, 980px); justify-content: center; align-items: flex-start; padding: 12px; background: #fff; box-shadow: 0 2px 12px #0f172a40; }
+.sip-pdf-preview__page canvas { display: block; max-width: 100%; height: auto; }
+.sip-pdf-preview__page-loading,
+.sip-pdf-preview__page-error { padding: 18px; color: #475569; }
+@media (max-width: 600px) {
+    .sip-toolbar { align-items: stretch; }
+    .sip-bulk-upload-trigger { width: 100%; }
+    .sip-bulk-upload-row { grid-template-columns: minmax(0, 1fr); align-items: stretch; gap: 10px; padding: 12px; }
+    .sip-bulk-upload-remove { justify-self: start; }
+    .modal.sip-preview-modal { width: 100%; height: 94vh; max-height: 94vh; }
+    .modal.sip-bulk-upload-modal { width: 100%; max-width: 100%; max-height: 94vh; }
+    .sip-bulk-upload-modal .modal-head { padding: 14px 16px; }
+    .sip-bulk-upload-modal .modal-form { padding: 16px; }
+    .sip-preview-modal__head { align-items: flex-start; padding: 12px; }
+    .sip-preview-modal__actions { gap: 4px; }
+    .sip-preview-modal__actions .btn-ghost { padding: 8px; }
+    .sip-pdf-preview__viewport { padding: 8px; }
+    .sip-pdf-preview__page { padding: 6px; }
 }
 
 /* ---------- ACCOUNT CLASSIFICATIONS ---------- */

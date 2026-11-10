@@ -533,14 +533,15 @@ class User extends Authenticatable
     }
 
     /**
-     * Whether this account may view the School Improvement Plan landing page.
+     * Whether this account may view the School Improvement Plan library.
      *
-     * School Heads and SDS Viewers may see the page; administrative and
-     * finance roles do not have a SIP destination.
+     * School Heads and SDS Viewers use the library for their own work, while
+     * administrators can review submissions across every school.
      */
     public function canAccessSip(): bool
     {
-        return ! $this->is_superadmin && in_array($this->role, ['user', 'viewer'], true);
+        return $this->hasAdminAccess()
+            || (! $this->is_superadmin && in_array($this->role, ['user', 'viewer'], true));
     }
 
     /**

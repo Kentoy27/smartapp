@@ -6,6 +6,7 @@ use App\Models\District;
 use App\Models\School;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -163,6 +164,68 @@ class UsersTableTest extends TestCase
         $this->assertDatabaseMissing('users', ['id' => $other->id]);
     }
 
+    public function test_administrator_can_reset_a_school_heads_password_to_the_school_id(): void
+    {
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
+        [, $school] = $this->createDivisionWithSchool();
+        $schoolHead = User::factory()->create([
+            'is_superadmin' => false,
+            'role' => 'user',
+            'school_id' => $school->id,
+            'password' => 'OldStrongPassword123!',
+        ]);
+
+        Livewire::actingAs($admin)
+            ->test('users-table')
+            ->assertSee('Reset Password')
+            ->call('openResetPasswordModal', $schoolHead->id)
+            ->assertSet('showResetPasswordModal', true)
+            ->assertSet('resetPasswordUsername', $schoolHead->username)
+            ->assertSet('resetPasswordDefault', $school->school_id)
+            ->call('confirmResetPassword')
+            ->assertSet('showResetPasswordModal', false)
+            ->assertSet('successMessage', "Password reset for {$schoolHead->username}. The password is now the School ID.");
+
+        $this->assertTrue(Hash::check($school->school_id, $schoolHead->fresh()->password));
+    }
+
+    public function test_administrator_can_use_deped_email_school_id_when_school_id_is_missing(): void
+    {
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
+        [, $school] = $this->createDivisionWithSchool();
+        $school->update(['school_id' => null]);
+        $schoolHead = User::factory()->create([
+            'is_superadmin' => false,
+            'role' => 'user',
+            'school_id' => $school->id,
+            'email' => '117881@deped.gov.ph',
+        ]);
+
+        Livewire::actingAs($admin)
+            ->test('users-table')
+            ->assertSee('Reset Password')
+            ->call('openResetPasswordModal', $schoolHead->id)
+            ->assertSet('resetPasswordDefault', '117881')
+            ->assertSee('117881')
+            ->call('confirmResetPassword');
+
+        $this->assertTrue(Hash::check('117881', $schoolHead->fresh()->password));
+    }
+
+    public function test_administrator_cannot_reset_passwords_for_accounts_without_a_school_id(): void
+    {
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
+        $staff = User::factory()->create(['is_superadmin' => false, 'role' => 'user']);
+
+        Livewire::actingAs($admin)
+            ->test('users-table')
+            ->assertDontSee('Reset Password')
+            ->call('openResetPasswordModal', $staff->id)
+            ->assertForbidden();
+
+        $this->assertTrue(Hash::check('password', $staff->fresh()->password));
+    }
+
     public function test_deleting_yourself_never_sets_a_success_message(): void
     {
         $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
@@ -191,26 +254,44 @@ class UsersTableTest extends TestCase
             ->assertDontSee('Settings');
     }
 
-    public function test_sidebar_items_follow_the_working_order(): void
+    public function test_administrator_sidebar_items_are_grouped_in_workflow_order(): void
     {
         $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
 
-        $html = Livewire::actingAs($admin)->test('sidebar')->html();
+        $sidebar = Livewire::actingAs($admin)->test('sidebar');
+        $items = $sidebar->instance()->items();
 
-        // Each label renders inside its own plain <span>, so the offset of the
-        // label marks its position in the menu.
-        $positions = array_map(
-            fn (string $label) => strpos($html, ">{$label}</span>"),
-            ['Dashboard', 'OPCRF', 'Users', 'Districts &amp; Schools']
+        $this->assertSame(
+            [
+                'Dashboard',
+                'AIP Review',
+                'OPCRF',
+                'OPCRF Schedule',
+                'WFP Uploads',
+                'School Allotments',
+                'Districts & Schools',
+                'Users',
+                'Account Classifications',
+                'WFP Setup',
+                'School Division Mapping',
+            ],
+            array_column($items, 'label'),
         );
 
-        $this->assertNotContains(false, $positions, 'All four items are rendered.');
+        $this->assertSame(
+            ['Main', 'Reviews', 'Operations', 'Administration'],
+            array_values(array_unique(array_column($items, 'section'))),
+        );
 
-        $sorted = $positions;
-        sort($sorted);
-
-        // Dashboard and file destinations come before superadmin management.
-        $this->assertSame($sorted, $positions, 'Sidebar items must appear in working order.');
+        $html = $sidebar->html();
+        $sectionPositions = array_map(
+            fn (string $section) => strpos($html, ">{$section}</span>"),
+            ['Main', 'Reviews', 'Operations', 'Administration']
+        );
+        $this->assertNotContains(false, $sectionPositions, 'Each navigation group has a heading.');
+        $sortedPositions = $sectionPositions;
+        sort($sortedPositions);
+        $this->assertSame($sortedPositions, $sectionPositions, 'Navigation groups render in order.');
     }
 
     /**

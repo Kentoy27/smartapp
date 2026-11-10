@@ -13,6 +13,7 @@ use App\Models\OpcrfSchedule;
 use App\Models\OpcrfSubmission;
 use App\Models\OpcrfTemplate;
 use App\Models\School;
+use App\Models\SipSubmission;
 use App\Models\User;
 use App\Models\UserMov;
 use App\Models\WfpExportAudit;
@@ -29,6 +30,7 @@ use App\Support\OpcrfPartOne;
 use App\Support\OpcrfTemplatePersonalizer;
 use App\Support\OpcrfWorkbookProgress;
 use App\Support\OpcrfWorkbookTrim;
+use App\Support\SipDocumentPreview;
 use App\Support\WfpAllotment;
 use App\Support\WfpAllotmentXlsxExporter;
 use App\Support\WfpPlanExporter;
@@ -160,6 +162,25 @@ Route::middleware(['auth'])->group(function () {
 
         return view('sip.index');
     })->name('sip.index');
+
+    Route::get('/sip/{submission}/download', function (SipSubmission $submission) {
+        $user = Auth::user();
+        abort_unless($submission->canBeDownloadedBy($user), 404);
+        abort_unless($submission->hasFile(), 404);
+
+        return Storage::disk('local')->download(
+            $submission->file_path,
+            $submission->downloadName(),
+        );
+    })->name('sip.download')->where('submission', '[0-9]+');
+
+    Route::get('/sip/{submission}/preview', function (SipSubmission $submission) {
+        $user = Auth::user();
+        abort_unless($submission->canBeDownloadedBy($user), 404);
+        abort_unless($submission->hasFile(), 404);
+
+        return SipDocumentPreview::response($submission);
+    })->name('sip.preview')->where('submission', '[0-9]+');
 
     // Reviewers can read and decide submitted AIPs; the component enforces
     // the same permission on its actions.

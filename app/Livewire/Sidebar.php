@@ -219,8 +219,8 @@ class Sidebar extends Component
                 'route' => 'aip.review',
                 'path' => 'aip-review',
                 'icon' => 'file-spreadsheet',
-                'section' => 'Files',
-                'order' => 9,
+                'section' => 'Reviews',
+                'order' => 2,
             ];
 
             $items[] = [
@@ -232,18 +232,18 @@ class Sidebar extends Component
                 // The badge's tooltip, per item — the wording is the item's
                 // own, not inferred from its path.
                 'badge_title' => '%d submissions to review',
-                'section' => 'Files',
-                'order' => 10,
+                'section' => 'Reviews',
+                'order' => 3,
             ];
 
-            // Both superadmin OPCRF tools remain available under Files.
+            // Both superadmin OPCRF tools remain available under Operations.
             $items[] = [
                 'label' => 'OPCRF Schedule',
                 'route' => 'opcrf.schedule',
                 'path' => 'opcrf-schedule',
                 'icon' => 'calendar',
-                'section' => 'Files',
-                'order' => 11,
+                'section' => 'Operations',
+                'order' => 5,
             ];
 
             // WFP Uploads: every school's uploaded Work and Financial Plan.
@@ -254,8 +254,8 @@ class Sidebar extends Component
                 'route' => 'wfp.submissions.index',
                 'path' => 'wfp-submissions',
                 'icon' => 'chart-column',
-                'section' => 'Files',
-                'order' => 14,
+                'section' => 'Operations',
+                'order' => 6,
             ];
 
             // School Allotments: the ceiling each School Head may consume
@@ -267,9 +267,20 @@ class Sidebar extends Component
                 'route' => 'budget.allotments.index',
                 'path' => 'budget-allotments',
                 'icon' => 'wallet',
-                'section' => 'Files',
-                'order' => 15,
+                'section' => 'Operations',
+                'order' => 7,
             ];
+
+            if (Auth::user()?->canAccessSip()) {
+                $items[] = [
+                    'label' => 'SIP Records',
+                    'route' => 'sip.index',
+                    'path' => 'sip',
+                    'icon' => 'school',
+                    'section' => 'Operations',
+                    'order' => 8,
+                ];
+            }
 
             // WFP Final Approvals: the Superadmin's queue of Budget-certified
             // plans submitted by the School Heads. Only the Superadmin may
@@ -282,12 +293,21 @@ class Sidebar extends Component
                     'icon' => 'check-circle',
                     'badge' => $this->wfpApprovalCount,
                     'badge_title' => '%d WFPs awaiting final approval',
-                    'section' => 'Files',
-                    'order' => 16,
+                    'section' => 'Reviews',
+                    'order' => 4,
                 ];
             }
 
             if (Auth::user()?->canManageUsersAndSchools()) {
+                $items[] = [
+                    'label' => 'Districts & Schools',
+                    'route' => 'districts.index',
+                    'path' => 'districts',
+                    'icon' => 'school',
+                    'section' => 'Administration',
+                    'order' => 9,
+                ];
+
                 $items[] = [
                     'label' => 'Users',
                     'route' => 'users.index',
@@ -295,17 +315,8 @@ class Sidebar extends Component
                     'icon' => 'users-round',
                     'badge' => $this->usersCount,
                     'badge_title' => '%d accounts',
-                    'section' => 'Admin',
-                    'order' => 20,
-                ];
-
-                $items[] = [
-                    'label' => 'Districts & Schools',
-                    'route' => 'districts.index',
-                    'path' => 'districts',
-                    'icon' => 'school',
-                    'section' => 'Admin',
-                    'order' => 21,
+                    'section' => 'Administration',
+                    'order' => 10,
                 ];
             }
 
@@ -319,8 +330,8 @@ class Sidebar extends Component
                     'route' => 'account-classifications.index',
                     'path' => 'account-classifications',
                     'icon' => 'file-text',
-                    'section' => 'Admin',
-                    'order' => 22,
+                    'section' => 'Administration',
+                    'order' => 11,
                 ];
 
                 // WFP Setup: the administrator's lookup library and activity
@@ -330,8 +341,8 @@ class Sidebar extends Component
                     'route' => 'wfp.setup.index',
                     'path' => 'wfp-setup',
                     'icon' => 'settings',
-                    'section' => 'Admin',
-                    'order' => 23,
+                    'section' => 'Administration',
+                    'order' => 12,
                 ];
 
                 // School Division Mapping: where existing (pre-division)
@@ -342,8 +353,8 @@ class Sidebar extends Component
                     'route' => 'division-mapping.index',
                     'path' => 'division-mapping',
                     'icon' => 'arrow-right-left',
-                    'section' => 'Admin',
-                    'order' => 24,
+                    'section' => 'Administration',
+                    'order' => 13,
                 ];
             }
         } elseif (Auth::user()?->isBudgetRole()) {

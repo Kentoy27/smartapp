@@ -62,6 +62,14 @@ class UsersTable extends Component
 
     public string $deleteUsername = '';
 
+    public bool $showResetPasswordModal = false;
+
+    public ?int $resetPasswordUserId = null;
+
+    public string $resetPasswordUsername = '';
+
+    public string $resetPasswordDefault = '';
+
     /**
      * The employee's real name.
      *
@@ -348,6 +356,41 @@ class UsersTable extends Component
         $this->closeDeleteModal();
         $this->successMessage = "Account deleted — {$username} was removed.";
         $this->announce();
+    }
+
+    public function openResetPasswordModal(User $user): void
+    {
+        abort_unless($this->canResetPassword($user), 403);
+
+        $this->resetPasswordUserId = $user->id;
+        $this->resetPasswordUsername = $user->username;
+        $this->resetPasswordDefault = $this->schoolIdForPasswordReset($user) ?? '';
+        $this->showResetPasswordModal = true;
+    }
+
+    public function closeResetPasswordModal(): void
+    {
+        $this->showResetPasswordModal = false;
+        $this->resetPasswordUserId = null;
+        $this->resetPasswordUsername = '';
+        $this->resetPasswordDefault = '';
+    }
+
+    public function confirmResetPassword(): void
+    {
+        abort_unless($this->authenticatedUser()?->canManageUsersAndSchools(), 403);
+
+        $user = User::with('school')->findOrFail($this->resetPasswordUserId);
+        abort_unless($this->canResetPassword($user), 403);
+
+        $schoolId = $this->schoolIdForPasswordReset($user);
+        abort_unless($schoolId !== null, 403);
+
+        $user->forceFill(['password' => $schoolId])->save();
+        $username = $user->username;
+
+        $this->closeResetPasswordModal();
+        $this->successMessage = "Password reset for {$username}. The password is now the School ID.";
     }
 
     private function resetForm(): void
@@ -882,6 +925,29 @@ class UsersTable extends Component
     public function canChangeRoles(): bool
     {
         return $this->canAssignRoles();
+    }
+
+    public function canResetPassword(User $user): bool
+    {
+        return (bool) $this->authenticatedUser()?->canManageUsersAndSchools()
+            && $user->role === 'user'
+            && $user->school_id !== null
+            && $this->schoolIdForPasswordReset($user) !== null;
+    }
+
+    private function schoolIdForPasswordReset(User $user): ?string
+    {
+        $schoolId = trim((string) $user->school?->school_id);
+
+        if ($schoolId !== '') {
+            return $schoolId;
+        }
+
+        if (preg_match('/^([0-9]+)@deped\.gov\.ph$/i', trim((string) $user->email), $matches) === 1) {
+            return $matches[1];
+        }
+
+        return null;
     }
 
     private function isViewer(): bool

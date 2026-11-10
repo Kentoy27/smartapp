@@ -1,6 +1,10 @@
 bootstrap/cache/
 node_modules/
 vendor/
+!public/vendor/
+public/vendor/*
+!public/vendor/pdfjs/
+!public/vendor/pdfjs/**
 
 .env
 .end.example

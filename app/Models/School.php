@@ -21,6 +21,11 @@ class School extends Model
         return $this->hasMany(User::class);
     }
 
+    public function sipSubmissions(): HasMany
+    {
+        return $this->hasMany(SipSubmission::class);
+    }
+
     /**
      * The divisions this school operates, in canonical interface order.
      *

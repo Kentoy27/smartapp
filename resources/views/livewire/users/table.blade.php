@@ -98,8 +98,9 @@
                                          rather than a menu holding one item. --}}
                                     @php($canChangeRole = $this->canChangeRoles() && ! $account->is(auth()->user()))
                                     @php($canDelete = ! $account->is(auth()->user()))
+                                    @php($canResetPassword = $this->canResetPassword($account))
 
-                                    @if (! $canChangeRole && ! $canDelete)
+                                    @if (! $canChangeRole && ! $canDelete && ! $canResetPassword)
                                         <button
                                             type="button"
                                             class="users-action"
@@ -138,6 +139,18 @@
                                                 >
                                                     <x-icon name="shield" :size="15" />
                                                     <span>Change Role</span>
+                                                </x-row-menu-item>
+                                            @endif
+
+                                            @if ($canResetPassword)
+                                                <x-row-menu-item
+                                                    wire:click="openResetPasswordModal({{ $account->id }})"
+                                                    wire:loading.attr="disabled"
+                                                    wire:target="openResetPasswordModal"
+                                                    title="Reset password for {{ $account->username }}"
+                                                >
+                                                    <x-icon name="unlock" :size="15" />
+                                                    <span>Reset Password</span>
                                                 </x-row-menu-item>
                                             @endif
 
@@ -184,7 +197,7 @@
                 {{ $users->firstItem() }}–{{ $users->lastItem() }} of {{ $users->total() }}
             </span>
 
-            {{ $users->links() }}
+            {{ $users->onEachSide(0)->links() }}
         </div>
 
         @if ($this->canChangeRoles())
@@ -295,6 +308,35 @@
                             <button type="button" class="btn-danger" wire:click="confirmDelete" wire:loading.attr="disabled" wire:target="confirmDelete">
                                 <span wire:loading.remove wire:target="confirmDelete">Delete Account</span>
                                 <span wire:loading wire:target="confirmDelete">Deleting…</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        @endif
+
+        @if ($showResetPasswordModal)
+            <div class="modal-backdrop is-open"
+                 @mousedown.self="$wire.closeResetPasswordModal()"
+                 role="presentation">
+                <div class="modal modal--confirmation" role="dialog" aria-modal="true" aria-labelledby="resetPasswordFormTitle" @click.stop>
+                    <div class="modal-head">
+                        <h2 id="resetPasswordFormTitle">Reset Password</h2>
+                        <button type="button" class="modal-close" wire:click="closeResetPasswordModal" aria-label="Close" title="Close">×</button>
+                    </div>
+
+                    <div class="modal-form">
+                        <p>
+                            Reset <strong>{{ $resetPasswordUsername }}</strong>'s password to
+                            <strong>{{ $resetPasswordDefault }}</strong> (their School ID)?
+                            This ID is not private; share it securely and advise them to choose a new password.
+                        </p>
+
+                        <div class="modal-actions">
+                            <button type="button" class="btn-ghost" wire:click="closeResetPasswordModal">Cancel</button>
+                            <button type="button" class="btn-primary" wire:click="confirmResetPassword" wire:loading.attr="disabled" wire:target="confirmResetPassword">
+                                <span wire:loading.remove wire:target="confirmResetPassword">Reset Password</span>
+                                <span wire:loading wire:target="confirmResetPassword">Resetting…</span>
                             </button>
                         </div>
                     </div>
