@@ -9,11 +9,8 @@
     {{-- The version is bumped whenever dashboard.css changes: browsers that
          cached an older copy keep painting the stale sheet at the same URL,
          which is why a broken stylesheet can survive a fresh deploy. --}}
-<<<<<<< HEAD
     <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=60">
-=======
     <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=52">
->>>>>>> jet
     <title>@yield('title', 'Dashboard — SmartApp')</title>
     <script>
         /* Apply the saved theme before first paint to avoid a flash.
