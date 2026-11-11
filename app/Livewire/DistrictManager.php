@@ -40,10 +40,11 @@ class DistrictManager extends Component
     public string $districtName = '';
 
     /**
-     * The add-school form: opens under $schoolFormDistrictId, whose name
-     * the modal shows pre-filled and read-only.
+     * The district selected in the Add School modal.
      */
     public ?int $schoolFormDistrictId = null;
+
+    public bool $showSchoolFormModal = false;
 
     public string $schoolName = '';
 
@@ -137,6 +138,13 @@ class DistrictManager extends Component
         $this->cancelEditSchool();
     }
 
+    public function toggleDistrict(int $districtId): void
+    {
+        District::query()->findOrFail($districtId);
+
+        $this->selectDistrict($this->selectedDistrictId === $districtId ? null : $districtId);
+    }
+
     public function openModal(?int $districtId = null): void
     {
         $this->showModal = true;
@@ -187,9 +195,15 @@ class DistrictManager extends Component
 
     /* ---------- ADD SCHOOL ---------- */
 
-    public function openSchoolForm(int $districtId): void
+    public function openSchoolForm(?int $districtId = null): void
     {
         abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
+
+        if ($districtId !== null) {
+            District::query()->findOrFail($districtId);
+        } else {
+            $districtId = $this->selectedDistrictId;
+        }
 
         $this->schoolFormDistrictId = $districtId;
         $this->schoolName = '';
@@ -197,10 +211,12 @@ class DistrictManager extends Component
         $this->schoolDivisions = [SchoolDivision::ELEMENTARY];
         $this->cancelEditSchool();
         $this->resetValidation();
+        $this->showSchoolFormModal = true;
     }
 
     public function cancelSchoolForm(): void
     {
+        $this->showSchoolFormModal = false;
         $this->schoolFormDistrictId = null;
         $this->schoolName = '';
         $this->schoolId = '';
@@ -213,6 +229,7 @@ class DistrictManager extends Component
         abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
 
         $this->validate([
+            'schoolFormDistrictId' => ['required', 'integer', 'exists:districts,id'],
             // Unique only within the district being added to.
             'schoolName' => [
                 'required', 'string', 'max:160',
@@ -227,6 +244,8 @@ class DistrictManager extends Component
         ], [
             'schoolName.required' => 'The school name is required.',
             'schoolName.unique' => 'This school already exists in the district.',
+            'schoolFormDistrictId.required' => 'Select a district for this school.',
+            'schoolFormDistrictId.exists' => 'Select a valid district for this school.',
             'schoolId.required' => 'The School ID is required.',
             'schoolId.unique' => 'That School ID is already used by another school.',
             'schoolDivisions.required' => 'Choose at least one division the school operates.',
@@ -245,6 +264,7 @@ class DistrictManager extends Component
         $this->schoolId = '';
         $this->schoolDivisions = [SchoolDivision::ELEMENTARY];
         $this->selectedDistrictId = $school->district_id;
+        $this->showSchoolFormModal = false;
         $this->schoolFormDistrictId = null;
         $this->dispatch('districts-changed');
     }
@@ -272,6 +292,18 @@ class DistrictManager extends Component
         $this->editSchoolId = '';
         $this->editSchoolDivisions = [];
         $this->resetValidation();
+    }
+
+    #[Computed]
+    public function editingSchool(): ?School
+    {
+        if ($this->editingSchoolId === null) {
+            return null;
+        }
+
+        return School::query()
+            ->with('district')
+            ->findOrFail($this->editingSchoolId);
     }
 
     public function saveEditSchool(): void
@@ -468,6 +500,7 @@ class DistrictManager extends Component
         $this->schoolSearch = '';
         $this->districtName = '';
         $this->schoolFormDistrictId = null;
+        $this->showSchoolFormModal = false;
         $this->schoolName = '';
         $this->schoolId = '';
         $this->schoolDivisions = [SchoolDivision::ELEMENTARY];

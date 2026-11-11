@@ -9,7 +9,7 @@ use Illuminate\Validation\Rule;
 use Livewire\Attributes\Computed;
 
 /**
- * The Assigned District(s) picker — the searchable many-district selector an
+ * The Assigned District(s) picker — the multi-district selector an
  * administrator works on a PSDS account.
  *
  * The list is the account's monitoring reach (`user_district_assignments`),
@@ -18,27 +18,19 @@ use Livewire\Attributes\Computed;
  * nothing in this trait writes to the database, so a change the
  * administrator never saved cannot take effect.
  *
- * The trait carries state, the add/remove actions the picker's menu calls,
- * and the validation rules for the saved list. The host component decides
+ * The trait carries the selected districts, their add/remove actions, and
+ * validation rules. The host decides
  * WHO may edit the list (its own guard) and WHEN it is written (its save
  * path); the shared Blade partial renders it.
  */
 trait ManagesAssignedDistricts
 {
     /**
-     * The chosen districts' ids, in the order they were chosen — the value
-     * the host component validates and saves.
+     * The chosen district ids in selection order.
      *
      * @var array<int, int>
      */
     public array $assigned_districts = [];
-
-    /**
-     * The picker's search box. It narrows the menu and nothing else — it is
-     * never saved, and typing a district's name without picking it changes
-     * no assignment.
-     */
-    public string $districtSearch = '';
 
     /**
      * Fill the picker from an account's stored assignments. A role that
@@ -59,20 +51,17 @@ trait ManagesAssignedDistricts
     protected function resetAssignedDistricts(): void
     {
         $this->assigned_districts = [];
-        $this->districtSearch = '';
         $this->forgetSelectedDistricts();
     }
 
     /**
-     * Add a district to the list. Called from the picker's menu.
-     *
-     * Only a district that exists is ever added — an id from the browser is
-     * a request, not a fact — and a district already on the list is left
-     * where it is rather than doubled.
+     * Add the chosen district without removing earlier selections.
      */
     public function addAssignedDistrict(int $districtId): void
     {
         if (! District::query()->whereKey($districtId)->exists()) {
+            $this->addError('districtToAdd', 'Select a valid district.');
+
             return;
         }
 
@@ -84,13 +73,12 @@ trait ManagesAssignedDistricts
 
         $this->assigned_districts = array_values(array_unique($ids));
         $this->resetValidation(['assigned_districts', 'assigned_districts.*']);
+        $this->resetValidation('districtToAdd');
         $this->forgetSelectedDistricts();
     }
 
     /**
-     * Take a district off the list. Nothing is written here: the reach
-     * changes when the host saves, so removing a chip and cancelling the
-     * modal leaves the account exactly as it was.
+     * Remove a district from the unsaved assignment list.
      */
     public function removeAssignedDistrict(int $districtId): void
     {
@@ -100,6 +88,7 @@ trait ManagesAssignedDistricts
         ));
 
         $this->resetValidation(['assigned_districts', 'assigned_districts.*']);
+        $this->resetValidation('districtToAdd');
         $this->forgetSelectedDistricts();
     }
 
@@ -109,10 +98,8 @@ trait ManagesAssignedDistricts
      * every other role the field is not part of the form at all, so a
      * crafted payload is ignored rather than saved.
      *
-     * The list is required: a PSDS without a district monitors nothing, so
-     * an empty list is a form error, not an empty dashboard. Every id must
-     * be a real district (the database is the only authority on what may be
-     * assigned) and duplicates are refused.
+     * A PSDS must be assigned at least one real district; duplicate and
+     * nonexistent district ids are rejected.
      *
      * @return array<string, array<int, mixed>>
      */
@@ -134,16 +121,13 @@ trait ManagesAssignedDistricts
         return ['assigned_districts' => 'assigned districts'];
     }
 
-    /** Drop the chips' memoised districts after the list changes. */
     private function forgetSelectedDistricts(): void
     {
         unset($this->selectedDistricts);
     }
 
     /**
-     * The chips: the chosen districts as records, in the order they were
-     * chosen, each with its school count for the read-only preview. An id
-     * that names no district is dropped rather than rendered.
+     * Selected districts as records, in selection order, for the chips.
      *
      * @return Collection<int, District>
      */
@@ -182,33 +166,5 @@ trait ManagesAssignedDistricts
             ->withCount('schools')
             ->orderBy('name')
             ->get(['id', 'name']);
-    }
-
-    /**
-     * The picker's menu: the roster narrowed by the search box. The term
-     * matches the district's name.
-     *
-     * @return Collection<int, District>
-     */
-    #[Computed]
-    public function districtOptions(): Collection
-    {
-        $term = trim($this->districtSearch);
-
-        if ($term === '') {
-            return $this->districtRoster;
-        }
-
-        $needle = mb_strtolower($term);
-
-        return $this->districtRoster
-            ->filter(fn (District $district): bool => str_contains(mb_strtolower((string) $district->name), $needle))
-            ->values();
-    }
-
-    /** Whether a district is on the list — the menu's check mark. */
-    public function isDistrictSelected(int $districtId): bool
-    {
-        return in_array($districtId, array_map(intval(...), $this->assigned_districts), true);
     }
 }

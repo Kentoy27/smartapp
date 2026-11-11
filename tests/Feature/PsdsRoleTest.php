@@ -112,7 +112,11 @@ class PsdsRoleTest extends TestCase
             ->set('username', 'paula')
             ->set('email', 'paula@example.com')
             ->set('password', 'supersecret1')
-            ->set('assigned_districts', [$north->id, $south->id])
+            // Selecting each district adds it without removing prior choices.
+            ->call('addAssignedDistrict', $north->id)
+            ->assertSet('assigned_districts', [$north->id])
+            ->call('addAssignedDistrict', $south->id)
+            ->assertSet('assigned_districts', [$north->id, $south->id])
             ->call('saveUser')
             ->assertHasNoErrors();
 
@@ -152,10 +156,13 @@ class PsdsRoleTest extends TestCase
             ->call('openCreateModal')
             ->set('role', 'psds')
             ->call('addAssignedDistrict', $north->id)
-            // Picking the same district again is not a second assignment…
+            ->assertSet('assigned_districts', [$north->id])
+            // Picking the same district again is not a second assignment.
             ->call('addAssignedDistrict', $north->id)
-            // …and an id that names no district is a request, not a fact.
+            ->assertSet('assigned_districts', [$north->id])
+            // A non-existent district cannot enter the assignment list.
             ->call('addAssignedDistrict', 999999)
+            ->assertHasErrors(['districtToAdd'])
             ->assertSet('assigned_districts', [$north->id])
             ->call('removeAssignedDistrict', $north->id)
             ->assertSet('assigned_districts', []);
@@ -183,6 +190,33 @@ class PsdsRoleTest extends TestCase
         $this->assertSame('Paula P. District Supervisor', $psds->name);
         $this->assertSame('psds', $psds->role);
         $this->assertSame([$north->id], $psds->assignedDistrictIds());
+    }
+
+    public function test_editing_a_psds_persists_multiple_added_districts(): void
+    {
+        $admin = $this->administrator();
+        $north = $this->district('North District');
+        $south = $this->district('South District');
+        $east = $this->district('East District');
+        $psds = $this->psds([$north]);
+
+        Livewire::actingAs($admin)
+            ->test(UsersTable::class)
+            ->call('openEditModal', $psds->id)
+            ->assertSet('assigned_districts', [$north->id])
+            ->call('addAssignedDistrict', $south->id)
+            ->call('addAssignedDistrict', $east->id)
+            ->assertSet('assigned_districts', [$north->id, $south->id, $east->id])
+            ->call('saveUser')
+            ->assertHasNoErrors();
+
+        $psds->refresh();
+        $this->assertSame([$north->id, $south->id, $east->id], $psds->assignedDistrictIds());
+
+        Livewire::actingAs($admin)
+            ->test(UsersTable::class)
+            ->call('openEditModal', $psds->id)
+            ->assertSet('assigned_districts', [$north->id, $south->id, $east->id]);
     }
 
     public function test_the_role_modal_can_assign_the_psds_role(): void

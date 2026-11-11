@@ -78,7 +78,10 @@ class DistrictManagerTest extends TestCase
 
         Livewire::actingAs($admin)
             ->test(DistrictManager::class)
-            ->call('openSchoolForm', $district->id)
+            ->call('openSchoolForm')
+            ->assertSet('showSchoolFormModal', true)
+            ->assertSee('schoolFormDistrictId', false)
+            ->set('schoolFormDistrictId', $district->id)
             ->set('schoolName', 'San Isidro Elementary')
             ->set('schoolId', '123456')
             ->call('addSchool')
@@ -103,6 +106,22 @@ class DistrictManagerTest extends TestCase
             ->set('schoolId', '')
             ->call('addSchool')
             ->assertHasErrors(['schoolId']);
+
+        $this->assertSame(0, School::count());
+    }
+
+    public function test_a_school_requires_a_valid_district(): void
+    {
+        $admin = $this->administrator();
+
+        Livewire::actingAs($admin)
+            ->test(DistrictManager::class)
+            ->call('openSchoolForm')
+            ->set('schoolFormDistrictId', null)
+            ->set('schoolName', 'San Isidro Elementary')
+            ->set('schoolId', '123456')
+            ->call('addSchool')
+            ->assertHasErrors(['schoolFormDistrictId']);
 
         $this->assertSame(0, School::count());
     }
@@ -178,6 +197,23 @@ class DistrictManagerTest extends TestCase
             ->assertSee('2 Schools');
     }
 
+    public function test_clicking_an_open_district_collapses_its_school_list(): void
+    {
+        $admin = $this->administrator();
+        $district = District::create(['name' => 'District I']);
+        School::create(['district_id' => $district->id, 'name' => 'ABC Elementary School', 'school_id' => '123456']);
+
+        Livewire::actingAs($admin)
+            ->test(DistrictManager::class)
+            ->call('openModal')
+            ->call('toggleDistrict', $district->id)
+            ->assertSet('selectedDistrictId', $district->id)
+            ->assertSee('ABC Elementary School')
+            ->call('toggleDistrict', $district->id)
+            ->assertSet('selectedDistrictId', null)
+            ->assertDontSee('ABC Elementary School');
+    }
+
     public function test_the_school_search_filters_the_selected_district(): void
     {
         $admin = $this->administrator();
@@ -225,6 +261,7 @@ class DistrictManagerTest extends TestCase
             ->call('openModal')
             ->assertSee('District 1')
             ->assertSee('Add District')
+            ->assertSee('Add School')
             ->assertSee('Manage Districts');
     }
 
@@ -298,13 +335,13 @@ class DistrictManagerTest extends TestCase
         $component = Livewire::actingAs($admin)->test(DistrictManager::class)
             ->call('openModal', $district->id);
 
-        // Both school forms sit OUTSIDE .modal-form, which is what styles every
-        // other input in the app. They carry their own .input-icon shell and
-        // placeholders so the panel CSS has something to hang the standard
-        // field treatment on — without it they render as raw textboxes.
+        // School creation is handled in its own modal with district and division selectors.
         $component->call('openSchoolForm', $district->id)
-            ->assertSee('school-add-panel', false)
-            ->assertSee('school-form-head', false)
+            ->assertSet('showSchoolFormModal', true)
+            ->assertSee('modal--school-add', false)
+            ->assertSee('school-add-modal-form', false)
+            ->assertSee('schoolFormDistrictId', false)
+            ->assertSee('Division', false)
             ->assertSee('school-form-grid', false)
             ->assertSee('input-icon', false)
             ->assertSee('e.g. ABC Elementary School', false)
@@ -312,12 +349,16 @@ class DistrictManagerTest extends TestCase
 
         $component->call('cancelSchoolForm')
             ->call('startEditSchool', $school->id)
+            ->assertSet('editingSchoolId', $school->id)
+            ->assertSee('modal--school-edit', false)
+            ->assertSee('school-edit-modal-form', false)
             ->assertSee('school-edit-form', false)
-            ->assertSee('school-form-head', false)
             ->assertSee('school-form-grid', false)
             ->assertSee('input-icon', false)
             ->assertSee('e.g. 123456', false)
-            ->assertSee('Save Changes', false);
+            ->assertSee('Save Changes', false)
+            ->call('cancelEditSchool')
+            ->assertSet('editingSchoolId', null);
     }
 
     public function test_administrator_configures_the_divisions_a_school_operates(): void

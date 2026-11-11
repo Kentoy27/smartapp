@@ -564,7 +564,7 @@
                 @if ($this->role === 'psds')
                     @include('livewire.partials.assigned-districts-field', [
                         'label' => 'Assigned District(s)',
-                        'hint' => 'The districts this PSDS supervises. Every school currently in a chosen district is monitored; a school moved to another district follows its new district automatically.',
+                        'hint' => 'Select each district this PSDS supervises. Every selection is added above; remove any district using its chip.',
                         'inputId' => 'userAssignedDistricts',
                     ])
                 @endif

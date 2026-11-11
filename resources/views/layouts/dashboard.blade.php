@@ -4442,13 +4442,23 @@
             border-color: var(--primary);
         }
 
+        .district-toggle:focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: 2px;
+        }
+
         .district-toggle-name {
             display: inline-flex;
             align-items: center;
             gap: 8px;
+            min-width: 0;
             font-size: 0.875rem;
             font-weight: 700;
             color: var(--text-strong);
+        }
+
+        .district-toggle-name > svg {
+            flex: 0 0 auto;
         }
 
         .district-caret {
@@ -4541,6 +4551,91 @@
             border-radius: 10px;
             background: var(--bg-elevated);
             box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+        }
+
+        .modal--school-add {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            max-width: 640px;
+            max-height: min(90vh, 760px);
+        }
+
+        .modal--school-edit {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            max-width: 640px;
+            max-height: min(90vh, 760px);
+        }
+
+        .modal--school-edit .modal-head > div {
+            min-width: 0;
+        }
+
+        .school-edit-subtitle {
+            margin-top: 3px;
+            color: var(--text-muted);
+            font-size: 0.8125rem;
+            overflow-wrap: anywhere;
+        }
+
+        .school-add-modal-form {
+            margin-top: 0;
+            padding: 20px;
+            overflow-y: auto;
+            border: 0;
+            border-radius: 0;
+            background: var(--bg-panel);
+            box-shadow: none;
+        }
+
+        .school-add-modal-form .field {
+            margin-bottom: 0;
+        }
+
+        .school-add-modal-form select {
+            width: 100%;
+            min-height: 40px;
+            padding: 9px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg-input);
+            color: var(--text-strong);
+            font: inherit;
+            font-size: 0.875rem;
+        }
+
+        .school-add-modal-form select:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+
+        .school-add-modal-form .school-divisions-field {
+            margin-top: 0;
+        }
+
+        .school-edit-modal-form {
+            margin-top: 0;
+            padding: 20px;
+            overflow-y: auto;
+            border: 0;
+            border-radius: 0;
+            background: var(--bg-panel);
+            box-shadow: none;
+        }
+
+        .school-edit-modal-form .field {
+            margin-bottom: 0;
+        }
+
+        .school-edit-modal-form .school-form-chip {
+            align-self: flex-start;
+        }
+
+        .school-edit-modal-form .school-divisions-field {
+            margin-top: 0;
         }
 
         .school-form-head {
@@ -4803,7 +4898,24 @@
         .district-add-form {
             display: flex;
             gap: 10px;
-            align-items: flex-start;
+            align-items: flex-end;
+        }
+
+        .district-add-actions {
+            display: flex;
+            flex: 0 0 auto;
+            align-items: flex-end;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .district-add-actions .btn-primary,
+        .district-add-actions .btn-ghost {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            white-space: nowrap;
         }
 
         .district-add-form .field {
@@ -4811,8 +4923,17 @@
             margin-bottom: 0;
         }
 
+        .district-add-form label {
+            display: block;
+            margin-bottom: 6px;
+            color: var(--text);
+            font-size: 0.8125rem;
+            font-weight: 600;
+        }
+
         .district-add-form input {
             width: 100%;
+            min-height: 40px;
             padding: 9px 12px;
             background: var(--bg-input);
             border: 1px solid var(--border);
@@ -4831,6 +4952,38 @@
         .district-add-form input.error,
         .school-add-form input.error {
             border-color: var(--danger);
+        }
+
+        .district-toggle-count {
+            flex: 0 0 auto;
+        }
+
+        @media (max-width: 560px) {
+            .district-add-form {
+                flex-direction: column;
+            }
+
+            .district-add-actions {
+                width: 100%;
+            }
+
+            .district-add-actions > button {
+                flex: 1 1 auto;
+                min-height: 40px;
+            }
+
+            .modal--school-add {
+                max-height: 92vh;
+            }
+
+            .modal--school-edit {
+                max-height: 92vh;
+            }
+
+            .school-add-modal-form,
+            .school-edit-modal-form {
+                padding: 16px;
+            }
         }
 
         /* Two-level table: district rows carry a tinted background and bold
