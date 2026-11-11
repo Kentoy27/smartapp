@@ -56,6 +56,13 @@ class WfpGenerateButton extends Component
      */
     public string $year = '';
 
+    /**
+     * Whether the sign-off chain renders beneath the controls. The /wfp page
+     * gives it its own card instead (and follows the year through the
+     * `wfp-year-changed` event); the dashboard keeps it inline.
+     */
+    public bool $showSignatories = true;
+
     public function mount(): void
     {
         abort_unless(Auth::user()?->canAccessWfp(), 404);
@@ -136,6 +143,10 @@ class WfpGenerateButton extends Component
         unset($this->planYear);
         unset($this->missingSignatureLabels);
         unset($this->signatoryStatuses);
+
+        // A page that renders the sign-off chain in its own card (the /wfp
+        // workspace) follows the year that just resolved.
+        $this->dispatch('wfp-year-changed', year: (int) $this->year);
     }
 
     /**

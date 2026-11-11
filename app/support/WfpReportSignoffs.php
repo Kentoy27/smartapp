@@ -6,6 +6,7 @@ use App\Models\MonthlyExpenditureMatrix;
 use App\Models\School;
 use App\Models\SchoolAllotment;
 use App\Models\User;
+use App\Models\WfpPlan;
 use App\Models\WfpReportCheck;
 use RuntimeException;
 
@@ -62,6 +63,47 @@ final class WfpReportSignoffs
         ])->save();
 
         return $allotment;
+    }
+
+    /**
+     * File the school's plan for the Superadmin's final approval once Budget
+     * has finished reviewing it. Budget's sign-offs can be recorded from more
+     * than one page, so the transition lives here instead of on any one
+     * component: a plan whose report is checked and whose allotment is
+     * certified is submitted by the officer behind that certification.
+     *
+     * Returns the submitted plan, or null when the plan is not ready.
+     */
+    public static function submitReadyPlan(int $schoolId, int $year, string $division): ?WfpPlan
+    {
+        $plan = WfpPlan::query()
+            ->where('school_id', $schoolId)
+            ->where('school_division', $division)
+            ->where('year', $year)
+            ->first();
+
+        if (
+            $plan === null
+            || ! $plan->isEditable()
+            || ! $plan->items()->exists()
+            || $plan->isOutOfDate()
+            || ! $plan->hasBudgetReview()
+        ) {
+            return null;
+        }
+
+        $budgetOfficer = WfpAllotment::certifyingUser($schoolId, $year, $division);
+
+        if (
+            ! $budgetOfficer instanceof User
+            || WfpAllotment::checkingUser($schoolId, $year, $division) === null
+        ) {
+            return null;
+        }
+
+        $plan->submitForApprovalByBudget($budgetOfficer);
+
+        return $plan;
     }
 
     private static function schoolFor(User $user, int $schoolId, string $division): School

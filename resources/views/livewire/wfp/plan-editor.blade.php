@@ -59,7 +59,10 @@
 
             <div class="wfp-signatory-statuses__list">
                 @foreach ($this->signatoryStatuses as $status)
-                    <div class="wfp-signatory-status">
+                    <div @class([
+                        'wfp-signatory-status',
+                        'wfp-signatory-status--'.($status['state'] ?? 'pending'),
+                    ])>
                         <div class="wfp-signatory-status__header">
                             <span class="wfp-signatory-status__label">{{ $status['label'] }}</span>
                             <span @class([

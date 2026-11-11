@@ -453,13 +453,31 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
     margin-top: 4px;
 }
 
-/* The /wfp workspace: the generate card, then the School Head's own uploads
-   list beneath it — spaced as a column. */
+/* The /wfp workspace: the workbook card, the sign-off card, then the School
+   Head's own uploads list beneath them — spaced as a column. */
 .wfp-manager {
     display: flex;
     flex-direction: column;
     gap: 16px;
 }
+
+/* The column's gap is the whole rhythm; a card's own bottom margin would
+   double every space between them. */
+.wfp-manager > .card { margin-bottom: 0; }
+
+/* The workbook card's two bands — the file row, then the build controls —
+   divided by a rule, so the Year + Generate line does not read as part of
+   the file it rebuilds. */
+.wfp-manager .wfp-generate {
+    margin-top: 18px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+}
+
+/* The sign-off card IS the card; the section the component renders inside it
+   is the card's content, so it drops the standalone margin it carries when it
+   sits directly in a page. */
+.wfp-signatory-card .wfp-signatory-statuses { margin-bottom: 0; }
 
 .staff-dashboard-panel > *,
 .dashboard-plan-card__heading > div {
@@ -1752,9 +1770,32 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
 .mem-status--finalized { background: #d1fae5; color: var(--ok); }
 
 .wfp-signatory-statuses { margin-bottom: 16px; }
-.wfp-signatory-statuses__list { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
-.wfp-signatory-status { display: grid; gap: 8px; min-width: 0; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
-.wfp-signatory-status__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.wfp-signatory-statuses__list { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+/* Each checkpoint stands on its own: a rail down the card's edge carries its
+   state (grey while pending, green checked/approved, blue certified, amber
+   returned) so the row of cards can be scanned without reading a badge, and
+   the column layout lets a sign button sit at the card's foot. */
+.wfp-signatory-status {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--text-faint);
+    border-radius: 10px;
+    background: var(--bg);
+}
+.wfp-signatory-status--checked,
+.wfp-signatory-status--approved { border-left-color: #16a34a; }
+.wfp-signatory-status--certified { border-left-color: #2563eb; }
+.wfp-signatory-status--returned { border-left-color: #d97706; }
+[data-theme="dark"] .wfp-signatory-status--checked,
+[data-theme="dark"] .wfp-signatory-status--approved { border-left-color: #4ade80; }
+[data-theme="dark"] .wfp-signatory-status--certified { border-left-color: #60a5fa; }
+[data-theme="dark"] .wfp-signatory-status--returned { border-left-color: #fbbf24; }
+.wfp-signatory-status .allotment-certify { margin-top: auto; }
+.wfp-signatory-status__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .wfp-signatory-status__label { color: var(--text-strong); font-size: 0.75rem; font-weight: 700; line-height: 1.45; }
 .wfp-signatory-status__badge { display: inline-flex; align-items: center; justify-content: center; padding: 4px 10px; border-radius: 999px; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
 .wfp-signatory-status__badge--pending { background: var(--bg-muted); color: var(--text-muted); }

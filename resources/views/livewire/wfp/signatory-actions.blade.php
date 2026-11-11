@@ -112,7 +112,12 @@
 
         <div class="wfp-signatory-statuses__list">
             @foreach ($statuses as $status)
-                <div class="wfp-signatory-status">
+                {{-- The state rides on the card itself, not only its badge, so
+                     the rail down the card's edge can carry it. --}}
+                <div @class([
+                    'wfp-signatory-status',
+                    'wfp-signatory-status--'.$status['state'],
+                ])>
                     <div class="wfp-signatory-status__header">
                         <span class="wfp-signatory-status__label">{{ $status['label'] }}</span>
                         <span @class([

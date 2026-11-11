@@ -11,6 +11,7 @@ use App\Support\MemYearInitializer;
 use App\Support\SchoolAllotmentImporter;
 use App\Support\SchoolDivision;
 use App\Support\WfpAllotment;
+use App\Support\WfpReportSignoffs;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
@@ -771,10 +772,23 @@ class SchoolAllotmentManager extends Component
             'certified_at' => now(),
         ])->save();
 
+        $submitted = WfpReportSignoffs::submitReadyPlan(
+            $school->id,
+            (int) $this->year,
+            $this->division(),
+        ) !== null;
+
         $this->certifyingSchoolId = null;
         $this->errorMessage = null;
         $this->successMessage = 'Certified — '.number_format((float) $allotment->amount, 2)
-            .' is available for '.$school->name.' in CY '.$this->year.'.';
+            .' is available for '.$school->name.' in CY '.$this->year.'.'
+            .($submitted
+                ? ' WFP submitted to the Schools Division Superintendent for final approval.'
+                : '');
+
+        if ($submitted) {
+            $this->dispatch('wfp-plan-submitted');
+        }
 
         unset($this->overview);
     }

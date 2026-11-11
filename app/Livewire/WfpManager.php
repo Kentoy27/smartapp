@@ -2,10 +2,12 @@
 
 namespace App\Livewire;
 
+use App\Support\WfpPlanExporter;
 use App\Support\WfpTemplate;
 use App\Models\WfpPlan;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
@@ -24,9 +26,37 @@ use Livewire\Component;
 #[Title('Work and Financial Plan — SmartApp')]
 class WfpManager extends Component
 {
+    /**
+     * The year the sign-off card describes. Null until the generate select
+     * has said otherwise, and then resolved the same way the generate button
+     * resolves its own, so the card and the select cannot disagree.
+     */
+    public ?int $signatoryYear = null;
+
     public function mount(): void
     {
         abort_unless(Auth::user()?->canViewWfpSignoffs(), 404);
+    }
+
+    /**
+     * The generate select picked another year: the sign-off card follows it.
+     */
+    #[On('wfp-year-changed')]
+    public function syncSignatoryYear(int $year): void
+    {
+        $this->signatoryYear = $year;
+    }
+
+    /**
+     * The year the sign-off card renders for: the newest year the school has
+     * data for until the select moves it, and the current year when it has
+     * none — the same resolution the generate button applies on first paint.
+     */
+    private function resolvedSignatoryYear(): int
+    {
+        return $this->signatoryYear
+            ?? WfpPlanExporter::dataYearFor(Auth::user(), null)
+            ?? (int) now()->year;
     }
 
     #[Computed]
@@ -51,6 +81,7 @@ class WfpManager extends Component
         return view('livewire.wfp.manager', [
             'fileName' => WfpTemplate::fileName(),
             'templateDescription' => WfpTemplate::description(),
+            'signatoryYear' => $this->resolvedSignatoryYear(),
         ]);
     }
 }
