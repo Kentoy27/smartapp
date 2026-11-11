@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Livewire\BudgetLineItemAllotment;
 use App\Livewire\MemEditor;
+use App\Livewire\SchoolAllotmentManager;
 use App\Livewire\Sidebar;
 use App\Livewire\WfpApprovals;
 use App\Livewire\WfpPlanEditor;
@@ -390,6 +392,129 @@ class WfpApprovalTest extends TestCase
             'year' => $plan->year,
             'checked_by' => $bookkeeper->id,
         ]);
+    }
+
+    public function test_budget_certifying_from_the_per_line_item_page_submits_a_checked_plan(): void
+    {
+        $sh = $this->schoolHead();
+        $plan = $this->generatedPlan($sh);
+        $bookkeeper = User::factory()->create([
+            'role' => 'bookkeeper',
+            'is_superadmin' => false,
+            'school_id' => $plan->school_id,
+        ]);
+        $bookkeeper->syncAssignedSchools([$plan->school_id]);
+        WfpReportCheck::create([
+            'school_id' => $plan->school_id,
+            'school_division' => $plan->schoolDivision(),
+            'year' => $plan->year,
+            'checked_by' => $bookkeeper->id,
+            'checked_at' => now(),
+        ]);
+        SchoolAllotment::create([
+            'school_id' => $plan->school_id,
+            'school_division' => $plan->schoolDivision(),
+            'year' => $plan->year,
+            'amount' => 50000,
+        ]);
+
+        $budget = User::factory()->create(['role' => 'budget', 'is_superadmin' => false]);
+
+        Livewire::actingAs($budget)
+            ->test(BudgetLineItemAllotment::class, [
+                'schoolId' => (string) $plan->school_id,
+                'year' => (string) $plan->year,
+            ])
+            ->call('certify')
+            ->assertSet('successMessage', fn ($value) => str_contains((string) $value, 'WFP submitted'));
+
+        $this->assertSame(WfpPlan::STATUS_PENDING_APPROVAL, $plan->fresh()->status);
+        $this->assertSame($budget->id, $plan->fresh()->submitted_by);
+    }
+
+    public function test_bookkeeper_checking_from_the_per_line_item_page_submits_a_certified_plan(): void
+    {
+        $sh = $this->schoolHead();
+        $plan = $this->generatedPlan($sh);
+        $bookkeeper = User::factory()->create([
+            'role' => 'bookkeeper',
+            'is_superadmin' => false,
+            'school_id' => $plan->school_id,
+        ]);
+        $bookkeeper->syncAssignedSchools([$plan->school_id]);
+        $budget = User::factory()->create(['role' => 'budget', 'is_superadmin' => false]);
+        SchoolAllotment::create([
+            'school_id' => $plan->school_id,
+            'school_division' => $plan->schoolDivision(),
+            'year' => $plan->year,
+            'amount' => 50000,
+            'certified_by' => $budget->id,
+            'certified_at' => now(),
+        ]);
+
+        Livewire::actingAs($bookkeeper)
+            ->test(BudgetLineItemAllotment::class, [
+                'schoolId' => (string) $plan->school_id,
+                'year' => (string) $plan->year,
+            ])
+            ->call('check')
+            ->assertSet('successMessage', fn ($value) => str_contains((string) $value, 'WFP submitted'));
+
+        $this->assertSame(WfpPlan::STATUS_PENDING_APPROVAL, $plan->fresh()->status);
+        $this->assertSame($budget->id, $plan->fresh()->submitted_by);
+    }
+
+    public function test_certifying_from_the_school_allotments_page_submits_a_checked_plan(): void
+    {
+        $sh = $this->schoolHead();
+        $plan = $this->generatedPlan($sh);
+        $bookkeeper = User::factory()->create([
+            'role' => 'bookkeeper',
+            'is_superadmin' => false,
+            'school_id' => $plan->school_id,
+        ]);
+        $bookkeeper->syncAssignedSchools([$plan->school_id]);
+        WfpReportCheck::create([
+            'school_id' => $plan->school_id,
+            'school_division' => $plan->schoolDivision(),
+            'year' => $plan->year,
+            'checked_by' => $bookkeeper->id,
+            'checked_at' => now(),
+        ]);
+        SchoolAllotment::create([
+            'school_id' => $plan->school_id,
+            'school_division' => $plan->schoolDivision(),
+            'year' => $plan->year,
+            'amount' => 50000,
+        ]);
+
+        $budget = User::factory()->create(['role' => 'budget', 'is_superadmin' => false]);
+
+        Livewire::actingAs($budget)
+            ->test(SchoolAllotmentManager::class)
+            ->set('year', (string) $plan->year)
+            ->call('certify', $plan->school_id)
+            ->assertSet('successMessage', fn ($value) => str_contains((string) $value, 'WFP submitted'));
+
+        $this->assertSame(WfpPlan::STATUS_PENDING_APPROVAL, $plan->fresh()->status);
+        $this->assertSame($budget->id, $plan->fresh()->submitted_by);
+    }
+
+    public function test_the_backfill_submits_plans_lagging_behind_completed_budget_reviews(): void
+    {
+        $plan = $this->generatedPlan($this->schoolHead());
+        $this->budgetReview($plan);
+        $unready = $this->generatedPlan($this->schoolHead('Other School'));
+
+        $migration = require database_path('migrations/2026_11_11_000000_submit_budget_certified_wfp_plans.php');
+        $migration->up();
+
+        $this->assertSame(WfpPlan::STATUS_PENDING_APPROVAL, $plan->fresh()->status);
+        $this->assertSame(WfpPlan::STATUS_GENERATED, $unready->fresh()->status);
+
+        // The backfill is idempotent: a submitted plan is no longer editable.
+        $migration->up();
+        $this->assertSame(WfpPlan::STATUS_PENDING_APPROVAL, $plan->fresh()->status);
     }
 
     public function test_direct_queue_signing_refuses_a_plan_without_current_budget_review(): void

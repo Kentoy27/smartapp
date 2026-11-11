@@ -75,12 +75,11 @@ class WfpSignatoryActions extends Component
             return;
         }
 
-        $submitted = false;
-        $budgetOfficer = WfpAllotment::certifyingUser($this->schoolId, $this->year, $user->activeDivision());
-
-        if ($budgetOfficer instanceof User) {
-            $submitted = $this->submitPlanIfReady($budgetOfficer);
-        }
+        $submitted = WfpReportSignoffs::submitReadyPlan(
+            $this->schoolId,
+            $this->year,
+            $user->activeDivision(),
+        ) !== null;
 
         $this->successMessage = $submitted
             ? 'WFP submitted to the Schools Division Superintendent for final approval after the Bookkeeper check.'
@@ -105,7 +104,11 @@ class WfpSignatoryActions extends Component
             return;
         }
 
-        $submitted = $this->submitPlanIfReady($user);
+        $submitted = WfpReportSignoffs::submitReadyPlan(
+            $this->schoolId,
+            $this->year,
+            $user->activeDivision(),
+        ) !== null;
 
         $this->successMessage = $submitted
             ? 'WFP submitted to the Schools Division Superintendent for final approval after the Budget certification.'
@@ -139,31 +142,6 @@ class WfpSignatoryActions extends Component
         $this->successMessage = 'Submitted '.$plan->fiscalYearLabel().' for the Schools Division Superintendent’s final approval.';
         $this->errorMessage = null;
         $this->dispatch('wfp-plan-submitted');
-    }
-
-    private function submitPlanIfReady(User $budgetOfficer): bool
-    {
-        $plan = WfpPlan::query()
-            ->where('school_id', $this->schoolId)
-            ->where('school_division', $budgetOfficer->activeDivision())
-            ->where('year', $this->year)
-            ->first();
-
-        if (
-            $plan === null
-            || ! $plan->isEditable()
-            || ! $plan->items()->exists()
-            || $plan->isOutOfDate()
-            || ! $plan->hasBudgetReview()
-            || WfpAllotment::checkingUser($this->schoolId, $this->year, $budgetOfficer->activeDivision()) === null
-            || WfpAllotment::certifyingUser($this->schoolId, $this->year, $budgetOfficer->activeDivision()) === null
-        ) {
-            return false;
-        }
-
-        $plan->submitForApprovalByBudget($budgetOfficer);
-
-        return true;
     }
 
     public function clearMessage(): void

@@ -1,9 +1,11 @@
 <div class="wfp-manager">
 
     @if (auth()->user()?->canManageWfp())
-        {{-- GENERATE CARD: the page's one action — build the year's workbook and
-             download it. The generate button names the source and the year. --}}
-        <div class="card">
+        {{-- THE WORKBOOK: the file this page is about, and the two things done
+             to it — the completed copy handed back (Upload, with the file it
+             belongs to), and a fresh one built from the year's data (Generate,
+             below the rule). --}}
+        <div class="card wfp-template-card">
             <div class="card-head">
                 <div class="card-title">Work and Financial Plan Template</div>
             </div>
@@ -15,12 +17,28 @@
                     <span class="opcr-file-name">{{ $fileName }}</span>
                     <span class="opcr-file-sub">{{ $templateDescription }}</span>
                 </div>
-                <livewire:wfp-generate-button :key="'wfp-generate-page'" />
 
                 {{-- Uploading a completed workbook remains the School Head's action. --}}
                 <livewire:wfp-upload :key="'wfp-upload-page'" />
             </div>
+
+            {{-- The generate controls' own sign-off panel is off here: the card
+                 below carries the chain, and follows the year this select
+                 picks through the `wfp-year-changed` event. --}}
+            <livewire:wfp-generate-button :key="'wfp-generate-page'" :show-signatories="false" />
         </div>
+
+        {{-- THE SIGN-OFF CHAIN: where this year's WFP stands with the three
+             offices that sign it — the Bookkeeper's check, Budget's
+             certification, and the Superintendent's approval. --}}
+        @if (auth()->user()?->school_id)
+            <div class="card wfp-signatory-card">
+                @livewire('wfp-signatory-actions', [
+                    'schoolId' => auth()->user()->school_id,
+                    'year' => $signatoryYear,
+                ], key('wfp-page-signoffs-'.auth()->user()->school_id.'-'.$signatoryYear))
+            </div>
+        @endif
 
         {{-- MY UPLOADS: the School Head's own list of the workbooks they have
              handed back, each with a download. Refreshes on `wfp-uploaded`. --}}

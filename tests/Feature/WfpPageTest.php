@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Livewire\WfpGenerateButton;
+use App\Livewire\WfpManager;
 use App\Livewire\WfpMyUploadsList;
 use App\Models\AccountClassification;
 use App\Models\District;
@@ -151,6 +152,48 @@ class WfpPageTest extends TestCase
     public function test_guests_are_redirected_to_login(): void
     {
         $this->get(route('wfp.index'))->assertRedirect(route('login'));
+    }
+
+    public function test_the_page_carries_the_sign_off_chain_in_its_own_card(): void
+    {
+        $html = $this->actingAs($this->schoolHead())
+            ->get(route('wfp.index'))
+            ->assertOk()
+            ->getContent();
+
+        // Once only: the page's own card carries the chain, and the generate
+        // button's inline panel is off here — a prop that failed to bind would
+        // paint the three checkpoints a second time, under the controls.
+        $this->assertSame(1, substr_count($html, 'Signatory Status'));
+        $this->assertStringContainsString('wfp-signatory-card', $html);
+    }
+
+    public function test_changing_the_generate_year_announces_it_for_the_pages_sign_off_card(): void
+    {
+        $head = $this->schoolHead();
+
+        $this->matrixWithLine($head, 2025, 'Payment for Electricity', '5020402000');
+        $this->matrixWithLine($head, 2026, 'Payment for Water', '5020403000');
+
+        Livewire::actingAs($head)
+            ->test(WfpGenerateButton::class, ['showSignatories' => false])
+            ->set('year', '2025')
+            ->assertDispatched('wfp-year-changed', year: 2025)
+            ->assertDontSee('Signatory Status');
+    }
+
+    public function test_the_pages_sign_off_card_follows_the_year_the_select_picks(): void
+    {
+        $head = $this->schoolHead();
+
+        $this->matrixWithLine($head, 2025, 'Payment for Electricity', '5020402000');
+        $this->matrixWithLine($head, 2026, 'Payment for Water', '5020403000');
+
+        Livewire::actingAs($head)
+            ->test(WfpManager::class)
+            ->assertSee('Signatory Status · CY 2026')
+            ->dispatch('wfp-year-changed', year: 2025)
+            ->assertSee('Signatory Status · CY 2025');
     }
 
     public function test_superadmins_can_open_the_wfp_signoff_queue(): void

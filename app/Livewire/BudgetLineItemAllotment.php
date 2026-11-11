@@ -369,10 +369,11 @@ class BudgetLineItemAllotment extends Component
         $school = $this->school;
         abort_unless($school !== null && $user->canAccessDivision($this->division()), 404);
 
-        $year = (int) WfpAllotment::resolveYear($school->id, (int) $this->year, $this->division());
+        $division = $this->division();
+        $year = (int) WfpAllotment::resolveYear($school->id, (int) $this->year, $division);
 
         try {
-            WfpReportSignoffs::certify($user, $school->id, $year, $this->division());
+            WfpReportSignoffs::certify($user, $school->id, $year, $division);
         } catch (\RuntimeException $exception) {
             $this->showCertificationModal = false;
             $this->errorMessage = $exception->getMessage();
@@ -380,9 +381,19 @@ class BudgetLineItemAllotment extends Component
             return;
         }
 
+        $submitted = WfpReportSignoffs::submitReadyPlan($school->id, $year, $division) !== null;
+
         $this->showCertificationModal = false;
         $this->errorMessage = null;
-        $this->successMessage = 'Certified — '.$school->name.'’s CY '.$year.' allotment is available.';
+        $this->successMessage = 'Certified — '.$school->name.'’s CY '.$year.' allotment is available.'
+            .($submitted
+                ? ' WFP submitted to the Schools Division Superintendent for final approval.'
+                : '');
+
+        if ($submitted) {
+            $this->dispatch('wfp-plan-submitted');
+        }
+
         $this->forgetFigures();
     }
 
@@ -436,10 +447,19 @@ class BudgetLineItemAllotment extends Component
             ['checked_by' => $user->id, 'checked_at' => now()],
         );
 
+        $submitted = WfpReportSignoffs::submitReadyPlan($school->id, $year, $division) !== null;
+
         $this->showCheckModal = false;
         $this->errorMessage = null;
         $this->successMessage = 'Checked — the CY '.$year.' report for '.$school->name
-            .' now carries your name as the checker of its account titles and codes.';
+            .' now carries your name as the checker of its account titles and codes.'
+            .($submitted
+                ? ' WFP submitted to the Schools Division Superintendent for final approval.'
+                : '');
+
+        if ($submitted) {
+            $this->dispatch('wfp-plan-submitted');
+        }
 
         unset($this->checking);
     }

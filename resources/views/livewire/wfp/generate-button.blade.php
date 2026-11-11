@@ -99,7 +99,11 @@
         </span>
     @endif
 
-    @if (auth()->user()?->school_id)
+    {{-- THE SIGN-OFF CHAIN. The dashboard card reads it here, beneath the
+         controls; the /wfp workspace renders it as its own card instead
+         ($showSignatories is false there) and follows the year through the
+         `wfp-year-changed` event. --}}
+    @if ($showSignatories && auth()->user()?->school_id)
         @livewire('wfp-signatory-actions', [
             'schoolId' => auth()->user()->school_id,
             'year' => (int) $this->year,
