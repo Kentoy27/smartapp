@@ -20,6 +20,7 @@ use App\Livewire\OpcrfParts;
 use App\Livewire\OpcrfReview;
 use App\Livewire\OpcrfScheduleManager;
 use App\Livewire\OpcrfUpload;
+use App\Livewire\PsdsMonitoring;
 use App\Livewire\SchoolAllotmentManager;
 use App\Livewire\Sidebar;
 use App\Livewire\UsersTable;
@@ -153,6 +154,8 @@ class ApplicationSmokeTest extends TestCase
             '/opcrf/part/3',
             '/opcrf/part/4',
             '/opcrf-submissions/'.$submission->id.'/download',
+            '/psds',
+            '/psds/report',
         ];
     }
 
@@ -279,6 +282,22 @@ class ApplicationSmokeTest extends TestCase
             'is_superadmin' => false,
             'school_id' => $school->id,
         ]);
+
+        // The PSDS monitoring workspace is read-only and scoped to the
+        // account's assigned district.
+        $psds = User::create([
+            'name' => 'District Supervisor',
+            'username' => 'psdssupervisor',
+            'email' => 'psds@example.com',
+            'password' => Hash::make('secret123'),
+            'role' => 'psds',
+            'is_superadmin' => false,
+        ]);
+        $psds->syncAssignedDistricts([$district->id]);
+
+        Livewire::actingAs($psds)
+            ->test(PsdsMonitoring::class)
+            ->assertOk();
 
         $matrix = MonthlyExpenditureMatrix::create([
             'school_id' => $school->id,
@@ -527,6 +546,7 @@ class ApplicationSmokeTest extends TestCase
             WfpPlanEditor::class,
             WfpGenerateButton::class,
             WfpMyUploadsList::class,
+            PsdsMonitoring::class,
             SchoolAllotmentManager::class,
             BudgetAllotmentMonitor::class,
             BudgetLineItemChecker::class,

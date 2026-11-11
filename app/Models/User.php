@@ -75,6 +75,20 @@ class User extends Authenticatable
     }
 
     /**
+     * The districts this account is assigned to — the PSDS's monitoring
+     * reach. District membership is the whole rule: every school currently
+     * in an assigned district is in reach (see User::canAccessDistrict()),
+     * so a school transferred to another district follows its current
+     * district automatically and nothing per school is ever assigned.
+     *
+     * @return BelongsToMany<District, $this>
+     */
+    public function assignedDistricts(): BelongsToMany
+    {
+        return $this->belongsToMany(District::class, 'user_district_assignments')->withTimestamps();
+    }
+
+    /**
      * An account created with a school is assigned to it from the start:
      * `users.school_id` records where the account is based, and the
      * assignment list records what it may read — a freshly created
@@ -117,6 +131,21 @@ class User extends Authenticatable
     public function isBookkeeperRole(): bool
     {
         return ! $this->is_superadmin && $this->role === 'bookkeeper';
+    }
+
+    /**
+     * Whether this account is a PSDS (Public Schools District Supervisor) —
+     * the strictly view-only monitoring role.
+     *
+     * A PSDS monitors the AIP, OPCRF and WFP submission status of the
+     * schools in its assigned districts ({@see assignedDistrictIds()}) and
+     * carries no module of its own beyond that: no authoring, uploading,
+     * reviewing, checking, certifying, approving or account management. Its
+     * only destination is the School Submission Monitoring page.
+     */
+    public function isPsdsRole(): bool
+    {
+        return ! $this->is_superadmin && $this->role === 'psds';
     }
 
     /**
@@ -292,6 +321,7 @@ class User extends Authenticatable
         return ! $this->hasAdminAccess()
             && $this->role !== 'superadmin'
             && ! $this->isBudgetRole()
+            && ! $this->isPsdsRole()
             && $this->role !== 'viewer';
     }
 
@@ -363,6 +393,7 @@ class User extends Authenticatable
             'administrator' => 'Administrator',
             'bookkeeper' => 'Bookkeeper',
             'budget' => 'Budget',
+            'psds' => 'PSDS',
             'viewer' => 'SDS Viewer / Validator',
             default => 'SH',
         };
@@ -507,16 +538,105 @@ class User extends Authenticatable
     }
 
     /**
+     * The ids of the districts this account is assigned to, in assignment
+     * order.
+     *
+     * Never memoized: the list is read fresh from the pivot on every call,
+     * so an administrator's change takes effect on the next request rather
+     * than at the next login.
+     *
+     * @return array<int, int>
+     */
+    public function assignedDistrictIds(): array
+    {
+        return $this->assignedDistricts()
+            ->orderBy('user_district_assignments.id')
+            ->pluck('districts.id')
+            ->map(fn ($id): int => (int) $id)
+            ->all();
+    }
+
+    /**
+     * Whether this account may read a district's schools on the monitoring
+     * pages.
+     *
+     * For the PSDS the answer is membership in the assignment list, never a
+     * request payload: an unassigned district is refused even when its id is
+     * crafted into a URL or a Livewire call, and removing an assignment
+     * revokes the access on the next request. Every other role passes here —
+     * their scoping is enforced by their own gates — so callers must still
+     * apply the role gate (isPsdsRole()) first.
+     */
+    public function canAccessDistrict(?int $districtId): bool
+    {
+        if ($districtId === null) {
+            return false;
+        }
+
+        if (! $this->isPsdsRole()) {
+            return true;
+        }
+
+        return in_array($districtId, $this->assignedDistrictIds(), true);
+    }
+
+    /**
+     * Whether this account may read a school on the PSDS monitoring pages.
+     *
+     * A school is in reach while it sits in one of the account's assigned
+     * districts. The school's current `district_id` is read here, never a
+     * district id supplied by the request, so a crafted id cannot open a
+     * school outside the assignment list. The role is part of the answer: a
+     * non-PSDS account has no monitoring reach at all.
+     */
+    public function canMonitorSchool(?int $schoolId): bool
+    {
+        if ($schoolId === null || ! $this->isPsdsRole()) {
+            return false;
+        }
+
+        return School::query()
+            ->whereKey($schoolId)
+            ->whereIn('district_id', $this->assignedDistrictIds())
+            ->exists();
+    }
+
+    /**
+     * Replace this account's district assignment list in one transaction —
+     * the list is saved whole, so a failure never leaves it partially
+     * written. Only real districts are attached (a crafted payload must not
+     * reach the pivot), and duplicates collapse to one row.
+     *
+     * @param  array<int, mixed>  $districtIds
+     */
+    public function syncAssignedDistricts(array $districtIds): void
+    {
+        $ids = array_values(array_unique(array_map(intval(...), $districtIds)));
+
+        $valid = $ids === []
+            ? []
+            : District::query()->whereIn('id', $ids)->pluck('id')->map(fn ($id): int => (int) $id)->all();
+
+        DB::transaction(function () use ($valid): void {
+            $this->assignedDistricts()->sync($valid);
+        });
+    }
+
+    /**
      * Whether this account uses the staff-facing school pages (OPCRF, MOV).
      *
      * Those pages are the non-administrative school work, so the
      * administrative side (including superadmins) is refused. The Bookkeeper
      * is excluded as well: its module is the division-wide checking pages
-     * alone, so it carries no OPCRF or MOV destination of its own.
+     * alone, so it carries no OPCRF or MOV destination of its own. The PSDS
+     * is excluded for the same reason: it monitors submission status, it
+     * never authors a document.
      */
     public function canAccessStaffPages(): bool
     {
-        return ! $this->hasAdminAccess() && ! $this->isBookkeeperRole();
+        return ! $this->hasAdminAccess()
+            && ! $this->isBookkeeperRole()
+            && ! $this->isPsdsRole();
     }
 
     /**

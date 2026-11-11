@@ -115,6 +115,27 @@ class WfpGenerationTest extends TestCase
         $this->assertContains('major_output', $wfp->review_fields);
     }
 
+    public function test_generating_from_one_month_carries_every_month_of_the_year_into_the_plan(): void
+    {
+        $sh = $this->schoolHead();
+        $january = $this->matrixWithLine($sh, 1);
+        $this->matrixWithLine($sh, 2);
+        $this->matrixWithLine($sh, 12);
+
+        // The WFP is annual: generating from the month the SH happens to have
+        // open must still bring in every month of the year's matrices.
+        Livewire::actingAs($sh)
+            ->test(MemEditor::class, ['matrix' => $january])
+            ->call('generateWfp');
+
+        $plan = WfpPlan::firstOrFail();
+
+        $this->assertSame(
+            [1, 2, 12],
+            $plan->items()->orderBy('month')->pluck('month')->map(fn ($month): int => (int) $month)->all(),
+        );
+    }
+
     public function test_the_school_head_can_generate_then_submit_a_plan_after_budget_review(): void
     {
         $sh = $this->schoolHead();

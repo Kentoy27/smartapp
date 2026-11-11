@@ -157,8 +157,9 @@ class MovUploader extends Component
         // Every MOV below belongs to somebody. Without this the render
         // reaches UserMov::scopeForUser(null) and dies with a TypeError —
         // a 500, not a refusal — so the guard is what turns "no user" into
-        // a clean 404.
-        abort_unless(Auth::check(), 404);
+        // a clean 404. The same staff-side guard the actions use keeps the
+        // shell itself off every other role's screen.
+        abort_unless(Auth::user()?->canAccessStaffPages(), 404);
 
         $first = MovPart::query()->active()->orderBy('part_order')->orderBy('id')->first();
 

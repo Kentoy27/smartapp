@@ -12,7 +12,9 @@
                         ? 'BUDGET REVIEW WORKSPACE'
                         : ($isBookkeeper
                             ? 'WFP CHECKING WORKSPACE'
-                            : ($user->canAccessOpcrfTemplate() ? 'STAFF WORKSPACE' : 'VIEWER WORKSPACE'))) }}
+                            : ($user->isPsdsRole()
+                                ? 'DISTRICT MONITORING WORKSPACE'
+                                : ($user->canAccessOpcrfTemplate() ? 'STAFF WORKSPACE' : 'VIEWER WORKSPACE')))) }}
             </span>
             <h1>Welcome back, {{ $user->username }}</h1>
             <p>
@@ -20,11 +22,13 @@
                     ? 'Review submissions and keep your school data moving.'
                     : ($isBudgetReviewer
                         ? 'Review submitted WFP plans.'
-                        : ($user->canAccessOpcrfTemplate()
-                            ? 'Your performance plan and financial plan, together in one place.'
-                        : ($user->canReviewAllOpcrfSubmissions()
-                            ? 'Review School Head AIP, OPCRF, and WFP submissions.'
-                            : 'View OPCRF part schedules and status.'))) }}
+                        : ($user->isPsdsRole()
+                            ? 'Monitor the AIP, OPCRF, and WFP submissions of the schools in your districts.'
+                            : ($user->canAccessOpcrfTemplate()
+                                ? 'Your performance plan and financial plan, together in one place.'
+                            : ($user->canReviewAllOpcrfSubmissions()
+                                ? 'Review School Head AIP, OPCRF, and WFP submissions.'
+                                : 'View OPCRF part schedules and status.')))) }}
             </p>
         </div>
         @if ($user->canAccessAip())
@@ -37,6 +41,12 @@
             <a href="{{ route('budget.per-line-item.index') }}" class="dashboard-welcome__link" wire:navigate>
                 <x-icon name="check-check" :size="16" />
                 <span>Check the annual report</span>
+                <span aria-hidden="true">→</span>
+            </a>
+        @elseif ($user->isPsdsRole())
+            <a href="{{ route('psds.monitoring') }}" class="dashboard-welcome__link" wire:navigate>
+                <x-icon name="eye" :size="16" />
+                <span>Open School Submission Monitoring</span>
                 <span aria-hidden="true">→</span>
             </a>
         @endif
@@ -113,6 +123,12 @@
                 </a>
             </section>
         </div>
+    @elseif ($user->isPsdsRole())
+        {{-- The PSDS's dashboard IS the monitoring workspace: the summary
+             cards and the per-school submission table, exactly what the
+             /psds page shows. One component serves both, so the figures can
+             never disagree. --}}
+        <livewire:psds-monitoring />
     @elseif ($user->canReviewAllOpcrfSubmissions())
         <livewire:viewer-submission-stats />
     @elseif ($user->canAccessOpcrfTemplate())

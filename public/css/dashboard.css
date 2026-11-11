@@ -4262,3 +4262,376 @@ a.mem-month-tab:hover .mem-month-tab__total { color: var(--text-muted); }
         gap: 4px;
     }
 }
+
+/* ------------------------------------------------------------------
+   PSDS - School Submission Monitoring (/psds and the PSDS dashboard).
+
+   A read-only workspace: summary figures, the filter bar, per-district
+   coverage, the one-row-per-school table, and the read-only detail modal.
+   Everything reuses the shared card, badge and table primitives; these
+   rules only add the spacing and small displays unique to the page.
+   ------------------------------------------------------------------ */
+
+.psds-page-header {
+    align-items: flex-start;
+}
+
+.psds-page-header p {
+    max-width: 62ch;
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    line-height: 1.55;
+}
+
+.psds-export-link {
+    flex-shrink: 0;
+    text-decoration: none;
+}
+
+.psds-stats {
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+}
+
+.psds-stat-card .stat-value {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+}
+
+.psds-stat-of {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-faint);
+}
+
+.psds-stat-meter {
+    height: 4px;
+    margin-top: 10px;
+    border-radius: 999px;
+    background: var(--bg-muted);
+    overflow: hidden;
+}
+
+.psds-stat-meter span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--primary);
+    transition: width 0.2s ease;
+}
+
+.psds-filter-card {
+    padding: 18px 20px;
+}
+
+.psds-filters {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+}
+
+.psds-filter {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.psds-filter > span {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+}
+
+.psds-filter input,
+.psds-filter select {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.8125rem;
+}
+
+.psds-filter input:focus,
+.psds-filter select:focus {
+    outline: 2px solid var(--primary);
+    outline-offset: 1px;
+}
+
+.psds-filter-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.psds-filter-actions .users-action {
+    text-decoration: none;
+}
+
+.psds-filter-count {
+    margin-left: auto;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.psds-empty-state {
+    padding: 44px 24px;
+    text-align: center;
+}
+
+.psds-empty-state__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    margin-bottom: 14px;
+    border-radius: 50%;
+    background: var(--primary-soft);
+    color: var(--primary-strong);
+}
+
+.psds-empty-state h2 {
+    font-size: 1.0625rem;
+    font-weight: 700;
+    color: var(--text-strong);
+}
+
+.psds-empty-state p {
+    max-width: 58ch;
+    margin: 8px auto 0;
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    line-height: 1.6;
+}
+
+.psds-coverage-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+}
+
+.psds-coverage-item {
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-elevated);
+}
+
+.psds-coverage-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.psds-coverage-percent {
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: var(--primary-strong);
+}
+
+.psds-coverage-meter {
+    height: 6px;
+    margin-top: 8px;
+    border-radius: 999px;
+    background: var(--bg-muted);
+    overflow: hidden;
+}
+
+.psds-coverage-meter span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--primary);
+    transition: width 0.2s ease;
+}
+
+.psds-coverage-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    margin-top: 8px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.psds-coverage-warn {
+    color: var(--danger);
+    font-weight: 600;
+}
+
+.psds-table td {
+    vertical-align: top;
+}
+
+.psds-table .badge {
+    white-space: nowrap;
+}
+
+.psds-detail-modal {
+    max-width: min(1000px, calc(100vw - 32px));
+}
+
+.psds-detail-sub {
+    margin-top: 2px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.psds-detail-body {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.psds-detail-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    background: var(--bg-muted);
+}
+
+.psds-detail-summary > div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.psds-detail-summary__label {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+}
+
+.psds-detail-summary strong {
+    color: var(--text-strong);
+    font-size: 0.875rem;
+}
+
+.psds-detail-section {
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+}
+
+.psds-detail-section:first-of-type {
+    padding-top: 0;
+    border-top: 0;
+}
+
+.psds-detail-section__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.psds-detail-section__head h3 {
+    font-size: 0.9375rem;
+    font-weight: 700;
+    color: var(--text-strong);
+}
+
+.psds-detail-facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 10px 16px;
+    margin: 0 0 12px;
+}
+
+.psds-detail-facts > div {
+    min-width: 0;
+}
+
+.psds-detail-facts dt {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+}
+
+.psds-detail-facts dd {
+    margin: 2px 0 0;
+    font-size: 0.8125rem;
+    color: var(--text);
+    overflow-wrap: anywhere;
+}
+
+.psds-history-table {
+    font-size: 0.8125rem;
+}
+
+.psds-submission-block {
+    padding: 14px 16px;
+    margin-bottom: 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+
+.psds-submission-block__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.psds-detail-subheading {
+    margin: 16px 0 8px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+}
+
+.psds-detail-empty {
+    margin: 0;
+    font-size: 0.8125rem;
+    font-style: italic;
+    color: var(--text-muted);
+}
+
+.psds-readonly-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: var(--primary-soft);
+    color: var(--primary-strong);
+    font-size: 0.75rem;
+    line-height: 1.5;
+}
+
+@media (max-width: 720px) {
+    .psds-filter-count {
+        margin-left: 0;
+    }
+
+    .psds-page-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .psds-export-link {
+        align-self: flex-start;
+    }
+}
