@@ -167,18 +167,20 @@
                     <div class="sip-bulk-upload-rows">
                         @foreach ($bulkUploads as $index => $upload)
                             @php($otherDivisions = array_column(array_diff_key($bulkUploads, [$index => true]), 'division'))
-                            <div class="sip-bulk-upload-row" wire:key="sip-bulk-upload-{{ $index }}">
-                                <div class="field">
-                                    <label for="bulkSipDivision{{ $index }}">Division</label>
-                                    <select id="bulkSipDivision{{ $index }}" wire:model="bulkUploads.{{ $index }}.division" required>
-                                        @foreach ($uploadableDivisions as $divisionOption)
-                                            @if ($divisionOption === $upload['division'] || ! in_array($divisionOption, $otherDivisions, true))
-                                                <option value="{{ $divisionOption }}">{{ \App\Support\SchoolDivision::label($divisionOption) }}</option>
-                                            @endif
-                                        @endforeach
-                                    </select>
-                                    @error("bulkUploads.{$index}.division") <div class="error-text">{{ $message }}</div> @enderror
-                                </div>
+                            <div class="sip-bulk-upload-row {{ count($uploadableDivisions) === 1 ? 'sip-bulk-upload-row--single-division' : '' }}" wire:key="sip-bulk-upload-{{ $index }}">
+                                @if (count($uploadableDivisions) > 1)
+                                    <div class="field">
+                                        <label for="bulkSipDivision{{ $index }}">Division</label>
+                                        <select id="bulkSipDivision{{ $index }}" wire:model="bulkUploads.{{ $index }}.division" required>
+                                            @foreach ($uploadableDivisions as $divisionOption)
+                                                @if ($divisionOption === $upload['division'] || ! in_array($divisionOption, $otherDivisions, true))
+                                                    <option value="{{ $divisionOption }}">{{ \App\Support\SchoolDivision::label($divisionOption) }}</option>
+                                                @endif
+                                            @endforeach
+                                        </select>
+                                        @error("bulkUploads.{$index}.division") <div class="error-text">{{ $message }}</div> @enderror
+                                    </div>
+                                @endif
                                 <div class="field">
                                     <label for="bulkSipFile{{ $index }}">SIP document</label>
                                     <input

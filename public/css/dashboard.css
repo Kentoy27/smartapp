@@ -1650,6 +1650,7 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
 .sip-bulk-upload-modal .modal-form { min-width: 0; overflow-y: auto; }
 .sip-bulk-upload-rows { display: grid; gap: 14px; }
 .sip-bulk-upload-row { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) auto; align-items: end; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 8px; }
+.sip-bulk-upload-row--single-division { grid-template-columns: minmax(0, 1fr); }
 .sip-bulk-upload-row .field { min-width: 0; }
 .sip-bulk-upload-row select,
 .sip-bulk-upload-row input[type="file"] { display: block; width: 100%; min-width: 0; min-height: 40px; }

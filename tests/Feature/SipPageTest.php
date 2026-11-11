@@ -136,6 +136,11 @@ class SipPageTest extends TestCase
         $head = $this->makeSchoolHead($school, [$division]);
 
         Livewire::actingAs($head)->test(SipTable::class)
+            ->call('openBulkUploadModal')
+            ->assertSet('showBulkUploadModal', true)
+            ->assertDontSee('bulkSipDivision0', false);
+
+        Livewire::actingAs($head)->test(SipTable::class)
             ->assertSee('Upload')
             ->call('openUploadModal', $school->id, $division)
             ->set('sipFile', UploadedFile::fake()->create('School-SIP.pdf', 80, 'application/pdf'))
