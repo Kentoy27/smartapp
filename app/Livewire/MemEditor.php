@@ -2055,7 +2055,10 @@ class MemEditor extends Component
         $plan->generated_by = $user->id;
         $plan->save();
 
-        WfpGenerator::generate($plan, $matrix);
+        // The WFP is annual. Generating from the one month that happens to be
+        // open would drop every other month's lines (the generator reconciles
+        // the plan against its sources), so build from the year's matrices.
+        WfpGenerator::generate($plan);
 
         return $this->redirect(route('wfp.plans.edit', ['plan' => $plan->id]), navigate: true);
     }

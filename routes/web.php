@@ -30,7 +30,11 @@ use App\Support\OpcrfPartOne;
 use App\Support\OpcrfTemplatePersonalizer;
 use App\Support\OpcrfWorkbookProgress;
 use App\Support\OpcrfWorkbookTrim;
+<<<<<<< HEAD
 use App\Support\SipDocumentPreview;
+=======
+use App\Support\PsdsMonitoringReport;
+>>>>>>> jet
 use App\Support\WfpAllotment;
 use App\Support\WfpAllotmentXlsxExporter;
 use App\Support\WfpPlanExporter;
@@ -118,6 +122,58 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/app', function () {
         return view('procurement.app.index');
     })->name('procurement.app.index');
+
+    /* ------------------------------------------------------------------
+     * PSDS — School Submission Monitoring.
+     *
+     * The PSDS role's one destination: the AIP, OPCRF and WFP submission
+     * status of the schools in the districts the account is assigned. The
+     * guard is the role alone (isPsdsRole()); every figure the page shows is
+     * scoped inside the component by the account's own district list, never
+     * by anything the request carries.
+     * ----------------------------------------------------------------- */
+
+    Route::get('/psds', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->isPsdsRole(), 404);
+
+        return view('psds.monitoring');
+    })->name('psds.monitoring');
+
+    // The read-only CSV of the monitoring table. The role gate is the same
+    // as the page, and every row is re-scoped inside the report from the
+    // account's own district assignments — the query string only narrows.
+    Route::get('/psds/report', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->isPsdsRole(), 404);
+
+        $filters = [
+            'district' => request()->query('district'),
+            'school' => request()->query('school'),
+            'year' => request()->query('year'),
+            'aip' => request()->query('aip'),
+            'opcrf' => request()->query('opcrf'),
+            'wfp' => request()->query('wfp'),
+            'overall' => request()->query('overall'),
+            // `q` is the component's URL name; `search` is accepted too so a
+            // hand-written export link still works.
+            'search' => request()->query('q', request()->query('search', '')),
+        ];
+
+        // The filename names the reporting period. The report normalizes the
+        // same raw filters itself, so nothing is normalized twice.
+        $year = PsdsMonitoringReport::normalizeFilters($filters)['year'];
+
+        $filename = 'psds-submission-monitoring-'
+            .($year !== null ? $year.'-' : '')
+            .now()->format('Y-m-d').'.csv';
+
+        return response((new PsdsMonitoringReport($user))->csv($filters), 200, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+            'Cache-Control' => 'private, no-store, max-age=0',
+        ]);
+    })->name('psds.report');
 
     /* ------------------------------------------------------------------
      * AIP uploads are analyzed and submitted by School Heads. The records

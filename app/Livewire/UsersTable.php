@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Concerns\ManagesAssignedDistricts;
 use App\Livewire\Concerns\ManagesAssignedSchools;
 use App\Models\District;
 use App\Models\School;
@@ -19,6 +20,7 @@ use Livewire\WithPagination;
 #[Title('Users — SmartApp')]
 class UsersTable extends Component
 {
+    use ManagesAssignedDistricts;
     use ManagesAssignedSchools;
     use WithPagination;
 
@@ -185,7 +187,7 @@ class UsersTable extends Component
             // School Head passwords must be private, strong, and entered
             // explicitly; a public school identifier is never a password.
             'password' => $passwordRules,
-            'role' => ['required', Rule::in(['user', 'viewer', 'bookkeeper', 'budget', 'administrator', 'superadmin'])],
+            'role' => ['required', Rule::in(['user', 'viewer', 'bookkeeper', 'budget', 'psds', 'administrator', 'superadmin'])],
         ];
 
         // The Bookkeeper's roster is edited in this same modal, so its rules
@@ -193,6 +195,14 @@ class UsersTable extends Component
         // the other roles a crafted list is ignored rather than saved.
         if ($this->role === 'bookkeeper') {
             $rules = array_merge($rules, $this->assignedSchoolRules());
+        }
+
+        // The PSDS's district reach is edited the same way: the list is
+        // required exactly while the form IS a PSDS's, so a PSDS can never
+        // be saved without a district and a crafted list on any other role
+        // is ignored.
+        if ($this->role === 'psds') {
+            $rules = array_merge($rules, $this->assignedDistrictRules());
         }
 
         return $rules;
@@ -213,7 +223,7 @@ class UsersTable extends Component
             'username' => 'username',
             'email' => 'email',
             'password' => 'password',
-        ] + $this->assignedSchoolAttributes();
+        ] + $this->assignedSchoolAttributes() + $this->assignedDistrictAttributes();
     }
 
     public function openCreateModal(): void
@@ -242,6 +252,9 @@ class UsersTable extends Component
         // rows. For every other role the picker is left empty — it is not
         // rendered for them, and an empty list is what their save ignores.
         $this->loadAssignedSchools($user);
+
+        // The PSDS's district reach, read the same way.
+        $this->loadAssignedDistricts($user);
 
         // Show what the account can actually work in. A row written before
         // the explicit list existed is displayed through its classification;
@@ -300,7 +313,7 @@ class UsersTable extends Component
         abort_unless($this->canAssignRoles(), 403);
 
         $validated = $this->validate([
-            'selectedRole' => ['required', Rule::in(['user', 'viewer', 'bookkeeper', 'budget', 'administrator', 'superadmin'])],
+            'selectedRole' => ['required', Rule::in(['user', 'viewer', 'bookkeeper', 'budget', 'psds', 'administrator', 'superadmin'])],
         ]);
 
         $user = User::findOrFail($this->roleUserId);
@@ -317,6 +330,7 @@ class UsersTable extends Component
             'administrator' => 'Administrator',
             'bookkeeper' => 'Bookkeeper',
             'budget' => 'Budget',
+            'psds' => 'PSDS',
             'viewer' => 'SDS Viewer / Validator',
             default => 'SH',
         };
@@ -399,6 +413,7 @@ class UsersTable extends Component
         $this->school_id_choice = '';
         $this->division_access = [];
         $this->resetAssignedSchools();
+        $this->resetAssignedDistricts();
         $this->name = '';
         $this->username = '';
         $this->usernamePrefill = '';
@@ -420,7 +435,7 @@ class UsersTable extends Component
 
     public function setRole(string $role): void
     {
-        if (! in_array($role, ['user', 'viewer', 'bookkeeper', 'budget', 'administrator', 'superadmin'], true)) {
+        if (! in_array($role, ['user', 'viewer', 'bookkeeper', 'budget', 'psds', 'administrator', 'superadmin'], true)) {
             return;
         }
 
@@ -502,6 +517,13 @@ class UsersTable extends Component
             $this->usernamePrefill = '';
             $this->division_access = [];
             $this->resetAssignedSchools();
+        }
+
+        // The district picker is the PSDS's field alone: switching away from
+        // the role drops its list, so a hidden selection never rides along
+        // into a save.
+        if ($role !== 'psds') {
+            $this->resetAssignedDistricts();
         }
     }
 
@@ -612,6 +634,14 @@ class UsersTable extends Component
             }
         }
 
+        // A PSDS is created with its district reach: the validated list is
+        // required by the form, and only districts that exist survive the
+        // sync (the model re-checks), so a crafted payload cannot reach the
+        // pivot.
+        if ($selectedRole === 'psds') {
+            $user->syncAssignedDistricts(array_map(intval(...), $validated['assigned_districts'] ?? []));
+        }
+
         $this->showCreateModal = false;
         $this->editingUserId = null;
         $this->resetForm();
@@ -625,6 +655,7 @@ class UsersTable extends Component
             'administrator' => 'an administrator',
             'bookkeeper' => 'a bookkeeper',
             'budget' => 'a Budget user',
+            'psds' => 'a PSDS',
             'viewer' => 'a viewer',
             default => 'a user',
         };
@@ -682,6 +713,13 @@ class UsersTable extends Component
             $user->syncAssignedSchools($user->school_id !== null ? [(int) $user->school_id] : []);
         } elseif ($selectedRole === 'bookkeeper') {
             $user->syncAssignedSchools(array_map(intval(...), $validated['assigned_schools'] ?? []));
+        }
+
+        // The PSDS's district reach follows the save the same way: the
+        // modal's list is exactly what is written, and it is required by the
+        // form while the role is PSDS.
+        if ($selectedRole === 'psds') {
+            $user->syncAssignedDistricts(array_map(intval(...), $validated['assigned_districts'] ?? []));
         }
 
         $this->showCreateModal = false;

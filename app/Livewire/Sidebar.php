@@ -466,6 +466,20 @@ class Sidebar extends Component
                     ],
                 ],
             ];
+        } elseif (Auth::user()?->isPsdsRole()) {
+            // The PSDS monitors and nothing else: one destination — the
+            // School Submission Monitoring page — beside the Dashboard. No
+            // OPCRF, MOV, AIP, WFP, checking or administrative item exists
+            // for the role; the pages it lacks are refused by their own
+            // guards, not by this absence.
+            $items[] = [
+                'label' => 'School Submission Monitoring',
+                'route' => 'psds.monitoring',
+                'path' => 'psds-monitoring',
+                'icon' => 'eye',
+                'section' => 'Files',
+                'order' => 10,
+            ];
         } else {
             // The SDS Viewer/Validator uses the OPCRF review queue; the
             // School Head status page remains available from that page.

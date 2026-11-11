@@ -257,6 +257,14 @@
                             </label>
 
                             <label class="role-option">
+                                <input type="radio" name="selectedRole" value="psds" wire:model="selectedRole">
+                                <span class="role-option-body">
+                                    <strong>PSDS</strong>
+                                    <small>Monitor AIP, OPCRF, and WFP submissions of schools in assigned districts</small>
+                                </span>
+                            </label>
+
+                            <label class="role-option">
                                 <input type="radio" name="selectedRole" value="administrator" wire:model="selectedRole">
                                 <span class="role-option-body">
                                     <strong>Administrator</strong>
@@ -421,6 +429,19 @@
                                 <input
                                     type="radio"
                                     name="role"
+                                    value="psds"
+                                    wire:model.live="role"
+                                >
+                                <span class="role-option-body">
+                                    <strong>PSDS</strong>
+                                    <small>Monitor AIP, OPCRF, and WFP submissions of schools in assigned districts</small>
+                                </span>
+                            </label>
+
+                            <label class="role-option">
+                                <input
+                                    type="radio"
+                                    name="role"
                                     value="superadmin"
                                     wire:model.live="role"
                                 >
@@ -534,6 +555,18 @@
                         @error('division_access') <div class="error-text">{{ $message }}</div> @enderror
                         @error('division_access.*') <div class="error-text">{{ $message }}</div> @enderror
                     </fieldset>
+                @endif
+
+                {{-- ASSIGNED DISTRICT(S): a PSDS's monitoring reach — every
+                     school currently in a chosen district is in view, so no
+                     school is ever assigned individually. Required: a PSDS
+                     without a district monitors nothing. --}}
+                @if ($this->role === 'psds')
+                    @include('livewire.partials.assigned-districts-field', [
+                        'label' => 'Assigned District(s)',
+                        'hint' => 'The districts this PSDS supervises. Every school currently in a chosen district is monitored; a school moved to another district follows its new district automatically.',
+                        'inputId' => 'userAssignedDistricts',
+                    ])
                 @endif
 
                 <div class="field">
