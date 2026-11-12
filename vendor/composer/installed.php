@@ -3,7 +3,7 @@
         'name' => 'freebuff/laravel-app',
         'pretty_version' => 'dev-main',
         'version' => 'dev-main',
-        'reference' => '75a76aa5002474366a6600c2d09e38f866bcfde4',
+        'reference' => '1e01956473d742b6968c6c84a70ec1e8882c94f1',
         'type' => 'project',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -124,7 +124,7 @@
         'freebuff/laravel-app' => array(
             'pretty_version' => 'dev-main',
             'version' => 'dev-main',
-            'reference' => '75a76aa5002474366a6600c2d09e38f866bcfde4',
+            'reference' => '1e01956473d742b6968c6c84a70ec1e8882c94f1',
             'type' => 'project',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),

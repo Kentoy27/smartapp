@@ -7,6 +7,7 @@ use App\Support\WfpTemplate;
 use App\Models\WfpPlan;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -27,10 +28,10 @@ use Livewire\Component;
 class WfpManager extends Component
 {
     /**
-     * The year the sign-off card describes. Null until the generate select
-     * has said otherwise, and then resolved the same way the generate button
-     * resolves its own, so the card and the select cannot disagree.
+     * The year the generate select picked for the sign-off card. Null until
+     * the select has said otherwise.
      */
+    #[Locked]
     public ?int $signatoryYear = null;
 
     public function mount(): void
@@ -45,14 +46,27 @@ class WfpManager extends Component
     public function syncSignatoryYear(int $year): void
     {
         $this->signatoryYear = $year;
+
+        // The card's year is computed from this one, and the year just
+        // picked is a new answer to it.
+        unset($this->signatoryCardYear);
     }
 
     /**
-     * The year the sign-off card renders for: the newest year the school has
-     * data for until the select moves it, and the current year when it has
-     * none — the same resolution the generate button applies on first paint.
+     * The year the sign-off card renders for: the year the select picked,
+     * and until it does, the newest year the school has data for — the
+     * current year when it has none — the same resolution the generate
+     * button applies on first paint, so the card and the select cannot
+     * disagree.
+     *
+     * It is a computed property, read as `$this->signatoryCardYear`, and
+     * not a bare view variable: Livewire merges a component's public
+     * properties into its view data and the property wins, so a variable
+     * named like the property would be shadowed by it — null on the first
+     * paint, which the card then hands to the child as its year.
      */
-    private function resolvedSignatoryYear(): int
+    #[Computed]
+    public function signatoryCardYear(): int
     {
         return $this->signatoryYear
             ?? WfpPlanExporter::dataYearFor(Auth::user(), null)
@@ -81,7 +95,6 @@ class WfpManager extends Component
         return view('livewire.wfp.manager', [
             'fileName' => WfpTemplate::fileName(),
             'templateDescription' => WfpTemplate::description(),
-            'signatoryYear' => $this->resolvedSignatoryYear(),
         ]);
     }
 }

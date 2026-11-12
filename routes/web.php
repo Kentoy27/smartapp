@@ -73,9 +73,12 @@ Route::middleware(['auth'])->group(function () {
      * ----------------------------------------------------------------- */
 
     Route::post('/division', function () {
+        // Auth::user() is typed as the auth contract, so the analyzer has to
+        // be told it is the account model; the guard below proves it.
         $user = Auth::user();
         abort_unless($user instanceof User, 404);
 
+        /** @var User $user */
         $division = (string) request()->input('division');
 
         abort_unless($user->canAccessDivision($division), 403);
@@ -221,7 +224,10 @@ Route::middleware(['auth'])->group(function () {
         abort_unless($submission->canBeDownloadedBy($user), 404);
         abort_unless($submission->hasFile(), 404);
 
-        return Storage::disk('local')->download(
+        /** @var FilesystemAdapter $disk */
+        $disk = Storage::disk('local');
+
+        return $disk->download(
             $submission->file_path,
             $submission->downloadName(),
         );
@@ -912,6 +918,7 @@ Route::middleware(['auth'])->group(function () {
         $user = Auth::user();
         abort_unless($user instanceof User && $user->canCheckLineItems(), 404);
 
+        /** @var User $user */
         $schoolId = (int) $request->query('school');
         $school = $schoolId > 0 ? School::query()->find($schoolId) : null;
         abort_if($school === null, 404);
@@ -1004,6 +1011,7 @@ Route::middleware(['auth'])->group(function () {
         $user = Auth::user();
         abort_unless($user instanceof User && ($user->canAccessWfp() || $user->canCheckLineItems()), 404);
 
+        /** @var User $user */
         if ($user->canCheckLineItems()) {
             return view('budget.line-items');
         }
@@ -1045,6 +1053,7 @@ Route::middleware(['auth'])->group(function () {
         abort_unless($user instanceof User && $user->canAccessWfp(), 404);
         abort_if($user->school_id === null, 404);
 
+        /** @var User $user */
         $raw = $request->query('year');
         $year = is_string($raw) && ctype_digit($raw) ? (int) $raw : 0;
 
@@ -1099,6 +1108,7 @@ Route::middleware(['auth'])->group(function () {
         $user = Auth::user();
         abort_unless($user instanceof User && $matrix->canBeViewedBy($user), 404);
 
+        /** @var User $user */
         $preparedBy = $user->canManageWfp()
             ? $user
             : User::query()
@@ -1168,6 +1178,7 @@ Route::middleware(['auth'])->group(function () {
         $user = Auth::user();
         abort_unless($user instanceof User && ($user->canAccessWfp() || $user->canCheckLineItems()), 404);
 
+        /** @var User $user */
         if ($user->canCheckLineItems()) {
             return view('budget.per-line-item');
         }
@@ -1188,6 +1199,7 @@ Route::middleware(['auth'])->group(function () {
         abort_unless($user instanceof User && $user->canAccessWfp(), 404);
         abort_if($user->school_id === null, 404);
 
+        /** @var User $user */
         $schoolId = (int) $user->school_id;
         $division = $user->activeDivision();
         $year = WfpAllotment::resolveYear($schoolId, (int) $request->query('year'), $division);
@@ -1249,6 +1261,7 @@ Route::middleware(['auth'])->group(function () {
         );
         abort_unless(WfpTemplate::exists(), 404);
 
+        /** @var User $user */
         $signatureMode = request()->query('signatures', 'with');
         abort_unless(is_string($signatureMode) && in_array($signatureMode, ['with', 'without'], true), 404);
         $includeSignatures = $signatureMode === 'with';

@@ -16,6 +16,7 @@ use App\Support\WfpAccountCodeGenerator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
+use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
 use Livewire\Livewire;
 use Tests\Concerns\BuildsWfpTemplates;
 use Tests\TestCase;
@@ -194,6 +195,25 @@ class WfpPageTest extends TestCase
             ->assertSee('Signatory Status · CY 2026')
             ->dispatch('wfp-year-changed', year: 2025)
             ->assertSee('Signatory Status · CY 2025');
+    }
+
+    /**
+     * The year the sign-off chain acts on is the server's to decide: the
+     * select announces a new one, the browser cannot name one. The card
+     * reads this year, so a crafted request that moved it would point the
+     * signatures at a year nobody picked.
+     */
+    public function test_the_sign_off_cards_year_cannot_be_changed_from_the_browser(): void
+    {
+        $head = $this->schoolHead();
+
+        $this->matrixWithLine($head, 2026, 'Payment for Electricity', '5020402000');
+
+        $this->expectException(CannotUpdateLockedPropertyException::class);
+
+        Livewire::actingAs($head)
+            ->test(WfpManager::class)
+            ->set('signatoryYear', 2019);
     }
 
     public function test_superadmins_can_open_the_wfp_signoff_queue(): void

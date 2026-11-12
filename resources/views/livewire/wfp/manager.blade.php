@@ -35,8 +35,8 @@
             <div class="card wfp-signatory-card">
                 @livewire('wfp-signatory-actions', [
                     'schoolId' => auth()->user()->school_id,
-                    'year' => $signatoryYear,
-                ], key('wfp-page-signoffs-'.auth()->user()->school_id.'-'.$signatoryYear))
+                    'year' => $this->signatoryCardYear,
+                ], key('wfp-page-signoffs-'.auth()->user()->school_id.'-'.$this->signatoryCardYear))
             </div>
         @endif
 
