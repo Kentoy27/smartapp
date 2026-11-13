@@ -283,6 +283,7 @@ class BudgetLineItemAllotment extends Component
             $this->certification,
             $this->checking,
             $this->preparedBy,
+            $this->missingSignatureLabels,
             $this->planUrl,
         );
     }
@@ -461,7 +462,7 @@ class BudgetLineItemAllotment extends Component
             $this->dispatch('wfp-plan-submitted');
         }
 
-        unset($this->checking);
+        unset($this->checking, $this->missingSignatureLabels);
     }
 
     public function clearSuccess(): void
@@ -704,6 +705,24 @@ class BudgetLineItemAllotment extends Component
             ->first(fn (User $candidate): bool => $candidate->canAccessDivision($division));
     }
 
+    /**
+     * The sign-off blocks whose e-signature the signed export will not carry,
+     * each with the reason — so the reader is told on the page, not by
+     * opening a workbook with no signature in it.
+     *
+     * @return array<int, string>
+     */
+    #[Computed]
+    public function missingSignatureLabels(): array
+    {
+        return WfpAllotment::missingSignatureLabels(
+            $this->school?->id,
+            (int) $this->year,
+            $this->division(),
+            $this->preparedBy,
+        );
+    }
+
     public function render()
     {
         $this->user();
@@ -712,6 +731,7 @@ class BudgetLineItemAllotment extends Component
             'preparedBy' => $this->preparedBy,
             'checking' => $this->checking,
             'signatoryStatuses' => $this->signatoryStatuses,
+            'missingSignatureLabels' => $this->missingSignatureLabels,
             'canCheck' => $this->canCheck(),
             'canCertify' => $this->canCertify(),
             'planUrl' => $this->planUrl,

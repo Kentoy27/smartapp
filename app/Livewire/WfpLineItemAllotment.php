@@ -79,7 +79,7 @@ class WfpLineItemAllotment extends Component
 
         // The figures are computed properties keyed off this year; forgetting
         // them is what makes the page re-read for the year that was picked.
-        unset($this->months, $this->lineItems, $this->grandTotal, $this->allocation, $this->certification, $this->checking);
+        unset($this->months, $this->lineItems, $this->grandTotal, $this->allocation, $this->certification, $this->checking, $this->missingSignatureLabels);
     }
 
     /* ----------------------------------------------------------- computed */
@@ -214,6 +214,24 @@ class WfpLineItemAllotment extends Component
         );
     }
 
+    /**
+     * The sign-off blocks whose e-signature the signed export will not carry,
+     * each with the reason — so the reader is told on the page, not by
+     * opening a workbook with no signature in it.
+     *
+     * @return array<int, string>
+     */
+    #[Computed]
+    public function missingSignatureLabels(): array
+    {
+        return WfpAllotment::missingSignatureLabels(
+            Auth::user()?->school_id,
+            (int) $this->year,
+            $this->division(),
+            Auth::user(),
+        );
+    }
+
     public function render()
     {
         $this->user();
@@ -222,6 +240,7 @@ class WfpLineItemAllotment extends Component
             'preparedBy' => Auth::user(),
             'checking' => $this->checking,
             'signatoryStatuses' => $this->signatoryStatuses,
+            'missingSignatureLabels' => $this->missingSignatureLabels,
             // The SH reads the block, never signs it: the check is the
             // Bookkeeper's statement, given on their own copy of the report.
             'canCheck' => false,

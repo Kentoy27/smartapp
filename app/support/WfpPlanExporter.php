@@ -28,6 +28,21 @@ final class WfpPlanExporter
     private const SIGNATURE_STAGES = ['prepared', 'bookkeeper', 'budget', 'superadmin'];
 
     /**
+     * The box an e-signature is stamped in, in pixels: the width a signature
+     * needs to be read and the height of the form's signing band.
+     *
+     * The form's own sign-off columns are narrow (the Bookkeeper's is six
+     * characters wide) and its rows are short, so a signature stretched to
+     * the cell it lands in is either a flat line or a smudge. A box of a
+     * fixed size is the Per Line Item report's, so the two forms carry their
+     * signatures alike — and the box may reach into the empty columns beside
+     * the block, which is where the room comes from.
+     */
+    private const SIGNATURE_WIDTH_PX = 90;
+
+    private const SIGNATURE_HEIGHT_PX = 60;
+
+    /**
      * The plan as workbook bytes.
      *
      * The plan is not consulted for its "shape": the template's own layout
@@ -174,6 +189,8 @@ final class WfpPlanExporter
             $block['range'],
             $extension,
             self::signerName($signer),
+            self::SIGNATURE_WIDTH_PX,
+            self::SIGNATURE_HEIGHT_PX,
         );
 
         if ($stamped === null) {

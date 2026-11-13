@@ -802,7 +802,7 @@ class WfpApprovalTest extends TestCase
             $pendingSheet = $this->wfpSheetXml((string) $pending->getContent());
             $labelRow = $this->approvalLabelRow($pendingSheet);
 
-            $this->assertSame('', $this->wfpCellText($pendingSheet, 'A'.($labelRow + 3)));
+            $this->assertSame('', $this->wfpCellText($pendingSheet, 'A'.($labelRow + 4)));
             $this->assertStringNotContainsString($superadmin->name, $pendingSheet);
 
             $plan->fresh()->markApproved($superadmin);
@@ -815,7 +815,7 @@ class WfpApprovalTest extends TestCase
 
             // The filler trimmed two blank data rows, so the block moved up.
             // The stamp must follow it, not the template's original row.
-            $this->assertSame($superadmin->name, $this->wfpCellText($sheet, 'A'.($labelRow + 3)));
+            $this->assertSame($superadmin->name, $this->wfpCellText($sheet, 'A'.($labelRow + 4)));
         } finally {
             @unlink(storage_path('forms/'.$name));
         }
@@ -845,7 +845,7 @@ class WfpApprovalTest extends TestCase
             $sheet = $this->wfpSheetXml((string) $response->getContent());
             $labelRow = $this->approvalLabelRow($sheet);
 
-            $this->assertSame('', $this->wfpCellText($sheet, 'A'.($labelRow + 3)));
+            $this->assertSame('', $this->wfpCellText($sheet, 'A'.($labelRow + 4)));
             $this->assertStringNotContainsString($sh->name, $sheet);
         } finally {
             @unlink(storage_path('forms/'.$name));
@@ -857,7 +857,9 @@ class WfpApprovalTest extends TestCase
         $withBlock = $this->wfpTemplateBytes(3, null, true);
         $withoutBlock = $this->wfpTemplateBytes(3);
 
-        $this->assertSame(['A12' => 'SDS Grace'], WfpTemplateFiller::approvalCells($withBlock, 'SDS Grace'));
+        // The printed name sits directly above its designation, with the
+        // signing band above the name.
+        $this->assertSame(['A13' => 'SDS Grace'], WfpTemplateFiller::approvalCells($withBlock, 'SDS Grace'));
         $this->assertSame([], WfpTemplateFiller::approvalCells($withBlock, null));
         $this->assertSame([], WfpTemplateFiller::approvalCells($withBlock, '   '));
         $this->assertSame([], WfpTemplateFiller::approvalCells($withoutBlock, 'SDS Grace'));

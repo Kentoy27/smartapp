@@ -542,6 +542,92 @@ class WfpLineItemAllotmentTest extends TestCase
         $this->assertStringContainsString('EDILYN LIRAZAN', $sheet);
     }
 
+    public function test_the_page_says_which_e_signature_a_signed_export_cannot_carry(): void
+    {
+        $sh = $this->schoolHead('Partly Signed School');
+
+        $bookkeeper = User::factory()->create([
+            'role' => 'bookkeeper',
+            'is_superadmin' => false,
+            'school_id' => $sh->school_id,
+            'name' => 'Edilyn Lirazan',
+            'position' => 'Senior Bookkeeper',
+        ]);
+        $budget = User::factory()->create([
+            'role' => 'budget',
+            'is_superadmin' => false,
+            'name' => 'Lyn Rose E. Otea',
+            'position' => 'Budget Officer III',
+        ]);
+
+        // The School Head and the Bookkeeper have a registered signature; the
+        // Budget Officer, who certified the allotment, has not uploaded one.
+        $this->registerSignature($sh, self::PNG);
+        $this->registerSignature($bookkeeper, self::PNG_RED);
+
+        $this->line($sh, 1);
+
+        WfpReportCheck::create([
+            'school_id' => $sh->school_id,
+            'school_division' => SchoolDivision::ELEMENTARY,
+            'year' => 2026,
+            'checked_by' => $bookkeeper->id,
+            'checked_at' => now(),
+        ]);
+        SchoolAllotment::create([
+            'school_id' => $sh->school_id,
+            'school_division' => SchoolDivision::ELEMENTARY,
+            'year' => 2026,
+            'amount' => 50000,
+            'certified_by' => $budget->id,
+            'certified_at' => now(),
+        ]);
+
+        // The page says which block the signed export cannot sign, and why —
+        // the certification is on record, but the officer has no signature
+        // image to stamp.
+        Livewire::actingAs($sh)
+            ->test(WfpLineItemAllotment::class)
+            ->assertSee('will remain unsigned')
+            ->assertSee('Certifying Availability of Allotment — the certifying Budget Officer has no registered e-signature')
+            // The two signatures that CAN be stamped are not complained about.
+            ->assertDontSee('the School Head has no registered e-signature')
+            ->assertDontSee('the checking Bookkeeper has no registered e-signature');
+
+        // And the workbook agrees with the page: two images, not three.
+        $parts = $this->partsOf(
+            $this->actingAs($sh)->get(route('wfp.lineitems.export', ['year' => 2026]))->getContent()
+        );
+
+        $this->assertCount(2, $this->partsMatching($parts, 'xl/media/'));
+
+        $drawing = html_entity_decode($parts['xl/drawings/drawing1.xml'], ENT_XML1 | ENT_QUOTES, 'UTF-8');
+        $this->assertStringContainsString('Digital signature of '.$sh->name, $drawing);
+        $this->assertStringContainsString('Digital signature of '.$bookkeeper->name, $drawing);
+        $this->assertStringNotContainsString('Digital signature of '.$budget->name, $drawing);
+    }
+
+    public function test_a_signed_export_without_any_registered_signature_says_so_on_the_page(): void
+    {
+        $sh = $this->schoolHead('Unsigned School');
+
+        $this->line($sh, 1);
+
+        Livewire::actingAs($sh)
+            ->test(WfpLineItemAllotment::class)
+            ->assertSee('the School Head has no registered e-signature')
+            ->assertSee('the report has not been checked yet')
+            ->assertSee('the allotment has not been certified yet');
+
+        // Nothing can be stamped, so the workbook carries no images at all.
+        $parts = $this->partsOf(
+            $this->actingAs($sh)->get(route('wfp.lineitems.export', ['year' => 2026]))->getContent()
+        );
+
+        $this->assertSame([], $this->partsMatching($parts, 'xl/media/'));
+        $this->assertSame([], $this->partsMatching($parts, 'xl/drawings/'));
+    }
+
     public function test_a_check_whose_bookkeeper_lost_school_access_is_not_stamped(): void
     {
         $sh = $this->schoolHead('Stale School');

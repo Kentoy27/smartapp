@@ -80,6 +80,9 @@
             'certification' => $this->certification,
             'checking' => $checking,
             'signatoryStatuses' => $signatoryStatuses,
+            // The sign-off blocks whose e-signature the signed export will
+            // not carry, each with the reason.
+            'missingSignatureLabels' => $missingSignatureLabels,
             // Bookkeeper and Budget sign their own separate blocks.
             'canCheck' => $canCheck,
             'canCertify' => $this->canCertify(),

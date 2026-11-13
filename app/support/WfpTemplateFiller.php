@@ -509,10 +509,10 @@ class WfpTemplateFiller
      * its designation sits in (or, failing the pin, anywhere near) its label —
      * a matching phrase in the letterhead is never a sign-off block.
      *
-     * The printed geometry is fixed by the form: the name sits two rows above
-     * the designation, and the signature row one row above that; the range
-     * handed to the stamper covers the signature row exactly (its bottom edge
-     * is the top of the designation row).
+     * The printed geometry is fixed by the form: the designation is at the
+     * bottom of the block, the printed name directly above it, and the
+     * signing band — the empty rows above the name — where the signature
+     * goes. The range handed to the stamper covers that band.
      *
      * @return array<string, array{stage: string, label: string, title: string, column: string, title_cell: string, name_cell: string, signature_cell: string, range: string, name_row: int, signature_row: int, title_row: int}>
      */
@@ -577,10 +577,24 @@ class WfpTemplateFiller
 
         foreach ($candidates as $candidate) {
             $titleRow = $candidate['row'];
-            $nameRow = $titleRow - 2;
-            $signatureRow = $titleRow - 1;
 
-            if ($nameRow < 1 || $signatureRow < 1) {
+            // The printed name sits directly above its designation and the
+            // signature in the band above it — the order the Per Line Item
+            // report prints, so the two forms look alike. The band is the
+            // empty rows above the name; a template that leaves no room there
+            // keeps the older arrangement (the name two rows above its
+            // designation, the signature in the row between).
+            $nameRow = $titleRow - 1;
+            $bandRow = $nameRow - 2;
+            $bandRows = 2;
+
+            if ($bandRow < 1 || ! self::rowsAreEmpty($byRow, $candidate['column'], $bandRow, $nameRow)) {
+                $nameRow = $titleRow - 2;
+                $bandRow = $titleRow - 1;
+                $bandRows = 1;
+            }
+
+            if ($nameRow < 1 || $bandRow < 1) {
                 continue;
             }
 
@@ -606,15 +620,32 @@ class WfpTemplateFiller
                 'column' => $candidate['column'],
                 'title_cell' => $candidate['column'].$titleRow,
                 'name_cell' => $candidate['column'].$nameRow,
-                'signature_cell' => $candidate['column'].$signatureRow,
-                'range' => $candidate['column'].$signatureRow.':'.$candidate['column'].$titleRow,
+                'signature_cell' => $candidate['column'].$bandRow,
+                'range' => $candidate['column'].$bandRow.':'.$candidate['column'].($bandRow + $bandRows),
                 'name_row' => $nameRow,
-                'signature_row' => $signatureRow,
+                'signature_row' => $bandRow,
                 'title_row' => $titleRow,
             ];
         }
 
         return null;
+    }
+
+    /**
+     * Whether a block's column is empty across a band of rows — the space the
+     * signature and the printed name need.
+     *
+     * @param  array<int, array<string, string>>  $byRow
+     */
+    private static function rowsAreEmpty(array $byRow, string $column, int $fromRow, int $toRow): bool
+    {
+        for ($row = $fromRow; $row <= $toRow; $row++) {
+            if (trim((string) ($byRow[$row][$column] ?? '')) !== '') {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

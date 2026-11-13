@@ -229,6 +229,145 @@ final class WfpAllotment
     }
 
     /**
+     * The report's e-signature slots and the account whose registered profile
+     * signature may be stamped into each one — with the reason a slot stays
+     * unsigned when it may not.
+     *
+     * One source of truth for the .xlsx export and for the page that offers
+     * it, so the workbook can never disagree with what the page promised.
+     *
+     * The three slots are the form's own: the School Head prepares, the
+     * Bookkeeper checks the account titles and codes, and the Budget Officer
+     * certifies the allotment's availability. The SDS approves on paper — this
+     * report has no approval record — so there is no fourth slot.
+     *
+     * A slot with no signer is not an error: the report may simply not be
+     * signed off yet, or the account behind a sign-off may have no signature
+     * uploaded. Either way the reason is what the reader is told.
+     *
+     * @return array<string, array{title: string, signer: ?User, reason: ?string}>
+     */
+    public static function signatureSlots(
+        int $schoolId,
+        int $year,
+        ?string $division = SchoolDivision::ELEMENTARY,
+        ?User $preparedBy = null,
+    ): array {
+        $check = WfpReportCheck::query()
+            ->where('school_id', $schoolId)
+            ->where('year', $year)
+            ->when($division !== null, fn ($query) => $query->where('school_division', $division))
+            ->first();
+
+        $allotment = SchoolAllotment::query()
+            ->where('school_id', $schoolId)
+            ->where('year', $year)
+            ->when($division !== null, fn ($query) => $query->where('school_division', $division))
+            ->first();
+
+        $checker = self::checkingUser($schoolId, $year, $division);
+        $certifier = self::certifyingUser($schoolId, $year, $division);
+
+        // A slot is stampable only when its account still stands behind the
+        // sign-off AND has a readable signature image on file — the same two
+        // conditions the exporter needs, read once.
+        $slot = static function (string $title, ?User $signer, string $reason): array {
+            $signature = $signer?->signatureImage();
+
+            return [
+                'title' => $title,
+                'signer' => $signature === null ? null : $signer,
+                'reason' => $signature === null ? $reason : null,
+            ];
+        };
+
+        return [
+            'prepared' => $slot(
+                'Prepared by',
+                $preparedBy,
+                $preparedBy === null
+                    ? 'the report has no School Head to sign it'
+                    : 'the School Head has no registered e-signature',
+            ),
+            'checked' => $slot(
+                'Checked as to the Correctness of Account Titles and Codes',
+                $checker,
+                self::checkReason($check, $checker),
+            ),
+            'certified' => $slot(
+                'Certifying Availability of Allotment',
+                $certifier,
+                self::certificationReason($allotment, $certifier),
+            ),
+        ];
+    }
+
+    /**
+     * The slots whose e-signature a signed export will not carry, each with
+     * the reason — what the page tells the reader before the download, so a
+     * workbook without signatures is never a surprise.
+     *
+     * @return array<int, string>
+     */
+    public static function missingSignatureLabels(
+        ?int $schoolId,
+        int $year,
+        ?string $division = SchoolDivision::ELEMENTARY,
+        ?User $preparedBy = null,
+    ): array {
+        if ($schoolId === null) {
+            return [];
+        }
+
+        $labels = [];
+
+        foreach (self::signatureSlots($schoolId, $year, $division, $preparedBy) as $slot) {
+            if ($slot['signer'] !== null || $slot['reason'] === null) {
+                continue;
+            }
+
+            $labels[] = $slot['title'].' — '.$slot['reason'];
+        }
+
+        return $labels;
+    }
+
+    /**
+     * Why the Bookkeeper's check cannot be stamped. A report that has not
+     * been checked yet is simply not signed off; a check that exists but
+     * cannot be signed is a different thing, and the reader is told which.
+     */
+    private static function checkReason(?WfpReportCheck $check, ?User $checker): string
+    {
+        if ($check === null || ! $check->isChecked()) {
+            return 'the report has not been checked yet';
+        }
+
+        if ($checker === null) {
+            return 'the Bookkeeper who checked this report can no longer sign it';
+        }
+
+        return 'the checking Bookkeeper has no registered e-signature';
+    }
+
+    /**
+     * Why the Budget Officer's certification cannot be stamped — the
+     * counterpart of {@see checkReason()}.
+     */
+    private static function certificationReason(?SchoolAllotment $allotment, ?User $certifier): string
+    {
+        if ($allotment === null || ! $allotment->isCertified()) {
+            return 'the allotment has not been certified yet';
+        }
+
+        if ($certifier === null) {
+            return 'the Budget Officer who certified this allotment can no longer sign it';
+        }
+
+        return 'the certifying Budget Officer has no registered e-signature';
+    }
+
+    /**
      * The current signatory status for the three required WFP checkpoints on a
      * school's report: Bookkeeper check, Budget certification, and final WFP
      * approval. The view reads this summary so the SH sees the same saved

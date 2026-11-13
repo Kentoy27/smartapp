@@ -243,6 +243,49 @@ class WfpExportOptionsTest extends TestCase
         }
     }
 
+    public function test_every_signature_is_stamped_in_the_same_fixed_box_above_the_printed_name(): void
+    {
+        $template = $this->signatureTemplate();
+
+        try {
+            [$head, $plan, $bookkeeper, $budget, $superadmin] = $this->approvedPlanWithWorkflowSigners();
+
+            $response = $this->actingAs($head)->get(route('wfp.plans.export', ['plan' => $plan->id]));
+            $response->assertOk();
+
+            $parts = $this->workbookParts((string) $response->getContent());
+            $drawing = $parts['xl/drawings/drawing1.xml'];
+
+            // The form's sign-off columns are narrow, so a signature
+            // stretched to the cell it lands in is a flat line or a smudge.
+            // Every signature is stamped in the same fixed box instead — the
+            // size the Per Line Item report gives its signatures — and the
+            // box may reach into the empty columns beside the block.
+            preg_match_all('/<a:ext cx="(\d+)" cy="(\d+)"\/>/', $drawing, $extents);
+            $this->assertCount(4, $extents[1]);
+            $this->assertSame([$extents[1][0]], array_values(array_unique($extents[1])));
+            $this->assertSame([$extents[2][0]], array_values(array_unique($extents[2])));
+
+            // The picture is stamped in the signing band, and the printed
+            // name is below it — the order the Per Line Item report prints.
+            $this->assertSame(1, preg_match(
+                '/<xdr:from><xdr:col>\d+<\/xdr:col><xdr:colOff>\d+<\/xdr:colOff><xdr:row>(\d+)<\/xdr:row>/',
+                $drawing,
+                $anchor
+            ));
+
+            $sheet = $parts['xl/worksheets/sheet1.xml'];
+            $nameRow = ((int) $anchor[1]) + 3;
+
+            $this->assertMatchesRegularExpression(
+                '/<c r="B'.$nameRow.'"[^>]*>.*'.preg_quote($head->name, '/').'/s',
+                $sheet
+            );
+        } finally {
+            @unlink(storage_path('forms/'.$template));
+        }
+    }
+
     public function test_bookkeeper_and_budget_can_export_a_plan_with_the_school_heads_signature(): void
     {
         $template = $this->signatureTemplate();

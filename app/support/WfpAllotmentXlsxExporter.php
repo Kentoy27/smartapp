@@ -119,11 +119,9 @@ final class WfpAllotmentXlsxExporter
         // the School Head prepares, the Bookkeeper checks, the Budget Officer
         // certifies. The SDS has no approval record for this report. Resolved
         // only for a signed export, so an unsigned download does no extra work.
-        $signers = $includeSignatures ? [
-            'prepared' => $preparedBy,
-            'checked' => WfpAllotment::checkingUser($schoolId, $year, $division),
-            'certified' => WfpAllotment::certifyingUser($schoolId, $year, $division),
-        ] : [];
+        $signers = $includeSignatures
+            ? WfpAllotment::signatureSlots($schoolId, $year, $division, $preparedBy)
+            : [];
 
         /** @var array<int, array<string, array{style: int, kind: string, value: string|float|null}>> $cells */
         $cells = [];
@@ -355,7 +353,7 @@ final class WfpAllotmentXlsxExporter
         $stamps = [];
 
         foreach ($signatureRanges as $slot => $range) {
-            $signer = $signers[$slot] ?? null;
+            $signer = $signers[$slot]['signer'] ?? null;
 
             if (! $signer instanceof User) {
                 continue;

@@ -18,6 +18,9 @@
        $allocation    array     allotted / consumed / remaining / percent
        $certification ?array    the Budget office's certification
        $checking      ?array    the Bookkeeper's check, or null while unchecked
+       $missingSignatureLabels array the sign-off blocks whose e-signature the
+                                   signed export will not carry, each with the
+                                   reason it is missing
        $canCheck      bool      whether the viewer may give the check (Bookkeeper)
        $canCertify    bool      whether the viewer may certify the allotment (Budget)
        $preparedBy    ?User     the school's School Head
@@ -155,6 +158,19 @@
     </section>
 @endif
 
+@if (! empty($missingSignatureLabels ?? []))
+    {{-- THE E-SIGNATURES THE SIGNED EXPORT WILL NOT CARRY: a signature is
+         stamped only when the account behind the sign-off still stands
+         behind it AND holds a registered signature image. The page says which
+         blocks those are before the download, so a workbook without
+         signatures is never a surprise. --}}
+    <p class="mem-banner mem-banner--warn wfp-allotment-export-note" role="status">
+        These sections have no applicable registered e-signature and will
+        remain unsigned:
+        {{ implode('; ', $missingSignatureLabels) }}.
+    </p>
+@endif
+
 <div class="card">
     <div class="card-head users-toolbar wfp-allotment-toolbar">
         @if ($schoolOptions !== null)
@@ -253,7 +269,10 @@
             </select>
         </label>
 
-        <div class="ac-toolbar-actions">
+        <div
+            class="ac-toolbar-actions"
+            x-data="{ missing: @js($missingSignatureLabels ?? []) }"
+        >
             {{-- The report is a printed form, so printing it is the action:
                  the browser's own dialog is the one that puts the letterhead
                  on paper. --}}
@@ -272,12 +291,15 @@
                  a file download, and there is no page to morph into. The year
                  the reader is on travels with each one. The signed copy stamps
                  the registered profile signatures of the workflow signers; the
-                 unsigned copy keeps the printed form for wet signing. --}}
+                 unsigned copy keeps the printed form for wet signing. A
+                 signature that cannot be stamped is announced before the
+                 download, not discovered in the file. --}}
             @if ($exportSignedUrl)
                 <a
                     class="ac-import-btn"
                     href="{{ $exportSignedUrl }}"
                     title="Download this report as Excel with the signers’ e-signatures"
+                    x-on:click.prevent="if (missing.length === 0 || window.confirm('These sections have no applicable registered e-signature and will remain unsigned: ' + missing.join('; ') + '. Continue with the available signatures?')) window.location.href = $el.href"
                 >
                     <x-icon name="file-spreadsheet" :size="16" />
                     <span>Export with E-Signatures</span>

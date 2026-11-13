@@ -186,6 +186,12 @@ final class OpcrfSignatureStamper
     /**
      * Stamp an image into a fixed range in the workbook's first worksheet.
      *
+     * With `$widthPx`/`$heightPx` the picture is placed in a box of exactly
+     * that size, anchored at the range's top-left corner — the size the
+     * signer deserves rather than the size of whatever cell it lands in. The
+     * box may reach into the cells beside the range: a signature in a narrow
+     * column still has to be legible.
+     *
      * @throws RuntimeException when the range is invalid or the workbook is unreadable
      */
     public static function stampAtRange(
@@ -193,7 +199,9 @@ final class OpcrfSignatureStamper
         string $signatureBytes,
         string $range,
         string $extension = 'png',
-        ?string $signerName = null
+        ?string $signerName = null,
+        ?int $widthPx = null,
+        ?int $heightPx = null
     ): ?string {
         if (trim($signatureBytes) === '') {
             return null;
@@ -206,7 +214,7 @@ final class OpcrfSignatureStamper
             return null;
         }
 
-        $anchor = self::rangeAnchor($range, $parts[$sheetPart]);
+        $anchor = self::rangeAnchor($range, $parts[$sheetPart], $widthPx, $heightPx);
         $format = self::detectExtension($signatureBytes, $extension);
         $mediaPart = self::freeMediaPart($parts, $format);
         $parts[$mediaPart] = $signatureBytes;
@@ -286,9 +294,13 @@ final class OpcrfSignatureStamper
      * (O, Z, AL) are narrow, and the signature covers one column's width on
      * one row. Only a range that covers nothing is refused.
      *
+     * With a size given, the anchor describes a box of exactly that many
+     * pixels anchored at the range's top-left corner instead of the range's
+     * own cells — see sizeAnchor().
+     *
      * @return array{from_col: int, from_row: int, to_col: int, to_row: int, first_column: string, last_column: string, first_row: int, last_row: int, geometry: array<string, mixed>}
      */
-    private static function rangeAnchor(string $range, string $sheetXml): array
+    private static function rangeAnchor(string $range, string $sheetXml, ?int $widthPx = null, ?int $heightPx = null): array
     {
         if (preg_match('/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/', $range, $matches) !== 1) {
             throw new RuntimeException('The signature range is invalid.');
@@ -305,17 +317,93 @@ final class OpcrfSignatureStamper
             throw new RuntimeException('The signature range must cover a positive worksheet area.');
         }
 
-        return [
+        $anchor = [
             'from_col' => self::columnIndex($firstColumn) - 1,
             'from_row' => $firstRow - 1,
             'to_col' => self::columnIndex($lastColumn),
             'to_row' => $lastRow - 1,
+            'from_col_off' => 0,
+            'from_row_off' => 0,
+            'to_col_off' => 0,
+            'to_row_off' => 0,
             'first_column' => $firstColumn,
             'last_column' => $lastColumn,
             'first_row' => $firstRow,
             'last_row' => $lastRow - 1,
             'geometry' => self::sheetGeometry($sheetXml, $firstRow, $lastRow - 1),
         ];
+
+        if ($widthPx !== null && $heightPx !== null) {
+            return self::sizeAnchor($anchor, $widthPx, $heightPx);
+        }
+
+        return $anchor;
+    }
+
+    /**
+     * The anchor a box of $widthPx × $heightPx describes: the range's
+     * top-left corner and the corner that far away from it.
+     *
+     * The box is measured in the sheet's own units — the columns' widths and
+     * the rows' heights — and may reach past the range into the cells beside
+     * it, which is the point: a signature wider than the column it is
+     * printed in still has to be legible.
+     *
+     * @param  array{from_col: int, from_row: int, to_col: int, to_row: int, geometry: array<string, mixed>}  $anchor
+     * @return array<string, mixed>
+     */
+    private static function sizeAnchor(array $anchor, int $widthPx, int $heightPx): array
+    {
+        // The height never reaches past the band the signature is printed in:
+        // a signature that covers the name below it is worse than a smaller
+        // one. The width may — the cells beside the block are empty, and
+        // that is where the room for a readable signature comes from.
+        $bandHeightPx = (int) round(self::bandHeightPoints($anchor) * 96 / 72);
+        $heightPx = min($heightPx, max(1, $bandHeightPx));
+
+        // Across: the from column's own width, then the next column's…
+        $column = $anchor['from_col'];
+        $offsetPx = 0;
+        $remaining = max(0, $widthPx);
+
+        while ($remaining > 0 && $column < 16383) {
+            $available = self::columnWidthPixels($anchor, $column + 1) - $offsetPx;
+
+            if ($remaining <= $available) {
+                break;
+            }
+
+            $remaining -= $available;
+            $column++;
+            $offsetPx = 0;
+        }
+
+        $anchor['to_col'] = $column;
+        $anchor['to_col_off'] = (int) round(($offsetPx + $remaining) * self::EMU_PER_PIXEL);
+
+        // Down: the same walk down the rows, whose heights are in points.
+        $row = $anchor['from_row'];
+        $offsetPx = 0;
+        $remaining = max(0, $heightPx);
+
+        while ($remaining > 0 && $row < 1048575) {
+            $available = (int) round(self::rowHeightPoints($anchor, $row + 1) * 96 / 72) - $offsetPx;
+
+            if ($remaining <= $available) {
+                break;
+            }
+
+            $remaining -= $available;
+            $row++;
+            $offsetPx = 0;
+        }
+
+        $anchor['to_row'] = $row;
+        $anchor['to_row_off'] = (int) round(($offsetPx + $remaining) * self::EMU_PER_PIXEL);
+        $anchor['width_px'] = $widthPx;
+        $anchor['height_px'] = $heightPx;
+
+        return $anchor;
     }
 
     /**
@@ -783,12 +871,12 @@ final class OpcrfSignatureStamper
 
         $picture = '<'.$xdr.':twoCellAnchor editAs="oneCell">'
             .'<'.$xdr.':from>'
-            .'<'.$xdr.':col>'.$anchor['from_col'].'</'.$xdr.':col><'.$xdr.':colOff>0</'.$xdr.':colOff>'
-            .'<'.$xdr.':row>'.$anchor['from_row'].'</'.$xdr.':row><'.$xdr.':rowOff>0</'.$xdr.':rowOff>'
+            .'<'.$xdr.':col>'.$anchor['from_col'].'</'.$xdr.':col><'.$xdr.':colOff>'.($anchor['from_col_off'] ?? 0).'</'.$xdr.':colOff>'
+            .'<'.$xdr.':row>'.$anchor['from_row'].'</'.$xdr.':row><'.$xdr.':rowOff>'.($anchor['from_row_off'] ?? 0).'</'.$xdr.':rowOff>'
             .'</'.$xdr.':from>'
             .'<'.$xdr.':to>'
-            .'<'.$xdr.':col>'.$anchor['to_col'].'</'.$xdr.':col><'.$xdr.':colOff>0</'.$xdr.':colOff>'
-            .'<'.$xdr.':row>'.$anchor['to_row'].'</'.$xdr.':row><'.$xdr.':rowOff>0</'.$xdr.':rowOff>'
+            .'<'.$xdr.':col>'.$anchor['to_col'].'</'.$xdr.':col><'.$xdr.':colOff>'.($anchor['to_col_off'] ?? 0).'</'.$xdr.':colOff>'
+            .'<'.$xdr.':row>'.$anchor['to_row'].'</'.$xdr.':row><'.$xdr.':rowOff>'.($anchor['to_row_off'] ?? 0).'</'.$xdr.':rowOff>'
             .'</'.$xdr.':to>'
             .'<'.$xdr.':pic>'
             .'<'.$xdr.':nvPicPr>'
@@ -825,9 +913,19 @@ final class OpcrfSignatureStamper
      * The band's measured size in EMU, so a viewer that reads the picture's
      * own extent agrees with the anchor: the covered columns' widths (Excel's
      * characters-to-pixels rule) and the covered rows' heights.
+     *
+     * A box of a fixed size is measured in pixels instead — the size the
+     * caller asked for, which is what the picture was placed in.
      */
     private static function bandExtent(array $anchor): array
     {
+        if (isset($anchor['width_px'], $anchor['height_px'])) {
+            return [
+                'width' => $anchor['width_px'] * self::EMU_PER_PIXEL,
+                'height' => $anchor['height_px'] * self::EMU_PER_PIXEL,
+            ];
+        }
+
         return [
             'width' => self::bandWidthPixels($anchor) * self::EMU_PER_PIXEL,
             'height' => self::bandHeightPoints($anchor) * self::EMU_PER_POINT,

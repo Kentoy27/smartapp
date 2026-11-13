@@ -3592,7 +3592,8 @@ a.mem-month-tab:hover .mem-month-tab__total { color: var(--text-muted); }
 
 /* The report summary is application context, not part of the printed form. */
 @media print {
-    .allotment-summary { display: none !important; }
+    .allotment-summary,
+    .wfp-allotment-export-note { display: none !important; }
 }
 
 /* ---------- LINE ITEM CHECKING ----------

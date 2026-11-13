@@ -39,6 +39,7 @@
         'certification' => $this->certification,
         'checking' => $checking,
         'signatoryStatuses' => $signatoryStatuses,
+        'missingSignatureLabels' => $missingSignatureLabels,
         'canCheck' => false,
         'preparedBy' => $preparedBy,
         'schoolOptions' => null,
