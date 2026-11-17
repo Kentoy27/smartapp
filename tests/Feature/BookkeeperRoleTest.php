@@ -11,6 +11,7 @@ use App\Livewire\UsersTable;
 use App\Livewire\WfpGenerateButton;
 use App\Livewire\WfpLineItemAllotment;
 use App\Livewire\WfpManager;
+use App\Livewire\WfpPreview;
 use App\Livewire\WfpSignatoryActions;
 use App\Models\District;
 use App\Models\MonthlyExpenditureItem;
@@ -135,6 +136,36 @@ class BookkeeperRoleTest extends TestCase
         return $parts;
     }
 
+    /**
+     * A generated plan for the head's school, with one line on it — the
+     * document the Bookkeeper previews.
+     */
+    private function planFor(User $head, string $activity = 'Procure supplies'): WfpPlan
+    {
+        $plan = WfpPlan::create([
+            'school_id' => $head->school_id,
+            'school_division' => $head->activeDivision(),
+            'year' => 2026,
+            'status' => WfpPlan::STATUS_GENERATED,
+        ]);
+
+        $plan->items()->create([
+            'group_key' => 'operations-1',
+            'position' => 1,
+            'month' => 3,
+            'section' => 'operations',
+            'objective' => 'To keep the school running',
+            'program_activity' => $activity,
+            'physical_target' => 10,
+            'physical_unit' => 'ream',
+            'financial_target' => 2500,
+            'account_title' => 'Office Supplies Expenses',
+            'account_code' => '5020301000',
+        ]);
+
+        return $plan;
+    }
+
     /* ------------------------------------------------------------ the role */
 
     public function test_an_administrator_can_create_a_bookkeeper_attached_to_a_school(): void
@@ -255,6 +286,9 @@ class BookkeeperRoleTest extends TestCase
             ->assertSee('WFP')
             ->assertSee('Monthly Expenditure')
             ->assertSee('Per Line Item Expenditure')
+            // The generated plan, read-only: the School Head's Excel-based
+            // generation, seen from the Bookkeeper's side.
+            ->assertSee('WFP Preview')
             // The Budget-only destinations are not the Bookkeeper's…
             ->assertDontSee('Work & Financial Plan')
             ->assertDontSee('School Allotments')
@@ -277,6 +311,40 @@ class BookkeeperRoleTest extends TestCase
         $this->actingAs($bookkeeper)->get(route('wfp.matrices.index'))->assertOk()->assertSee('Monthly Expenditure');
         $this->actingAs($bookkeeper)->get(route('wfp.lineitems.index'))->assertOk()->assertSee('Per Line Item Expenditure');
         $this->actingAs($bookkeeper)->get(route('budget.allotments.index'))->assertNotFound();
+    }
+
+    public function test_a_bookkeeper_previews_the_generated_wfp_of_its_assigned_schools_only(): void
+    {
+        $home = $this->school();
+        $bookkeeper = $this->bookkeeper($home);
+        $head = $this->schoolHead($home);
+        $outsideHead = $this->schoolHead($this->school());
+
+        $plan = $this->planFor($head);
+        $outsidePlan = $this->planFor($outsideHead);
+
+        // The page opens on the assigned school's plan — and on no other.
+        $this->actingAs($bookkeeper)
+            ->get(route('wfp.preview.index'))
+            ->assertOk()
+            ->assertSee('Generated Work and Financial Plans')
+            ->assertSee($home->name)
+            ->assertDontSee($outsideHead->school->name);
+
+        // The plan itself opens, read-only: the enrichment fields are the
+        // School Head's, and the Bookkeeper only reads them.
+        Livewire::actingAs($bookkeeper)
+            ->test(WfpPreview::class)
+            ->call('selectPlan', $plan->id)
+            ->assertSee('Work and Financial Plan — CY 2026')
+            ->assertSee('Procure supplies')
+            ->assertDontSee('Save changes');
+
+        // A plan outside the assignment list is refused, not shown.
+        Livewire::actingAs($bookkeeper)
+            ->test(WfpPreview::class)
+            ->call('selectPlan', $outsidePlan->id)
+            ->assertNotFound();
     }
 
     public function test_a_bookkeeper_reads_the_lines_of_assigned_schools_only(): void

@@ -1382,7 +1382,7 @@
                                 <span class="mem-line-months__hint">
                                     {{ $editingKey === null
                                         ? 'The line is added to every month checked.'
-                                        : 'Checked months keep the line — unchecking one removes it there.' }}
+                                        : 'Only this month is edited — unchecking a month removes the line there.' }}
                                 </span>
                             </span>
 

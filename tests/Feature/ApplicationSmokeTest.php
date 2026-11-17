@@ -31,6 +31,7 @@ use App\Livewire\WfpLookupTable;
 use App\Livewire\WfpManager;
 use App\Livewire\WfpMyUploadsList;
 use App\Livewire\WfpPlanEditor;
+use App\Livewire\WfpPreview;
 use App\Livewire\WfpUpload;
 use App\Models\District;
 use App\Models\MonthlyExpenditureMatrix;
@@ -129,6 +130,7 @@ class ApplicationSmokeTest extends TestCase
             '/api/admin/account-classifications',
             '/movs',
             '/wfp',
+            '/wfp/preview',
             '/wfp/line-items',
             '/wfp/line-items/export',
             '/budget/allotments',
@@ -260,6 +262,7 @@ class ApplicationSmokeTest extends TestCase
             WfpGenerateButton::class,
             WfpLineItemAllotment::class,
             WfpMyUploadsList::class,
+            WfpPreview::class,
         ];
 
         foreach ($staffComponents as $component) {
@@ -335,6 +338,7 @@ class ApplicationSmokeTest extends TestCase
             OpcrfMovs::class,
             BudgetLineItemChecker::class,
             BudgetLineItemAllotment::class,
+            WfpPreview::class,
         ];
 
         foreach ($bookkeeperComponents as $component) {
@@ -546,6 +550,7 @@ class ApplicationSmokeTest extends TestCase
             WfpPlanEditor::class,
             WfpGenerateButton::class,
             WfpMyUploadsList::class,
+            WfpPreview::class,
             PsdsMonitoring::class,
             SchoolAllotmentManager::class,
             BudgetAllotmentMonitor::class,

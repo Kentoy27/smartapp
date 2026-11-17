@@ -434,7 +434,7 @@ class Sidebar extends Component
                 'route' => 'budget.lineitems.index',
                 // The group lights up on any page it holds, like the Budget
                 // office's copy of it.
-                'active' => 'budget.*',
+                'active' => ['budget.*', 'wfp.index', 'wfp.preview.index'],
                 'path' => 'wfp',
                 'icon' => 'chart-column',
                 'section' => 'Files',
@@ -463,6 +463,18 @@ class Sidebar extends Component
                         'title' => 'Read each school\'s annual MOOE allotment report and sign it as checked',
                         'url' => route('budget.per-line-item.index'),
                         'route' => 'budget.per-line-item.*',
+                    ],
+                    // The generated plan itself, read-only: the School Head's
+                    // Excel-based generation of the WFP, seen from the
+                    // Bookkeeper's side so the account titles and codes can be
+                    // checked against the plan that carries them. It sits last
+                    // because it is the document the pages above it produce.
+                    [
+                        'key' => 'bookkeeper-wfp-preview',
+                        'label' => 'WFP Preview',
+                        'title' => 'Preview the generated Work and Financial Plan of your assigned schools',
+                        'url' => route('wfp.preview.index'),
+                        'route' => 'wfp.preview.index',
                     ],
                 ],
             ];

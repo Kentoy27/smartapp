@@ -110,6 +110,31 @@ class WfpPlan extends Model
     }
 
     /**
+     * The plans this account may read: the plans of the division it is
+     * working in, narrowed to the schools on a Bookkeeper's assignment list.
+     *
+     * This is the one definition of "the plans in scope", so the sign-off
+     * list and the preview list can never disagree about whose plans these
+     * are. The Bookkeeper's assignment is read from the database here, never
+     * taken from a request.
+     */
+    public function scopeVisibleTo(Builder $query, ?User $user): Builder
+    {
+        if ($user === null) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        $visible = $user->visibleSchoolIds();
+
+        return $query
+            ->where('school_division', $user->activeDivision())
+            ->when(
+                $visible !== null,
+                fn (Builder $scoped) => $scoped->whereIn('school_id', $visible),
+            );
+    }
+
+    /**
      * The plan's lines grouped by `group_key`, preserving position order, so
      * every read-only rendering reads as one WFP row per grouping.
      *
@@ -479,10 +504,17 @@ class WfpPlan extends Model
      * The annual financial target: the sum of every line's financial target,
      * rounded to two decimals (SQLite hands back a float from sum(), so the
      * rounding happens here rather than at the database).
+     *
+     * The loaded relation is used when there is one, so a page that lists
+     * several plans totals them all without a query per plan.
      */
     public function annualFinancialTotal(): float
     {
-        return round((float) $this->items()->sum('financial_target'), 2);
+        $items = $this->relationLoaded('items')
+            ? $this->items
+            : $this->items()->get();
+
+        return round((float) $items->sum('financial_target'), 2);
     }
 
     /** How many lines still carry an unreviewed flag. */
