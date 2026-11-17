@@ -80,11 +80,7 @@ class WfpManager extends Component
 
         return WfpPlan::query()
             ->with('school')
-            ->where('school_division', $user->activeDivision())
-            ->when(
-                $user->visibleSchoolIds() !== null,
-                fn ($query) => $query->whereIn('school_id', $user->visibleSchoolIds()),
-            )
+            ->visibleTo($user)
             ->orderByDesc('year')
             ->orderBy('school_id')
             ->paginate(15);

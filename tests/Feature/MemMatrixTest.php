@@ -889,13 +889,13 @@ class MemMatrixTest extends TestCase
             ->assertDontSee('Apply to months')
             ->set('lineRepeated', 'yes')
             ->assertSee('Apply to months')
-            ->assertSee('Checked months keep the line — unchecking one removes it there.')
+            ->assertSee('Only this month is edited — unchecking a month removes the line there.')
             // The month holding the line opens checked, like any other month
             // that holds it.
             ->assertSet('lineMonths', [3]);
     }
 
-    public function test_editing_a_line_updates_the_existing_copy_in_a_checked_month(): void
+    public function test_editing_a_line_leaves_the_copy_in_a_checked_month_untouched(): void
     {
         $sh = $this->schoolHead();
         $january = $this->matrixFor($sh, month: 1);
@@ -908,6 +908,7 @@ class MemMatrixTest extends TestCase
             'resource_kind' => 'MOOE',
             'quantity' => 1,
             'unit_cost' => 1500,
+            'calculated_total' => 1500,
         ]);
         $feb = $february->items()->create([
             'position' => 1,
@@ -916,6 +917,7 @@ class MemMatrixTest extends TestCase
             'resource_kind' => 'MOOE',
             'quantity' => 1,
             'unit_cost' => 1500,
+            'calculated_total' => 1500,
         ]);
 
         WfpReportCheck::create([
@@ -931,18 +933,22 @@ class MemMatrixTest extends TestCase
             ->set('lineMonths', [1, 2])
             ->call('saveLineFromModal')
             ->assertHasNoErrors()
-            ->assertSet('successMessage', 'Line saved to Jan and Feb 2026.');
+            // Nothing outside this month was written, so there is nothing to
+            // announce.
+            ->assertSet('successMessage', null);
 
-        // February's copy is the same row, updated in place — not re-added.
+        // The edit belongs to January: February keeps the copy it already has
+        // rather than receiving this month's values.
         $this->assertSame(1, $february->items()->count());
-        $this->assertSame($feb->id, $feb->fresh()->id);
-        $this->assertEquals(2000.0, (float) $feb->fresh()->unit_cost);
-        $this->assertEquals(2000.0, (float) $feb->fresh()->calculated_total);
+        $this->assertEquals(1500.0, (float) $feb->fresh()->unit_cost);
+        $this->assertEquals(1500.0, (float) $feb->fresh()->calculated_total);
+        $this->assertEquals(2000.0, (float) $jan->fresh()->unit_cost);
+        $this->assertEquals(2000.0, (float) $jan->fresh()->calculated_total);
 
-        // Both written months are bumped, so a WFP mapped from the old versions
-        // reads as out of date.
+        // Only the month actually written is bumped, so a WFP mapped from the
+        // other month's version still reads as current.
         $this->assertSame(2, $january->fresh()->version);
-        $this->assertSame(2, $february->fresh()->version);
+        $this->assertSame(1, $february->fresh()->version);
 
         // Writing another month of the year still invalidates the check.
         $this->assertNull(WfpReportCheck::first());
@@ -1118,7 +1124,8 @@ class MemMatrixTest extends TestCase
             ->set('lineMonths', [1, 2])
             ->call('saveLineFromModal')
             ->assertHasNoErrors()
-            ->assertSet('successMessage', 'Line saved to Jan and Feb 2026. Removed from Mar 2026.');
+            // February keeps its own copy; only March loses the line.
+            ->assertSet('successMessage', 'Line saved to Jan 2026. Removed from Mar 2026.');
 
         $this->assertSame(0, $march->items()->count());
         $this->assertSame(1, $february->items()->count());
@@ -1165,52 +1172,59 @@ class MemMatrixTest extends TestCase
             ->assertSet('lineMonths', [1, 2])
             ->call('saveLineFromModal')
             ->assertHasNoErrors()
-            // ...and saving never deletes a line it does not claim.
-            ->assertSet('successMessage', 'Line saved to Jan and Feb 2026.');
+            // ...and saving never deletes a line it does not claim. Nothing
+            // outside this month was written, so nothing is announced.
+            ->assertSet('successMessage', null);
 
         $this->assertSame(1, $march->items()->count());
         $this->assertEquals(999.0, (float) $march->items()->firstOrFail()->unit_cost);
         $this->assertSame(1, $march->fresh()->version);
     }
 
-    public function test_reopening_the_edit_modal_checks_the_months_the_line_was_applied_to(): void
+    public function test_editing_one_month_with_apply_to_all_leaves_every_other_month_untouched(): void
     {
         $sh = $this->schoolHead();
-        $january = $this->matrixFor($sh, month: 1);
-        $february = $this->matrixFor($sh, month: 2);
+        $matrices = [];
 
-        $jan = $january->items()->create([
-            'position' => 1,
-            'section' => 'operations',
-            'activity_description' => 'Monthly internet',
-            'quantity' => 1,
-            'unit_cost' => 1500,
-            'calculated_total' => 1500,
-        ]);
-        $february->items()->create([
-            'position' => 1,
-            'section' => 'operations',
-            'activity_description' => 'Monthly internet',
-            'quantity' => 1,
-            'unit_cost' => 1500,
-            'calculated_total' => 1500,
-        ]);
+        for ($month = 1; $month <= 12; $month++) {
+            $matrices[$month] = $this->matrixFor($sh, month: $month);
 
-        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
-            // The months already holding this line open checked, so an edit
-            // keeps applying there without re-ticking them.
+            $matrices[$month]->items()->create([
+                'position' => 1,
+                'section' => 'operations',
+                'activity_description' => 'Monthly internet',
+                'quantity' => 1,
+                'unit_cost' => 1500,
+                'calculated_total' => 1500,
+            ]);
+        }
+
+        $jan = $matrices[1]->items()->firstOrFail();
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrices[1]])
             ->call('openEditModal', 'item-'.$jan->id)
-            ->assertSet('lineRepeated', 'yes')
-            ->assertSet('lineMonths', [1, 2])
+            // The line lives in every month, so the picker opens with them
+            // all checked...
+            ->assertSet('lineMonths', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
             ->set('lineForm.unit_cost', '2000')
+            ->call('applyLineToAllMonths')
             ->call('saveLineFromModal')
             ->assertHasNoErrors()
-            // Saving and opening the line again keeps them checked.
-            ->call('openEditModal', 'item-'.$jan->id)
-            ->assertSet('lineMonths', [1, 2]);
+            // ...but only January was written, so nothing is announced.
+            ->assertSet('successMessage', null);
 
-        $this->assertEquals(2000.0, (float) $january->items()->firstOrFail()->unit_cost);
-        $this->assertEquals(2000.0, (float) $february->items()->firstOrFail()->unit_cost);
+        $this->assertEquals(2000.0, (float) $matrices[1]->items()->firstOrFail()->unit_cost);
+        $this->assertSame(2, $matrices[1]->fresh()->version);
+
+        foreach ($matrices as $month => $matrix) {
+            if ($month === 1) {
+                continue;
+            }
+
+            // Every other month keeps its own copy of the line, untouched.
+            $this->assertEquals(1500.0, (float) $matrix->items()->firstOrFail()->unit_cost);
+            $this->assertSame(1, $matrix->fresh()->version);
+        }
     }
 
     public function test_reopening_the_edit_modal_does_not_check_a_month_whose_copy_diverged(): void

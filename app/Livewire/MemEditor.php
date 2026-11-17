@@ -764,12 +764,12 @@ class MemEditor extends Component
 
     /**
      * Validate the modal's line and write it to the checked months. Adding
-     * copies the line in; editing keeps the line only in the checked months —
-     * this month's row is updated (or deleted when its checkbox is cleared),
-     * a checked sibling month's exact copy is updated (or a copy appended),
-     * and an unchecked sibling month's exact copy is removed. This month goes
-     * through persist(), so the optimistic lock applies; every written month
-     * is bumped.
+     * copies the line in; editing changes only the month being edited — this
+     * month's row is updated (or deleted when its checkbox is cleared), a
+     * checked sibling month keeps the copy it already holds and receives one
+     * only when it has none, and an unchecked sibling month's exact copy is
+     * removed. This month goes through persist(), so the optimistic lock
+     * applies; every written month is bumped.
      */
     public function saveLineFromModal(): void
     {
@@ -882,17 +882,26 @@ class MemEditor extends Component
             $this->closeLineModal();
 
             $removed = [];
+            $copiedTo = [];
 
-            $saved = DB::transaction(function () use ($row, $existing, $siblings, $months, $dropped, $currentMonth, $extraRows, &$removed): bool {
+            $saved = DB::transaction(function () use ($row, $existing, $siblings, $months, $dropped, $currentMonth, $extraRows, &$removed, &$copiedTo): bool {
                 if (! $this->persist()) {
                     return false;
                 }
 
-                $this->applyEditToMonths($row, $existing, $siblings);
+                $copiedTo = $this->applyEditToMonths($row, $existing, $siblings);
 
                 foreach ($extraRows as $extraRow) {
                     $this->copyLineToMonths($extraRow, $siblings);
+
+                    $copiedTo = array_merge(
+                        $copiedTo,
+                        $siblings->map(fn (MonthlyExpenditureMatrix $matrix): int => (int) $matrix->month)->all(),
+                    );
                 }
+
+                $copiedTo = array_values(array_unique($copiedTo));
+                sort($copiedTo);
 
                 $removed = $this->removeLineFromUncheckedMonths($existing, $months);
 
@@ -908,13 +917,20 @@ class MemEditor extends Component
                 return;
             }
 
-            // The current month already shows its result in the grid; the
-            // alert is for the months this page does not show.
-            if ($siblings->isNotEmpty() || $removed !== []) {
-                $message = 'Line saved to '.$this->monthList($months).' '.$this->matrix->year.'.';
+            // The current month already shows its result in the grid; the alert
+            // is for the months this page does not show. A month that only kept
+            // the copy it already held was not written, so it is not reported.
+            if ($copiedTo !== [] || $removed !== []) {
+                $savedMonths = $inCurrentMonth ? array_merge([$currentMonth], $copiedTo) : $copiedTo;
+                $savedMonths = array_values(array_unique($savedMonths));
+                sort($savedMonths);
+
+                $message = $savedMonths === []
+                    ? ''
+                    : 'Line saved to '.$this->monthList($savedMonths).' '.$this->matrix->year.'.';
 
                 if ($removed !== []) {
-                    $message .= ' Removed from '.$this->monthList($removed).' '.$this->matrix->year.'.';
+                    $message .= ($message === '' ? '' : ' ').'Removed from '.$this->monthList($removed).' '.$this->matrix->year.'.';
                 }
 
                 $this->successMessage = $message;
@@ -1058,67 +1074,57 @@ class MemEditor extends Component
     }
 
     /**
-     * Apply an edited line to each checked sibling month. A month that still
-     * holds an exact copy of the line as it was before this edit has that copy
-     * updated in place; a month without one receives an appended copy. "Exact
-     * copy" is compared on the stored columns, so a copy someone has already
-     * changed there keeps its own values — it is never silently overwritten.
+     * Add an edited line to each checked sibling month that does not already
+     * hold it. A month holding an exact copy of the line as it was before this
+     * edit keeps that copy untouched: an edit belongs to the month it was made
+     * in, so saving it never rewrites the other months. A copy someone has
+     * already changed there keeps its own values for the same reason; the
+     * edited line is only appended when the picker is told to add it to a
+     * month that has no copy at all.
      *
      * @param  array<string, mixed>  $row  the edited line
      * @param  MonthlyExpenditureItem|null  $snapshot  the line as last saved
      * @param  iterable<int, MonthlyExpenditureMatrix>  $matrices
+     * @return array<int, int> the months a copy was added to
      */
-    private function applyEditToMonths(array $row, ?MonthlyExpenditureItem $snapshot, iterable $matrices): void
+    private function applyEditToMonths(array $row, ?MonthlyExpenditureItem $snapshot, iterable $matrices): array
     {
         $fingerprint = $snapshot === null ? null : self::copyFingerprint($snapshot);
 
+        $added = [];
+
         foreach ($matrices as $matrix) {
-            $copies = $fingerprint === null
-                ? collect()
-                : $matrix->items()->get()->filter(
-                    fn (MonthlyExpenditureItem $item): bool => self::copyFingerprint($item) === $fingerprint,
-                );
+            $holdsLine = $fingerprint !== null && $matrix->items()->get()->contains(
+                fn (MonthlyExpenditureItem $item): bool => self::copyFingerprint($item) === $fingerprint,
+            );
 
-            $written = false;
-
-            if ($copies->isEmpty()) {
-                $position = (int) ($matrix->items()->max('position') ?? 0) + 1;
-
-                $item = new MonthlyExpenditureItem(self::itemAttributes($row, (int) $matrix->id, $position));
-                $item->syncTotal();
-                $item->save();
-                $written = true;
-            } else {
-                foreach ($copies as $copy) {
-                    $copy->fill(self::itemAttributes($row, (int) $matrix->id, (int) $copy->position));
-                    $copy->syncTotal();
-
-                    // The modal opens with these months checked, so a save that
-                    // changed nothing must not churn the month's version.
-                    if (! $copy->isDirty()) {
-                        continue;
-                    }
-
-                    $copy->save();
-                    $written = true;
-                }
-            }
-
-            if (! $written) {
+            if ($holdsLine) {
                 continue;
             }
+
+            $position = (int) ($matrix->items()->max('position') ?? 0) + 1;
+
+            $item = new MonthlyExpenditureItem(self::itemAttributes($row, (int) $matrix->id, $position));
+            $item->syncTotal();
+            $item->save();
 
             $matrix->updated_by = Auth::id();
             $matrix->save();
             $matrix->bumpVersion();
+
+            $added[] = (int) $matrix->month;
         }
+
+        sort($added);
+
+        return $added;
     }
 
     /**
      * The picker is the line's membership: a month left unchecked must not
      * keep a copy of it. Every sibling month still holding an exact copy of
-     * the line as it was loses it; a line changed differently there is left
-     * alone, exactly as the update path leaves it alone.
+     * the line as it was loses it; a copy changed differently there is left
+     * alone, just as an edit never rewrites it.
      *
      * @param  array<int, int>  $checkedMonths
      * @return array<int, int> the months the line was removed from
@@ -1185,9 +1191,9 @@ class MemEditor extends Component
     /**
      * The months whose matrix already holds this line: the month it lives in
      * plus every sibling month with an identical stored line. The edit modal
-     * opens with them checked, so the months a line was applied to survive a
-     * save-and-reopen; a copy changed differently there no longer matches and
-     * opens unchecked.
+     * opens with them checked, so the line's membership survives a reopen; a
+     * copy changed differently there no longer matches and opens unchecked —
+     * an edited month's copies elsewhere keep their own values.
      *
      * @return array<int, int>
      */

@@ -810,6 +810,29 @@ Route::middleware(['auth'])->group(function () {
     })->name('wfp.index');
 
     /* ------------------------------------------------------------------
+     * WFP Preview — the generated plans this account may read, and the
+     * plan itself.
+     *
+     * The School Head authors the plan from the Monthly Expenditure
+     * Matrices; the school's Bookkeeper reads it here to check the
+     * account titles and codes behind its lines. The list is scoped to
+     * the plans in scope (WfpPlan::scopeVisibleTo()), so a Bookkeeper sees the
+     * schools on its assignment list and nobody else's, and the plan
+     * itself re-checks that gate when it is opened.
+     *
+     * The scope is the same audience as the /wfp workspace (the School
+     * Head, the Budget office, the Bookkeeper and the approving
+     * official); the Livewire component re-checks the gate too.
+     * ----------------------------------------------------------------- */
+
+    Route::get('/wfp/preview', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canViewWfpSignoffs(), 404);
+
+        return view('wfp.preview');
+    })->name('wfp.preview.index');
+
+    /* ------------------------------------------------------------------
      * WFP Uploads — the ADMIN page: every school's uploaded Work and
      * Financial Plan, as its own destination for the sidebar.
      *
