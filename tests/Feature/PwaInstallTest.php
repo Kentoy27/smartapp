@@ -36,4 +36,16 @@ class PwaInstallTest extends TestCase
             ->assertHeader('service-worker-allowed', $scope)
             ->assertHeader('content-type', 'application/javascript; charset=utf-8');
     }
+
+    public function test_android_app_download_is_served_as_an_installable_apk(): void
+    {
+        $apkPath = public_path('downloads/smartapp-android.apk');
+
+        $this->assertFileExists($apkPath);
+
+        $this->get(route('app.android.download'))
+            ->assertOk()
+            ->assertHeader('content-type', 'application/vnd.android.package-archive')
+            ->assertHeader('content-disposition', 'attachment; filename=SmartApp-Android.apk');
+    }
 }

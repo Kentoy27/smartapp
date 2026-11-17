@@ -46,6 +46,23 @@
                         <span>Install on as many supported devices as you need. There is no device limit.</span>
                     </div>
 
+                    <section class="download-app-modal__android" aria-labelledby="downloadAppAndroidTitle">
+                        <div>
+                            <span class="download-app-modal__android-label">ANDROID APP</span>
+                            <h3 id="downloadAppAndroidTitle">Install the SmartApp Android app</h3>
+                            <p>Download the Android installer (APK), then open it on your phone to install SmartApp.</p>
+                        </div>
+                        @if (is_file(public_path('downloads/smartapp-android.apk')))
+                            <a class="btn-primary download-app-modal__apk" href="{{ route('app.android.download') }}">
+                                <x-icon name="download" :size="17" />
+                                <span>Download Android APK</span>
+                            </a>
+                            <p class="download-app-modal__apk-note">Android may ask you to allow installs from this browser. Only install APKs you downloaded from SmartApp.</p>
+                        @else
+                            <p class="download-app-modal__apk-note" role="status">The Android installer is being prepared. Browser installation is still available below.</p>
+                        @endif
+                    </section>
+
                     <div class="download-app-modal__status" x-show="installed" x-cloak role="status">
                         <x-icon name="check-circle" :size="17" />
                         <span>SmartApp is already installed on this device.</span>
