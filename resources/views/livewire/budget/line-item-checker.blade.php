@@ -120,11 +120,15 @@
                                 <td>{{ $monthCount }} / 12</td>
                                 <td>{{ $lastUpdated?->diffForHumans() ?? '—' }}</td>
                                 <td class="users-actions-col" @click.stop>
-                                    @livewire('wfp-signatory-actions', [
-                                        'schoolId' => $school->id,
-                                        'year' => (int) $this->year,
-                                        'compact' => true,
-                                    ], key('monthly-signoffs-'.$school->id.'-'.$this->year))
+                                    @if ($school->offersDivision($division))
+                                        @livewire('wfp-signatory-actions', [
+                                            'schoolId' => $school->id,
+                                            'year' => (int) $this->year,
+                                            'compact' => true,
+                                        ], key('monthly-signoffs-'.$school->id.'-'.$this->year))
+                                    @else
+                                        <span class="badge badge-muted" title="This school does not offer the selected division">—</span>
+                                    @endif
                                 </td>
 
                                 <td class="users-actions-col" @click.stop>
@@ -211,10 +215,12 @@
             </p>
         </div>
 
-        @livewire('wfp-signatory-actions', [
-            'schoolId' => $selectedSchool->id,
-            'year' => (int) $this->year,
-        ], key('monthly-detail-signoffs-'.$selectedSchool->id.'-'.$this->year))
+        @if ($selectedSchool->offersDivision($division))
+            @livewire('wfp-signatory-actions', [
+                'schoolId' => $selectedSchool->id,
+                'year' => (int) $this->year,
+            ], key('monthly-detail-signoffs-'.$selectedSchool->id.'-'.$this->year))
+        @endif
 
         {{-- THE ALLOTMENT BALANCE: the annual budget the Budget office set for
              this school, read against the year's matrices. The month tabs below

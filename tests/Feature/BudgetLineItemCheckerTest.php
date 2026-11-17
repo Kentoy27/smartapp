@@ -9,6 +9,7 @@ use App\Models\MonthlyExpenditureItem;
 use App\Models\MonthlyExpenditureMatrix;
 use App\Models\School;
 use App\Models\SchoolAllotment;
+use App\Models\SchoolDivisionSetting;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -166,6 +167,24 @@ class BudgetLineItemCheckerTest extends TestCase
             ->call('openSchool', $beta->school_id)
             ->assertSee('No expenditure lines have been entered for CY')
             ->assertDontSee('Procure supplies');
+    }
+
+    public function test_schools_outside_the_selected_division_do_not_block_the_index(): void
+    {
+        $this->schoolHead('Elementary School');
+        $juniorHigh = $this->schoolHead('Junior High School');
+        SchoolDivisionSetting::create([
+            'school_id' => $juniorHigh->school_id,
+            'division_code' => 'JUNIOR_HIGH',
+            'is_active' => true,
+        ]);
+
+        $this->actingAs($this->budgetOfficer())
+            ->get(route('budget.lineitems.index'))
+            ->assertOk()
+            ->assertSeeLivewire('budget-line-item-checker')
+            ->assertSee('Elementary School')
+            ->assertSee('Junior High School');
     }
 
     public function test_an_unknown_school_in_the_url_falls_back_to_the_index(): void

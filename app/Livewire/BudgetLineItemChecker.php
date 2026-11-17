@@ -343,6 +343,7 @@ class BudgetLineItemChecker extends Component
             ->when($visible !== null, fn (Builder $query) => $query->whereIn('id', $visible))
             ->with([
                 'district',
+                'divisionSettings',
                 'users' => fn ($query) => $query
                     ->with('school.divisionSettings')
                     ->where('role', 'user')
@@ -401,6 +402,7 @@ class BudgetLineItemChecker extends Component
         $school = School::query()
             ->with([
                 'district',
+                'divisionSettings',
                 'users' => fn ($query) => $query
                     ->with('school.divisionSettings')
                     ->where('role', 'user')
@@ -699,6 +701,7 @@ class BudgetLineItemChecker extends Component
                 'selectedSchool' => null,
                 'schools' => $schools,
                 'matrices' => $matrices,
+                'division' => $this->division(),
             ]);
         }
 
@@ -707,6 +710,7 @@ class BudgetLineItemChecker extends Component
             'selectedSchool' => $selectedSchool,
             'rows' => $this->rows,
             'summary' => $this->summary,
+            'division' => $this->division(),
         ]);
     }
 }
