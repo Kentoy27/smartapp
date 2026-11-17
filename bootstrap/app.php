@@ -28,6 +28,10 @@ return Application::configure(basePath: dirname(__DIR__))
         // and the browser blocks it as mixed content on the HTTPS page.
         $middleware->trustProxies(at: '*');
 
+        $middleware->web(append: [
+            \App\Http\Middleware\TrackUserDeviceSession::class,
+        ]);
+
         // Logging out is safe to repeat and must still work when a long-lived
         // Livewire page has an expired CSRF token.
         $middleware->validateCsrfTokens(except: ['logout']);

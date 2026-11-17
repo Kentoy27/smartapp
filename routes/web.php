@@ -52,6 +52,50 @@ Route::get('/', function () {
     return redirect()->route('login');
 });
 
+Route::get('/app.webmanifest', function () {
+    $homePath = parse_url(route('home'), PHP_URL_PATH) ?: '/home';
+    $basePath = rtrim(dirname($homePath), '/');
+    $scope = $basePath === '' ? '/' : $basePath.'/';
+
+    return response()->json([
+        'id' => $scope,
+        'name' => 'SmartApp',
+        'short_name' => 'SmartApp',
+        'description' => 'SmartApp school management workspace.',
+        'start_url' => route('home'),
+        'scope' => $scope,
+        'display' => 'standalone',
+        'background_color' => '#f1f5f9',
+        'theme_color' => '#3b82f6',
+        'icons' => [
+            [
+                'src' => public_asset('pwa-icon-192.png'),
+                'sizes' => '192x192',
+                'type' => 'image/png',
+                'purpose' => 'any',
+            ],
+            [
+                'src' => public_asset('pwa-icon-512.png'),
+                'sizes' => '512x512',
+                'type' => 'image/png',
+                'purpose' => 'any maskable',
+            ],
+        ],
+    ])->header('Cache-Control', 'public, max-age=3600');
+})->name('pwa.manifest');
+
+Route::get('/service-worker.js', function () {
+    $homePath = parse_url(route('home'), PHP_URL_PATH) ?: '/home';
+    $basePath = rtrim(dirname($homePath), '/');
+    $scope = $basePath === '' ? '/' : $basePath.'/';
+
+    return response()->file(public_path('service-worker.js'), [
+        'Content-Type' => 'application/javascript; charset=utf-8',
+        'Service-Worker-Allowed' => $scope,
+        'Cache-Control' => 'no-cache',
+    ]);
+})->name('pwa.service-worker');
+
 Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login')->middleware('guest');
 Route::post('/login', [LoginController::class, 'login']);
 Route::post('/logout', [LoginController::class, 'logout'])->name('logout')->middleware('auth');

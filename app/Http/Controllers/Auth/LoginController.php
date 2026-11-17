@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\UserDeviceSession;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
@@ -62,6 +63,12 @@ class LoginController extends Controller
 
     public function logout(Request $request)
     {
+        $user = Auth::user();
+
+        if ($user instanceof User) {
+            UserDeviceSession::endCurrentSession($user, $request->session()->getId());
+        }
+
         Auth::logout();
 
         cookie()->queue(cookie()->forget('smartapp_login'));

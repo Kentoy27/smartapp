@@ -4,12 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#f1f5f9">
+    <link rel="manifest" href="{{ route('pwa.manifest') }}?v=2">
+    <link rel="apple-touch-icon" href="{{ public_asset('pwa-icon-192.png') }}">
     <link rel="icon" type="image/svg+xml" href="{{ public_asset('smap.svg') }}?v=2">
     <link rel="shortcut icon" href="{{ public_asset('smap.svg') }}?v=2">
     {{-- The version is bumped whenever dashboard.css changes: browsers that
          cached an older copy keep painting the stale sheet at the same URL,
          which is why a broken stylesheet can survive a fresh deploy. --}}
-    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=64">
+    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=66">
     <title>@yield('title', 'Dashboard — SmartApp')</title>
     <script>
         /* Apply the saved theme before first paint to avoid a flash.
@@ -8082,6 +8084,8 @@
                              signature dialog without each page carrying them. --}}
                         <livewire:profile.update-profile />
                         <livewire:profile.digital-signature-modal />
+                        <livewire:profile.device-sessions-modal />
+                        <livewire:profile.download-app-modal />
                     @endauth
 
                     <button type="button" class="theme-toggle" id="themeToggle" title="Toggle light/dark mode" aria-label="Toggle light/dark mode">
@@ -8110,6 +8114,12 @@
                         </button>
                         <button type="button" class="user-dropdown-link" role="menuitem" data-modal-event="open-signature-modal">
                             <x-icon name="pen-line" :size="16" /> Electronic Signature
+                        </button>
+                        <button type="button" class="user-dropdown-link" role="menuitem" data-modal-event="open-device-sessions-modal">
+                            <x-icon name="phone" :size="16" /> Devices
+                        </button>
+                        <button type="button" class="user-dropdown-link" role="menuitem" data-modal-event="open-download-app-modal">
+                            <x-icon name="download" :size="16" /> Download App
                         </button>
                         <form method="POST" action="{{ route('logout') }}">
                             @csrf
@@ -8496,6 +8506,12 @@
 
     {{-- SweetAlert2 (bundled locally, no CDN dependency) + a theme-aware
          helper used by Livewire components. --}}
+    <script
+        id="smartAppPwaConfig"
+        src="{{ public_asset('js/smartapp-pwa.js') }}"
+        data-service-worker="{{ route('pwa.service-worker') }}"
+        data-scope="{{ $appScope = (rtrim(dirname(parse_url(route('home'), PHP_URL_PATH) ?: '/home'), '/') ?: '') . '/' }}"
+    ></script>
     <script src="{{ public_asset('vendor/sweetalert2/sweetalert2.all.min.js') }}"></script>
     <script>
 

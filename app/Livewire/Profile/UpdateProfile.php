@@ -3,6 +3,8 @@
 namespace App\Livewire\Profile;
 
 use App\Livewire\Concerns\ManagesAssignedSchools;
+use App\Models\User;
+use App\Models\UserDeviceSession;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -165,6 +167,12 @@ class UpdateProfile extends Component
             // with the new one, so the modal does not stay open behind the
             // redirect.
             $this->showModal = false;
+
+            $account = Auth::user();
+
+            if ($account instanceof User) {
+                UserDeviceSession::endCurrentSession($account, session()->getId());
+            }
 
             Auth::logout();
 
