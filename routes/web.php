@@ -96,6 +96,15 @@ Route::get('/service-worker.js', function () {
     ]);
 })->name('pwa.service-worker');
 
+Route::get('/downloads/smartapp-android.apk', function () {
+    $apkPath = public_path('downloads/smartapp-android.apk');
+    abort_unless(is_file($apkPath), 404);
+
+    return response()->download($apkPath, 'SmartApp-Android.apk', [
+        'Cache-Control' => 'public, max-age=3600',
+    ]);
+})->name('app.android.download');
+
 Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login')->middleware('guest');
 Route::post('/login', [LoginController::class, 'login']);
 Route::post('/logout', [LoginController::class, 'logout'])->name('logout')->middleware('auth');
