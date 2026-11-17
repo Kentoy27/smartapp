@@ -4,12 +4,16 @@ namespace App\Support;
 
 use App\Models\AipPlan;
 use App\Models\District;
+use App\Models\MovPart;
+use App\Models\MovRequirement;
 use App\Models\OpcrfSubmission;
 use App\Models\School;
 use App\Models\User;
+use App\Models\UserMov;
 use App\Models\WfpPlan;
 use App\Models\WfpSubmission;
 use Carbon\CarbonInterface;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
 /**
@@ -21,8 +25,8 @@ use Illuminate\Support\Collection;
  * is not assigned narrows the result to nothing rather than widening it, and
  * `schoolDetail()` refuses a school outside that reach outright.
  *
- * The report maps each school's three documents to one of four monitoring
- * states:
+ * The report maps each school's three workflow documents to monitoring
+ * states and separately summarizes the school's standing MOV checklist:
  *
  *   submitted       — filed and somewhere in (or past) its review workflow
  *   needs_revision  — returned to the school for revision
@@ -259,6 +263,45 @@ final class PsdsMonitoringReport
             'aip' => $this->aipDetail($schoolId, $year),
             'opcrf' => $this->opcrfDetail($schoolId, $year),
             'wfp' => $this->wfpDetail($schoolId, $year),
+            'mov' => $this->movDetail($schoolId),
+        ];
+    }
+
+    /**
+     * The school's active MOV checklist and its school-head uploads.
+     *
+     * @return array<string, mixed>
+     */
+    private function movDetail(int $schoolId): array
+    {
+        $headIds = User::query()
+            ->where('school_id', $schoolId)
+            ->where('role', 'user')
+            ->where('is_superadmin', false)
+            ->pluck('id');
+
+        $parts = MovPart::query()
+            ->active()
+            ->with(['categories' => fn ($query) => $query
+                ->active()
+                ->with(['requirements' => fn ($query) => $query
+                    ->active()
+                    ->with(['userMovs' => fn ($query) => $query
+                        ->whereIn('user_id', $headIds)
+                        ->with(['user:id,name', 'reviewer:id,name'])
+                        ->orderBy('uploaded_at')
+                        ->orderBy('id')])])])
+            ->orderBy('part_order')
+            ->orderBy('id')
+            ->get();
+
+        $requirements = $parts
+            ->flatMap(fn (MovPart $part) => $part->categories)
+            ->flatMap(fn ($category) => $category->requirements);
+
+        return [
+            'stats' => $this->movStats($requirements),
+            'parts' => $parts,
         ];
     }
 
@@ -345,9 +388,10 @@ final class PsdsMonitoringReport
         $opcrfSubmissions = $this->opcrfSubmissionsFor($schoolIds, $year);
         $wfpPlans = $this->latestWfpPlans($schoolIds, $year);
         $wfpUploads = $this->wfpUploadsFor($schoolIds, $year);
+        $movProgress = $this->movProgressForSchools($schoolIds);
 
         return $schools
-            ->map(function (School $school) use ($aipPlans, $opcrfSubmissions, $wfpPlans, $wfpUploads): array {
+            ->map(function (School $school) use ($aipPlans, $opcrfSubmissions, $wfpPlans, $wfpUploads, $movProgress): array {
                 $aip = $this->aipCell($aipPlans->get($school->id));
                 $opcrf = $this->opcrfCell($opcrfSubmissions->get($school->id) ?? collect());
                 $wfp = $this->wfpCell($wfpPlans->get($school->id), $wfpUploads->get($school->id) ?? collect());
@@ -362,12 +406,103 @@ final class PsdsMonitoringReport
                     'aip' => $aip,
                     'opcrf' => $opcrf,
                     'wfp' => $wfp,
+                    'mov' => $movProgress->get((int) $school->id, [
+                        'total' => 0,
+                        'submitted' => 0,
+                        'returned' => 0,
+                        'percent' => 0,
+                    ]),
                     'overall_status' => $overall,
                     'overall_label' => self::overallStatusLabel($overall),
                     'overall_badge' => self::overallBadgeClass($overall),
                 ];
             })
             ->values();
+    }
+
+    /**
+     * @param  array<int, int>  $schoolIds
+     * @return Collection<int, array<string, int>>
+     */
+    private function movProgressForSchools(array $schoolIds): Collection
+    {
+        $requiredIds = $this->activeMovRequirements()
+            ->required()
+            ->pluck('mov_requirements.id');
+        $total = $requiredIds->count();
+
+        $schoolHeads = User::query()
+            ->whereIn('school_id', $schoolIds)
+            ->where('role', 'user')
+            ->where('is_superadmin', false)
+            ->get(['id', 'school_id']);
+
+        if ($total === 0 || $schoolHeads->isEmpty()) {
+            return collect($schoolIds)->mapWithKeys(fn (int $schoolId): array => [
+                $schoolId => [
+                    'total' => $total,
+                    'submitted' => 0,
+                    'returned' => 0,
+                    'percent' => 0,
+                ],
+            ]);
+        }
+
+        $ownerSchoolIds = $schoolHeads->pluck('school_id', 'id');
+        $uploadsBySchool = UserMov::query()
+            ->whereIn('user_id', $schoolHeads->pluck('id'))
+            ->whereIn('mov_requirement_id', $requiredIds)
+            ->get(['user_id', 'mov_requirement_id', 'status'])
+            ->groupBy(fn (UserMov $upload): int => (int) $ownerSchoolIds->get($upload->user_id))
+            ->map(fn ($uploads) => $uploads->groupBy('mov_requirement_id'));
+
+        return collect($schoolIds)
+            ->mapWithKeys(function ($schoolId) use ($uploadsBySchool, $total): array {
+                $byRequirement = $uploadsBySchool->get((int) $schoolId, collect());
+                $submitted = $byRequirement->count();
+                $returned = $byRequirement->filter(
+                    fn ($uploads): bool => $uploads->contains('status', UserMov::STATUS_RETURNED)
+                )->count();
+
+                return [(int) $schoolId => [
+                    'total' => $total,
+                    'submitted' => $submitted,
+                    'returned' => $returned,
+                    'percent' => (int) round($submitted / $total * 100),
+                ]];
+            });
+    }
+
+    /**
+     * @param  Collection<int, MovRequirement>  $requirements
+     * @return array<string, int>
+     */
+    private function movStats(Collection $requirements): array
+    {
+        $required = $requirements->where('is_required', true);
+        $submitted = $required->filter(fn (MovRequirement $requirement): bool => $requirement->userMovs->isNotEmpty())->count();
+        $returned = $required->filter(fn (MovRequirement $requirement): bool => $requirement->userMovs
+            ->contains('status', UserMov::STATUS_RETURNED))->count();
+        $total = $required->count();
+
+        return [
+            'total' => $total,
+            'submitted' => $submitted,
+            'returned' => $returned,
+            'percent' => $total > 0 ? (int) round($submitted / $total * 100) : 0,
+        ];
+    }
+
+    /**
+     * @return \Illuminate\Database\Eloquent\Builder<MovRequirement>
+     */
+    private function activeMovRequirements(): Builder
+    {
+        return MovRequirement::query()
+            ->where('mov_requirements.is_active', true)
+            ->whereHas('category', fn ($query) => $query
+                ->where('is_active', true)
+                ->whereHas('part', fn ($query) => $query->where('is_active', true)));
     }
 
     /**

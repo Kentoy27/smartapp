@@ -1,25 +1,30 @@
-{{-- SCHOOL SUBMISSION MONITORING — the PSDS's one workspace: the AIP,
-     OPCRF and WFP submission status of the schools in the districts the
-     account is assigned. Strictly view-only: nothing on this page writes a
-     submission, a status or an account. --}}
+{{-- PSDS read-only monitoring views for schools in assigned districts. --}}
 <div class="psds-monitoring-component">
     <div class="page-header psds-page-header">
         <div>
-            <h1>School Submission Monitoring</h1>
-            <p>
-                The AIP, OPCRF, and WFP submission status of the schools in your
-                assigned districts. This workspace is read-only.
-            </p>
+            @if ($mode === 'mov')
+                <h1>MOV Monitoring</h1>
+                <p>Monitor required MOV upload progress, review status, and evidence for schools in your assigned districts. This view is read-only.</p>
+            @else
+                <h1>School Submission Monitoring</h1>
+                <p>The AIP, OPCRF, and WFP submission status of the schools in your assigned districts. This workspace is read-only.</p>
+            @endif
         </div>
 
-        @if ($this->districts->isNotEmpty())
-            <a class="users-action psds-export-link" href="{{ $this->exportUrl }}">
-                <span class="users-action-inner">
-                    <x-icon name="download" :size="14" />
-                    <span>Export CSV</span>
-                </span>
-            </a>
-        @endif
+        <div class="psds-page-header__actions">
+            @if ($mode === 'mov')
+                <a class="users-action" href="{{ route('psds.monitoring') }}" wire:navigate>
+                    <span class="users-action-inner"><x-icon name="eye" :size="14" /><span>Submission overview</span></span>
+                </a>
+            @elseif ($this->districts->isNotEmpty())
+                <a class="users-action psds-export-link" href="{{ $this->exportUrl }}">
+                    <span class="users-action-inner">
+                        <x-icon name="download" :size="14" />
+                        <span>Export CSV</span>
+                    </span>
+                </a>
+            @endif
+        </div>
     </div>
 
     @php($report = \App\Support\PsdsMonitoringReport::class)
@@ -46,32 +51,55 @@
                 </div>
             </div>
 
-            @foreach (['aip' => 'AIP', 'opcrf' => 'OPCRF', 'wfp' => 'WFP'] as $documentKey => $documentLabel)
-                @php($counts = $this->summary[$documentKey])
-                @php($percent = $totalSchools > 0 ? (int) round($counts[$report::DOC_SUBMITTED] / $totalSchools * 100) : 0)
-                <div class="stat-card psds-stat-card">
-                    <div class="stat-label">{{ $documentLabel }}</div>
-                    <div class="stat-value">
-                        {{ $counts[$report::DOC_SUBMITTED] }}
-                        <span class="psds-stat-of">/ {{ $totalSchools }}</span>
+                @if ($mode === 'mov')
+                    @php($movSummary = $this->movSummary)
+                    <div class="stat-card psds-stat-card">
+                        <div class="stat-label">Required MOVs uploaded</div>
+                        <div class="stat-value">
+                            {{ $movSummary['submitted'] }}
+                            <span class="psds-stat-of">/ {{ $movSummary['required'] }}</span>
+                        </div>
+                        <div class="stat-sub">
+                            {{ $movSummary['percent'] }}% uploaded across schools in view
+                        </div>
+                        <div class="psds-stat-meter" aria-hidden="true">
+                            <span style="width: {{ $movSummary['percent'] }}%"></span>
+                        </div>
                     </div>
-                    <div class="stat-sub">
-                        {{ $counts[$report::DOC_NOT_SUBMITTED] }} not submitted
-                        @if ($counts[$report::DOC_NEEDS_REVISION] > 0)
-                            · {{ $counts[$report::DOC_NEEDS_REVISION] }} need revision
-                        @endif
-                    </div>
-                    <div class="psds-stat-meter" aria-hidden="true">
-                        <span style="width: {{ $percent }}%"></span>
-                    </div>
-                </div>
-            @endforeach
 
-            <div class="stat-card psds-stat-card">
-                <div class="stat-label">Complete schools</div>
-                <div class="stat-value">{{ $this->summary['overall'][$report::OVERALL_COMPLETE] }}</div>
-                <div class="stat-sub">All three documents submitted</div>
-            </div>
+                    <div class="stat-card psds-stat-card">
+                        <div class="stat-label">MOVs needing revision</div>
+                        <div class="stat-value">{{ $movSummary['returned'] }}</div>
+                        <div class="stat-sub">Across {{ $movSummary['schools'] }} schools in view</div>
+                    </div>
+                @else
+                    @foreach (['aip' => 'AIP', 'opcrf' => 'OPCRF', 'wfp' => 'WFP'] as $documentKey => $documentLabel)
+                        @php($counts = $this->summary[$documentKey])
+                        @php($percent = $totalSchools > 0 ? (int) round($counts[$report::DOC_SUBMITTED] / $totalSchools * 100) : 0)
+                        <div class="stat-card psds-stat-card">
+                            <div class="stat-label">{{ $documentLabel }}</div>
+                            <div class="stat-value">
+                                {{ $counts[$report::DOC_SUBMITTED] }}
+                                <span class="psds-stat-of">/ {{ $totalSchools }}</span>
+                            </div>
+                            <div class="stat-sub">
+                                {{ $counts[$report::DOC_NOT_SUBMITTED] }} not submitted
+                                @if ($counts[$report::DOC_NEEDS_REVISION] > 0)
+                                    · {{ $counts[$report::DOC_NEEDS_REVISION] }} need revision
+                                @endif
+                            </div>
+                            <div class="psds-stat-meter" aria-hidden="true">
+                                <span style="width: {{ $percent }}%"></span>
+                            </div>
+                        </div>
+                    @endforeach
+
+                    <div class="stat-card psds-stat-card">
+                        <div class="stat-label">Complete schools</div>
+                        <div class="stat-value">{{ $this->summary['overall'][$report::OVERALL_COMPLETE] }}</div>
+                        <div class="stat-sub">All three documents submitted</div>
+                    </div>
+                @endif
         </section>
 
         <section class="card psds-filter-card" aria-label="Filter school submissions">
@@ -118,45 +146,47 @@
                     </select>
                 </label>
 
-                <label class="psds-filter">
-                    <span>AIP status</span>
-                    <select wire:model.live="aipFilter">
-                        <option value="">All AIP statuses</option>
-                        @foreach ($report::docStatusOptions() as $value => $label)
-                            <option value="{{ $value }}">{{ $label }}</option>
-                        @endforeach
-                    </select>
-                </label>
+                @if ($mode === 'all')
+                    <label class="psds-filter">
+                        <span>AIP status</span>
+                        <select wire:model.live="aipFilter">
+                            <option value="">All AIP statuses</option>
+                            @foreach ($report::docStatusOptions() as $value => $label)
+                                <option value="{{ $value }}">{{ $label }}</option>
+                            @endforeach
+                        </select>
+                    </label>
 
-                <label class="psds-filter">
-                    <span>OPCRF status</span>
-                    <select wire:model.live="opcrfFilter">
-                        <option value="">All OPCRF statuses</option>
-                        @foreach ($report::docStatusOptions() as $value => $label)
-                            <option value="{{ $value }}">{{ $label }}</option>
-                        @endforeach
-                    </select>
-                </label>
+                    <label class="psds-filter">
+                        <span>OPCRF status</span>
+                        <select wire:model.live="opcrfFilter">
+                            <option value="">All OPCRF statuses</option>
+                            @foreach ($report::docStatusOptions() as $value => $label)
+                                <option value="{{ $value }}">{{ $label }}</option>
+                            @endforeach
+                        </select>
+                    </label>
 
-                <label class="psds-filter">
-                    <span>WFP status</span>
-                    <select wire:model.live="wfpFilter">
-                        <option value="">All WFP statuses</option>
-                        @foreach ($report::docStatusOptions() as $value => $label)
-                            <option value="{{ $value }}">{{ $label }}</option>
-                        @endforeach
-                    </select>
-                </label>
+                    <label class="psds-filter">
+                        <span>WFP status</span>
+                        <select wire:model.live="wfpFilter">
+                            <option value="">All WFP statuses</option>
+                            @foreach ($report::docStatusOptions() as $value => $label)
+                                <option value="{{ $value }}">{{ $label }}</option>
+                            @endforeach
+                        </select>
+                    </label>
 
-                <label class="psds-filter">
-                    <span>Overall status</span>
-                    <select wire:model.live="overallFilter">
-                        <option value="">All overall statuses</option>
-                        @foreach ($report::overallStatusOptions() as $value => $label)
-                            <option value="{{ $value }}">{{ $label }}</option>
-                        @endforeach
-                    </select>
-                </label>
+                    <label class="psds-filter">
+                        <span>Overall status</span>
+                        <select wire:model.live="overallFilter">
+                            <option value="">All overall statuses</option>
+                            @foreach ($report::overallStatusOptions() as $value => $label)
+                                <option value="{{ $value }}">{{ $label }}</option>
+                            @endforeach
+                        </select>
+                    </label>
+                @endif
             </div>
 
             <div class="psds-filter-actions">
@@ -169,12 +199,14 @@
                     <span class="users-action-inner">Reset filters</span>
                 </button>
 
-                <a class="users-action" href="{{ $this->exportUrl }}">
-                    <span class="users-action-inner">
-                        <x-icon name="download" :size="14" />
-                        <span>Export this view</span>
-                    </span>
-                </a>
+                @if ($mode === 'all')
+                    <a class="users-action" href="{{ $this->exportUrl }}">
+                        <span class="users-action-inner">
+                            <x-icon name="download" :size="14" />
+                            <span>Export this view</span>
+                        </span>
+                    </a>
+                @endif
 
                 <span class="psds-filter-count">
                     {{ $this->paginatedRows->total() }}
@@ -194,7 +226,8 @@
                 </p>
             </section>
         @else
-            <section class="card psds-coverage-card" aria-labelledby="psds-coverage-title">
+            @if ($mode === 'all')
+                <section class="card psds-coverage-card" aria-labelledby="psds-coverage-title">
                 <div class="card-head">
                     <div>
                         <h2 class="card-title" id="psds-coverage-title">District coverage</h2>
@@ -235,31 +268,40 @@
                         <p class="psds-detail-empty">No district matches this view.</p>
                     @endforelse
                 </div>
-            </section>
+                </section>
+            @endif
 
             <section class="card" aria-labelledby="psds-schools-title">
                 <div class="card-head">
                     <div>
                         <h2 class="card-title" id="psds-schools-title">Schools</h2>
                         <p class="mem-toolbar-copy">
-                            One row per school. Open a school for its read-only
-                            submission and review history.
+                            @if ($mode === 'mov')
+                                Required MOV upload progress for each school. Open a school to view its evidence and review remarks.
+                            @else
+                                One row per school. Open a school for its read-only submission history and MOV progress.
+                            @endif
                         </p>
                     </div>
                 </div>
 
                 <div class="table-wrap">
                     <table class="data-table psds-table">
-                        <caption>Submission status by school</caption>
+                        <caption>{{ $mode === 'mov' ? 'MOV progress by school' : 'Submission status by school' }}</caption>
                         <thead>
                             <tr>
                                 <th scope="col">District</th>
                                 <th scope="col">School name</th>
                                 <th scope="col">School ID</th>
-                                <th scope="col">AIP</th>
-                                <th scope="col">OPCRF</th>
-                                <th scope="col">WFP</th>
-                                <th scope="col">Overall</th>
+                                @if ($mode === 'all')
+                                    <th scope="col">AIP</th>
+                                    <th scope="col">OPCRF</th>
+                                    <th scope="col">WFP</th>
+                                @endif
+                                <th scope="col">MOV progress</th>
+                                @if ($mode === 'all')
+                                    <th scope="col">Overall</th>
+                                @endif
                                 <th scope="col" class="users-actions-col">Action</th>
                             </tr>
                         </thead>
@@ -272,26 +314,37 @@
                                     </td>
                                     <td>{{ $row['school_code'] !== '' ? $row['school_code'] : '—' }}</td>
 
-                                    @foreach (['aip', 'opcrf', 'wfp'] as $documentKey)
-                                        @php($document = $row[$documentKey])
-                                        <td>
-                                            <span class="badge {{ $document['badge'] }}">{{ $document['label'] }}</span>
-                                            @if ($document['detail_label'])
-                                                <span class="cell-sub">{{ $document['detail_label'] }}</span>
-                                            @endif
-                                            @if ($document['submitted_at'])
-                                                <span class="cell-sub">{{ $document['submitted_at']->format('M j, Y g:i A') }}</span>
-                                            @else
-                                                <span class="cell-sub">
-                                                    {{ $document['status'] === $report::DOC_NOT_SUBMITTED ? 'No record' : 'Not yet submitted' }}
-                                                </span>
-                                            @endif
-                                        </td>
-                                    @endforeach
+                                    @if ($mode === 'all')
+                                        @foreach (['aip', 'opcrf', 'wfp'] as $documentKey)
+                                            @php($document = $row[$documentKey])
+                                            <td>
+                                                <span class="badge {{ $document['badge'] }}">{{ $document['label'] }}</span>
+                                                @if ($document['detail_label'])
+                                                    <span class="cell-sub">{{ $document['detail_label'] }}</span>
+                                                @endif
+                                                @if ($document['submitted_at'])
+                                                    <span class="cell-sub">{{ $document['submitted_at']->format('M j, Y g:i A') }}</span>
+                                                @else
+                                                    <span class="cell-sub">
+                                                        {{ $document['status'] === $report::DOC_NOT_SUBMITTED ? 'No record' : 'Not yet submitted' }}
+                                                    </span>
+                                                @endif
+                                            </td>
+                                        @endforeach
+                                    @endif
 
                                     <td>
-                                        <span class="badge {{ $row['overall_badge'] }}">{{ $row['overall_label'] }}</span>
+                                        <span class="cell-strong">{{ $row['mov']['submitted'] }} / {{ $row['mov']['total'] }}</span>
+                                        <span class="cell-sub">{{ $row['mov']['percent'] }}% of required MOVs uploaded</span>
+                                        @if ($row['mov']['returned'] > 0)
+                                            <span class="cell-sub psds-coverage-warn">{{ $row['mov']['returned'] }} need revision</span>
+                                        @endif
                                     </td>
+                                    @if ($mode === 'all')
+                                        <td>
+                                            <span class="badge {{ $row['overall_badge'] }}">{{ $row['overall_label'] }}</span>
+                                        </td>
+                                    @endif
                                     <td class="users-actions-col">
                                         <button
                                             type="button"
@@ -300,14 +353,14 @@
                                         >
                                             <span class="users-action-inner">
                                                 <x-icon name="eye" :size="14" />
-                                                <span>View</span>
+                                                <span>{{ $mode === 'mov' ? 'View MOVs' : 'View' }}</span>
                                             </span>
                                         </button>
                                     </td>
                                 </tr>
                             @empty
                                 <tr>
-                                    <td class="table-empty" colspan="8">
+                                                            <td class="table-empty" colspan="{{ $mode === 'mov' ? 5 : 9 }}">
                                         No schools match these filters. Clear a
                                         filter or search term to see the schools
                                         in your assigned districts.
@@ -351,14 +404,21 @@
 
                 <div class="modal-form psds-detail-body">
                     <div class="psds-detail-summary">
-                        <div>
-                            <span class="psds-detail-summary__label">Overall status</span>
-                            <strong>
-                                <span class="badge {{ $detail['row']['overall_badge'] }}">
-                                    {{ $detail['row']['overall_label'] }}
-                                </span>
-                            </strong>
-                        </div>
+                        @if ($mode === 'all')
+                            <div>
+                                <span class="psds-detail-summary__label">Overall status</span>
+                                <strong>
+                                    <span class="badge {{ $detail['row']['overall_badge'] }}">
+                                        {{ $detail['row']['overall_label'] }}
+                                    </span>
+                                </strong>
+                            </div>
+                        @else
+                            <div>
+                                <span class="psds-detail-summary__label">Required MOVs uploaded</span>
+                                <strong>{{ $detail['mov']['stats']['submitted'] }} / {{ $detail['mov']['stats']['total'] }}</strong>
+                            </div>
+                        @endif
                         <div>
                             <span class="psds-detail-summary__label">District</span>
                             <strong>{{ $detail['school']->district?->name ?? '—' }}</strong>
@@ -367,12 +427,15 @@
                             <span class="psds-detail-summary__label">School ID</span>
                             <strong>{{ $detail['school']->school_id ?: '—' }}</strong>
                         </div>
-                        <div>
-                            <span class="psds-detail-summary__label">Reporting period</span>
-                            <strong>{{ $detail['year'] !== null ? 'CY '.$detail['year'] : 'All years' }}</strong>
-                        </div>
+                        @if ($mode === 'all')
+                            <div>
+                                <span class="psds-detail-summary__label">Reporting period</span>
+                                <strong>{{ $detail['year'] !== null ? 'CY '.$detail['year'] : 'All years' }}</strong>
+                            </div>
+                        @endif
                     </div>
 
+                    @if ($mode === 'all')
                     {{-- AIP --}}
                     <section class="psds-detail-section" aria-labelledby="psds-detail-aip-title">
                         <div class="psds-detail-section__head">
@@ -604,6 +667,115 @@
                                     </tbody>
                                 </table>
                             </div>
+                        @endif
+                    </section>
+                    @endif
+
+                    {{-- MOV monitoring --}}
+                    <section class="psds-detail-section" aria-labelledby="psds-detail-mov-title">
+                        <div class="psds-detail-section__head">
+                            <h3 id="psds-detail-mov-title">Means of Verification (MOV) progress</h3>
+                            <span class="badge {{ $detail['mov']['stats']['returned'] > 0 ? 'badge--warn' : ($detail['mov']['stats']['percent'] === 100 ? 'badge--ok' : 'badge--info') }}">
+                                {{ $detail['mov']['stats']['submitted'] }} / {{ $detail['mov']['stats']['total'] }} required uploaded
+                            </span>
+                        </div>
+
+                        <div
+                            class="psds-coverage-meter"
+                            role="progressbar"
+                            aria-label="Required MOV upload progress for {{ $detail['school']->name }}"
+                            aria-valuenow="{{ $detail['mov']['stats']['percent'] }}"
+                            aria-valuemin="0"
+                            aria-valuemax="100"
+                        >
+                            <span style="width: {{ $detail['mov']['stats']['percent'] }}%"></span>
+                        </div>
+                        <p class="mem-toolbar-copy">
+                            {{ $detail['mov']['stats']['percent'] }}% uploaded
+                            @if ($detail['mov']['stats']['returned'] > 0)
+                                · {{ $detail['mov']['stats']['returned'] }} requirement(s) need revision
+                            @endif
+                        </p>
+
+                        @if ($detail['mov']['parts']->isEmpty())
+                            <p class="psds-detail-empty">No active MOV checklist requirements are configured.</p>
+                        @else
+                            @foreach ($detail['mov']['parts'] as $part)
+                                <h4 class="psds-detail-subheading">{{ $part->name }}</h4>
+                                <div class="table-wrap">
+                                    <table class="data-table psds-history-table">
+                                        <caption>{{ $part->name }} MOV checklist progress</caption>
+                                        <thead>
+                                            <tr>
+                                                <th scope="col">Category</th>
+                                                <th scope="col">Requirement</th>
+                                                <th scope="col">Progress</th>
+                                                <th scope="col">Evidence and review</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @forelse ($part->categories as $category)
+                                                @foreach ($category->requirements as $requirement)
+                                                    @php($uploads = $requirement->userMovs)
+                                                    @php($hasReturned = $uploads->contains('status', \App\Models\UserMov::STATUS_RETURNED))
+                                                    @php($allAccepted = $uploads->isNotEmpty() && $uploads->every(fn ($upload) => $upload->status === \App\Models\UserMov::STATUS_ACCEPTED))
+                                                    @php($underReview = $uploads->contains('status', \App\Models\UserMov::STATUS_UNDER_REVIEW))
+                                                    @php($requirementStatus = $uploads->isEmpty() ? 'Not Submitted' : ($hasReturned ? 'Returned' : ($allAccepted ? 'Accepted' : ($underReview ? 'Under Review' : 'Uploaded'))))
+                                                    @php($requirementBadge = $uploads->isEmpty() ? 'badge-muted' : ($hasReturned ? 'badge--warn' : ($allAccepted ? 'badge--ok' : ($underReview ? 'badge--info' : 'badge-muted'))))
+                                                    <tr wire:key="psds-mov-{{ $requirement->id }}">
+                                                        <td>{{ $category->name }}</td>
+                                                        <td>
+                                                            <span class="cell-strong">{{ $requirement->label() }}: {{ $requirement->title }}</span>
+                                                            @unless ($requirement->is_required)
+                                                                <span class="cell-sub">Optional</span>
+                                                            @endunless
+                                                        </td>
+                                                        <td>
+                                                            <span class="badge {{ $requirementBadge }}">{{ $requirementStatus }}</span>
+                                                        </td>
+                                                        <td>
+                                                            @forelse ($uploads as $upload)
+                                                                <div class="psds-mov-file">
+                                                                    <span class="cell-strong">{{ $upload->original_name }}</span>
+                                                                    <span class="badge {{ $upload->statusBadgeClass() }}">{{ $upload->statusLabel() }}</span>
+                                                                    <span class="cell-sub">
+                                                                        Uploaded {{ $upload->uploaded_at?->format('M j, Y g:i A') ?? '—' }}
+                                                                        by {{ $upload->user?->name ?? 'School account' }}
+                                                                        @if ($upload->reviewer)
+                                                                            · Reviewed by {{ $upload->reviewer->name }}
+                                                                        @endif
+                                                                    </span>
+                                                                    @if ($upload->remarks)
+                                                                        <span class="cell-sub">Remarks: {{ $upload->remarks }}</span>
+                                                                    @endif
+                                                                    @if ($upload->fileExists())
+                                                                        <span class="psds-mov-file__actions">
+                                                                            <a class="btn-ghost btn-ghost--small" href="{{ route('mov.preview', $upload) }}" target="_blank" rel="noopener">
+                                                                                <x-icon name="eye" :size="14" /><span>View</span>
+                                                                            </a>
+                                                                            <a class="btn-ghost btn-ghost--small" href="{{ route('mov.download', $upload) }}">
+                                                                                <x-icon name="download" :size="14" /><span>Download</span>
+                                                                            </a>
+                                                                        </span>
+                                                                    @else
+                                                                        <span class="cell-sub">File unavailable</span>
+                                                                    @endif
+                                                                </div>
+                                                            @empty
+                                                                <span class="cell-sub">No evidence uploaded</span>
+                                                            @endforelse
+                                                        </td>
+                                                    </tr>
+                                                @endforeach
+                                            @empty
+                                                <tr>
+                                                    <td class="table-empty" colspan="4">No active requirements in this part.</td>
+                                                </tr>
+                                            @endforelse
+                                        </tbody>
+                                    </table>
+                                </div>
+                            @endforeach
                         @endif
                     </section>
 

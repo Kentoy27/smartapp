@@ -4,6 +4,7 @@ namespace App\Livewire;
 
 use App\Models\OpcrfMov;
 use App\Models\MovRequirement;
+use App\Models\OpcrfReview as OpcrfReviewEntry;
 use App\Models\OpcrfSubmission;
 use App\Models\OpcrfSubmissionVersion;
 use App\Models\User;
@@ -58,6 +59,8 @@ class OpcrfReview extends Component
     public bool $showReview = false;
 
     public ?int $reviewId = null;
+
+    public bool $showApproveAllModal = false;
 
     /**
      * The reviewer's remarks, recorded with the next action they take
@@ -234,6 +237,76 @@ class OpcrfReview extends Component
             ->orderByDesc('submitted_at')
             ->orderByDesc('id')
             ->paginate($this->perPage);
+    }
+
+    public function approvableSubmissionCount(): int
+    {
+        return $this->approvableSubmissionsQuery()->count();
+    }
+
+    private function approvableSubmissionsQuery(): Builder
+    {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canManageUsersAndSchools(), 404);
+
+        return $this->queueQuery()
+            ->whereIn('status', [
+                OpcrfSubmission::STATUS_PENDING,
+                OpcrfSubmission::STATUS_RESUBMITTED,
+                OpcrfSubmission::STATUS_FORWARDED,
+            ]);
+    }
+
+    public function openApproveAllModal(): void
+    {
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
+        abort_if($this->approvableSubmissionCount() === 0, 404);
+
+        $this->showApproveAllModal = true;
+    }
+
+    public function closeApproveAllModal(): void
+    {
+        abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
+
+        $this->showApproveAllModal = false;
+    }
+
+    public function approveAllPending(): void
+    {
+        $administrator = Auth::user();
+        abort_unless($administrator instanceof User && $administrator->canManageUsersAndSchools(), 404);
+
+        [$approvedCount, $allSignaturesStamped] = DB::transaction(function () use ($administrator): array {
+            $submissions = $this->approvableSubmissionsQuery()->lockForUpdate()->get();
+            abort_if($submissions->isEmpty(), 409);
+
+            $allSignaturesStamped = true;
+            foreach ($submissions as $submission) {
+                $signedAt = now();
+                $signatureStamped = $submission->stampReviewerSignature($administrator, 'APPROVING AUTHORITY', $signedAt);
+                $allSignaturesStamped = $allSignaturesStamped && $signatureStamped;
+                $submission->markCompliant(
+                    $administrator,
+                    reviewedAt: $signedAt,
+                    action: OpcrfReviewEntry::ACTION_COMPLIANCE_FINAL,
+                );
+                $submission->forceFill(['assigned_to' => null])->save();
+                $submission->user?->notify(new OpcrfDecided($submission, $administrator, null, false));
+            }
+
+            return [$submissions->count(), $allSignaturesStamped];
+        });
+
+        $this->showApproveAllModal = false;
+        unset($this->submissions);
+        $this->successMessage = $approvedCount.' OPCRF submission(s) approved by the Administrator.';
+        if (! $allSignaturesStamped) {
+            $this->successMessage .= ' One or more digital signatures could not be added; check the Administrator signature and workbook signer fields.';
+        }
+
+        $this->dispatch('opcrf-submission-approved')->to(OpcrfMovs::class);
+        $this->dispatch('opcrf-submission-approved');
     }
 
     /**
@@ -429,16 +502,15 @@ class OpcrfReview extends Component
     }
 
     /**
-     * Approve: the submitted OPCRF is signed off as-is — the
-     * original uploaded workbook is never replaced — and the same
-     * submission auto-routes onward to the workflow's next superadmin (SY
-     * by config): one row, one ID, complete history. Eve's records keep
-     * showing it ("Forwarded to Superadmin SY"); SY's queue picks it up
-     * ("Pending Review").
+     * The assigned superadmin approves into the configured next review step.
+     * An Administrator may instead give final approval directly. In either
+     * case the submitted workbook remains untouched and the history is kept
+     * on the same submission.
      */
     public function approveSubmission(): void
     {
-        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+        $reviewer = Auth::user();
+        abort_unless($reviewer instanceof User && $reviewer->hasAdminAccess(), 404);
 
         $submission = $this->reviewSubmission();
 
@@ -446,10 +518,8 @@ class OpcrfReview extends Component
             abort(403);
         }
 
-        // Only the superadmin currently holding the review step may act —
-        // after an onward route the original reviewer keeps the record
-        // visible, but read-only.
-        abort_unless($submission->isAssignedTo(Auth::user()), 403);
+        $isAdministrator = $reviewer->canManageUsersAndSchools();
+        abort_unless($isAdministrator || $submission->isAssignedTo($reviewer), 403);
 
         $objectiveRemarks = $this->validatedObjectiveRemarks();
         $submission->forceFill(['reviewer_remarks' => $objectiveRemarks])->save();
@@ -458,23 +528,27 @@ class OpcrfReview extends Component
 
         // Route onward to the workflow's next superadmin. If there is no next
         // reviewer, the current reviewer's approval ends the chain.
-        $routeTo = $this->resolveNextReviewer($submission);
+        $routeTo = $isAdministrator ? null : $this->resolveNextReviewer($submission);
 
         $signerRole = $routeTo === null ? 'APPROVING AUTHORITY' : 'RATER';
         $signedAt = now();
-        $signatureStamped = $submission->stampReviewerSignature(Auth::user(), $signerRole, $signedAt);
+        $signatureStamped = $submission->stampReviewerSignature($reviewer, $signerRole, $signedAt);
         $submission->markCompliant(
-            Auth::user(),
+            $reviewer,
             $remarks,
             $routeTo,
+            action: $isAdministrator ? OpcrfReviewEntry::ACTION_COMPLIANCE_FINAL : OpcrfReviewEntry::ACTION_COMPLIANCE,
             reviewedAt: $signedAt,
             objectiveRemarks: $objectiveRemarks,
         );
+        if ($isAdministrator) {
+            $submission->forceFill(['assigned_to' => null])->save();
+        }
 
         // The staff member's bell carries the approval and reviewer's remarks.
         $submission->user?->notify(new OpcrfDecided(
             $submission,
-            Auth::user(),
+            $reviewer,
             $remarks,
             $routeTo !== null,
         ));

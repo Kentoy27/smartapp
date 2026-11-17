@@ -6,10 +6,14 @@ use App\Livewire\PsdsMonitoring;
 use App\Models\AipPlan;
 use App\Models\AipReview;
 use App\Models\District;
+use App\Models\MovCategory;
+use App\Models\MovPart;
+use App\Models\MovRequirement;
 use App\Models\OpcrfReview;
 use App\Models\OpcrfSubmission;
 use App\Models\School;
 use App\Models\User;
+use App\Models\UserMov;
 use App\Models\WfpApproval;
 use App\Models\WfpPlan;
 use App\Models\WfpSubmission;
@@ -17,12 +21,13 @@ use App\Support\PsdsMonitoringReport;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
- * The PSDS monitoring report: the assigned-district scope, the AIP/OPCRF/WFP
- * status mapping, the filters, the read-only detail modal and the CSV export.
+ * The PSDS monitoring report: assigned-district scope, AIP/OPCRF/WFP statuses,
+ * MOV progress and access, filters, read-only details and CSV export.
  *
  * Every test starts from the same premise: the report is built from the
  * account's own district assignments, and a district or school id carried in
@@ -447,6 +452,108 @@ class PsdsMonitoringTest extends TestCase
         // A crafted school id outside the assignment is refused before any
         // of its data is read.
         $component->call('openDetails', $eastSchool->id)->assertNotFound();
+    }
+
+    public function test_psds_can_monitor_and_read_movs_only_for_schools_in_assigned_districts(): void
+    {
+        Storage::fake('local');
+        $north = $this->district('North District');
+        $east = $this->district('East District');
+        $psds = $this->psds([$north]);
+        $school = $this->school($north, 'Alpha North School', '100001');
+        $eastSchool = $this->school($east, 'East Ridge School', '300001');
+        $head = $this->schoolHead($school);
+        $eastHead = $this->schoolHead($eastSchool);
+
+        $part = MovPart::create(['name' => 'PART 1', 'part_order' => 1, 'is_active' => true]);
+        $category = MovCategory::create([
+            'mov_part_id' => $part->id,
+            'name' => 'A',
+            'category_order' => 1,
+            'is_active' => true,
+        ]);
+        $submitted = MovRequirement::create([
+            'mov_category_id' => $category->id,
+            'mov_number' => 1,
+            'title' => 'Submitted evidence',
+            'is_required' => true,
+            'is_active' => true,
+        ]);
+        MovRequirement::create([
+            'mov_category_id' => $category->id,
+            'mov_number' => 2,
+            'title' => 'Missing evidence',
+            'is_required' => true,
+            'is_active' => true,
+        ]);
+        MovRequirement::create([
+            'mov_category_id' => $category->id,
+            'mov_number' => 3,
+            'title' => 'Optional evidence',
+            'is_required' => false,
+            'is_active' => true,
+        ]);
+
+        $path = 'mov-uploads/'.$head->id.'/submitted.pdf';
+        Storage::disk('local')->put($path, "%PDF-1.4\nMOV evidence");
+        $mov = UserMov::create([
+            'user_id' => $head->id,
+            'mov_requirement_id' => $submitted->id,
+            'original_name' => 'submitted.pdf',
+            'stored_path' => $path,
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 21,
+            'status' => UserMov::STATUS_RETURNED,
+            'remarks' => 'Please upload the signed copy.',
+            'uploaded_at' => now()->subDay(),
+        ]);
+        $eastMov = UserMov::create([
+            'user_id' => $eastHead->id,
+            'mov_requirement_id' => $submitted->id,
+            'original_name' => 'outside.pdf',
+            'stored_path' => 'mov-uploads/'.$eastHead->id.'/outside.pdf',
+            'status' => UserMov::STATUS_UPLOADED,
+        ]);
+
+        $row = (new PsdsMonitoringReport($psds))
+            ->dashboard(['year' => now()->year])['rows']
+            ->firstWhere('school_id', $school->id);
+        $this->assertSame(2, $row['mov']['total']);
+        $this->assertSame(1, $row['mov']['submitted']);
+        $this->assertSame(1, $row['mov']['returned']);
+        $this->assertSame(50, $row['mov']['percent']);
+
+        Livewire::actingAs($psds)
+            ->test(PsdsMonitoring::class)
+            ->call('openDetails', $school->id)
+            ->assertSee('Submitted evidence')
+            ->assertSee('Missing evidence')
+            ->assertSee('Optional evidence')
+            ->assertSee('Please upload the signed copy.')
+            ->assertSee('submitted.pdf')
+            ->assertSee(route('mov.preview', $mov))
+            ->assertSee(route('mov.download', $mov));
+
+        $this->actingAs($psds)
+            ->get(route('mov.preview', $mov))
+            ->assertOk()
+            ->assertStreamedContent("%PDF-1.4\nMOV evidence");
+        $this->actingAs($psds)
+            ->get(route('mov.download', $mov))
+            ->assertOk();
+
+        $this->actingAs($psds)
+            ->get(route('mov.preview', $eastMov))
+            ->assertForbidden();
+        $this->actingAs($psds)
+            ->get(route('mov.download', $eastMov))
+            ->assertForbidden();
+        $this->actingAs($psds)
+            ->get(route('mov.index'))
+            ->assertNotFound();
+
+        $this->assertSame(UserMov::STATUS_RETURNED, $mov->fresh()->status);
+        $this->assertSame(UserMov::STATUS_UPLOADED, $eastMov->fresh()->status);
     }
 
     /* ----------------------------------------------------------- pagination */

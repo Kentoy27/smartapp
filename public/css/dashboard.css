@@ -4410,6 +4410,12 @@ a.mem-month-tab:hover .mem-month-tab__total { color: var(--text-muted); }
     align-items: flex-start;
 }
 
+.psds-page-header__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
 .psds-page-header p {
     max-width: 62ch;
     color: var(--text-muted);
@@ -4709,6 +4715,24 @@ a.mem-month-tab:hover .mem-month-tab__total { color: var(--text-muted); }
 
 .psds-history-table {
     font-size: 0.8125rem;
+}
+
+.psds-mov-file {
+    display: grid;
+    justify-items: start;
+    gap: 4px;
+}
+
+.psds-mov-file + .psds-mov-file {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+}
+
+.psds-mov-file__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
 }
 
 .psds-submission-block {

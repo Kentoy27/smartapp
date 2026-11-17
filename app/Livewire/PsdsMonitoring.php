@@ -9,14 +9,14 @@ use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
 
 /**
- * The PSDS's monitoring workspace: the AIP, OPCRF and WFP submission status
- * of the schools in the districts the account is assigned.
+ * The PSDS's district-scoped, read-only submission and MOV monitoring views.
  *
  * Strictly view-only — the page reads submission records and writes nothing.
  * The guard is the role alone (isPsdsRole()), re-checked on every action, and
@@ -36,6 +36,9 @@ use Livewire\WithPagination;
 class PsdsMonitoring extends Component
 {
     use WithPagination;
+
+    #[Locked]
+    public string $mode = 'all';
 
     /** The reporting period on screen (empty = all years). */
     #[Url(as: 'year')]
@@ -74,9 +77,11 @@ class PsdsMonitoring extends Component
     /** The per-request report service; never serialised by Livewire. */
     private ?PsdsMonitoringReport $reportService = null;
 
-    public function mount(): void
+    public function mount(string $mode = 'all'): void
     {
         $this->psds();
+        abort_unless(in_array($mode, ['all', 'mov'], true), 404);
+        $this->mode = $mode;
 
         // The page opens on the current reporting year. A malformed year, or
         // one the account has no data for, falls back to the current year
@@ -128,10 +133,10 @@ class PsdsMonitoring extends Component
             'district' => $this->districtFilter,
             'school' => $this->schoolFilter,
             'year' => $this->yearFilter,
-            'aip' => $this->aipFilter,
-            'opcrf' => $this->opcrfFilter,
-            'wfp' => $this->wfpFilter,
-            'overall' => $this->overallFilter,
+            'aip' => $this->mode === 'all' ? $this->aipFilter : '',
+            'opcrf' => $this->mode === 'all' ? $this->opcrfFilter : '',
+            'wfp' => $this->mode === 'all' ? $this->wfpFilter : '',
+            'overall' => $this->mode === 'all' ? $this->overallFilter : '',
             'search' => $this->search,
         ];
     }
@@ -225,11 +230,31 @@ class PsdsMonitoring extends Component
         return $this->districtFilter !== ''
             || $this->schoolFilter !== ''
             || $this->yearFilter !== (string) now()->year
-            || $this->aipFilter !== ''
-            || $this->opcrfFilter !== ''
-            || $this->wfpFilter !== ''
-            || $this->overallFilter !== ''
+            || ($this->mode === 'all' && (
+                $this->aipFilter !== ''
+                || $this->opcrfFilter !== ''
+                || $this->wfpFilter !== ''
+                || $this->overallFilter !== ''
+            ))
             || trim($this->search) !== '';
+    }
+
+    /** @return array<string, int> */
+    #[Computed]
+    public function movSummary(): array
+    {
+        $rows = collect($this->reportData['rows']);
+        $totalSchools = $rows->count();
+        $required = (int) $rows->sum(fn (array $row): int => $row['mov']['total']);
+        $submitted = (int) $rows->sum(fn (array $row): int => $row['mov']['submitted']);
+
+        return [
+            'schools' => $totalSchools,
+            'submitted' => $submitted,
+            'required' => $required,
+            'returned' => (int) $rows->sum(fn (array $row): int => $row['mov']['returned']),
+            'percent' => $required > 0 ? (int) round($submitted / $required * 100) : 0,
+        ];
     }
 
     /** The current view as a read-only CSV, re-scoped server-side. */

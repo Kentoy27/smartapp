@@ -46,6 +46,18 @@ class OpcrfReviewTest extends TestCase
         ]);
     }
 
+    private function administrator(): User
+    {
+        return User::create([
+            'name' => 'Administrator',
+            'username' => 'administrator',
+            'email' => 'administrator@example.com',
+            'password' => Hash::make('password123'),
+            'role' => 'administrator',
+            'is_superadmin' => false,
+        ]);
+    }
+
     private function sdsValidator(): User
     {
         return User::create([
@@ -1881,6 +1893,95 @@ class OpcrfReviewTest extends TestCase
             ->assertSee('Staff Member')
             ->assertSee('(staff)')            // The name typed into the workbook is still shown in its own row.
             ->assertSee('Jane D. Doe');
+    }
+
+    public function test_administrator_can_finally_approve_all_submissions_without_routing_to_superadmins(): void
+    {
+        $administrator = $this->administrator();
+        $reviewer = $this->superadmin();
+        $submission = $this->createSubmission(
+            $this->staffUser(),
+            ['reviewer_id' => $reviewer->id, 'assigned_to' => $reviewer->id]
+        );
+
+        Livewire::actingAs($administrator)
+            ->test(OpcrfReview::class)
+            ->call('openReview', $submission->id)
+            ->set('reviewRemarks', 'Final Administrator approval.')
+            ->call('approveSubmission')
+            ->assertSet('showReview', false);
+
+        $submission->refresh();
+
+        $this->assertTrue($submission->isApproved());
+        $this->assertSame(OpcrfSubmission::STATUS_FOR_COMPLIANCE, $submission->status);
+        $this->assertSame($administrator->id, $submission->approved_by);
+        $this->assertNull($submission->assigned_to);
+        $this->assertDatabaseHas('opcrf_reviews', [
+            'opcrf_submission_id' => $submission->id,
+            'reviewer_id' => $administrator->id,
+            'action' => 'compliance_final',
+            'remarks' => 'Final Administrator approval.',
+            'to_id' => null,
+        ]);
+        $this->assertDatabaseMissing('opcrf_reviews', [
+            'opcrf_submission_id' => $submission->id,
+            'action' => 'forward',
+        ]);
+    }
+
+    public function test_administrator_can_approve_all_pending_submissions_in_one_confirmed_action(): void
+    {
+        $administrator = $this->administrator();
+        $reviewer = $this->superadmin();
+        $staff = $this->staffUser();
+        $first = $this->createSubmission($staff, [
+            'reviewer_id' => $reviewer->id,
+            'assigned_to' => $reviewer->id,
+        ]);
+        $second = $this->createSubmission($staff, [
+            'reviewer_id' => $reviewer->id,
+            'assigned_to' => $reviewer->id,
+            'review_period' => 'July to December 2026',
+            'status' => OpcrfSubmission::STATUS_RESUBMITTED,
+        ]);
+        $forwarded = $this->createSubmission($staff, [
+            'reviewer_id' => $reviewer->id,
+            'assigned_to' => $reviewer->id,
+            'approved_by' => $reviewer->id,
+            'approved_at' => now(),
+            'review_period' => 'Awaiting final review',
+            'status' => OpcrfSubmission::STATUS_FORWARDED,
+        ]);
+        $returned = $this->createSubmission($staff, [
+            'reviewer_id' => $reviewer->id,
+            'status' => OpcrfSubmission::STATUS_RETURNED,
+            'review_period' => 'Returned submission',
+        ]);
+
+        Livewire::actingAs($administrator)
+            ->test(OpcrfReview::class)
+            ->assertSee('Approve All Pending (3)')
+            ->call('openApproveAllModal')
+            ->assertSet('showApproveAllModal', true)
+            ->call('approveAllPending')
+            ->assertSet('showApproveAllModal', false)
+            ->assertSet('successMessage', '3 OPCRF submission(s) approved by the Administrator.');
+
+        foreach ([$first, $second, $forwarded] as $submission) {
+            $submission->refresh();
+            $this->assertTrue($submission->isApproved());
+            $this->assertSame($administrator->id, $submission->approved_by);
+            $this->assertNull($submission->assigned_to);
+        }
+
+        $this->assertSame(OpcrfSubmission::STATUS_RETURNED, $returned->fresh()->status);
+        $this->assertDatabaseCount('opcrf_reviews', 3);
+        $this->assertSame(
+            3,
+            \App\Models\OpcrfReview::query()->where('action', 'compliance_final')->count()
+        );
+        $this->assertSame(0, \App\Models\OpcrfReview::query()->where('action', 'forward')->count());
     }
 
     /**

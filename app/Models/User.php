@@ -137,11 +137,10 @@ class User extends Authenticatable
      * Whether this account is a PSDS (Public Schools District Supervisor) —
      * the strictly view-only monitoring role.
      *
-     * A PSDS monitors the AIP, OPCRF and WFP submission status of the
-     * schools in its assigned districts ({@see assignedDistrictIds()}) and
-     * carries no module of its own beyond that: no authoring, uploading,
-     * reviewing, checking, certifying, approving or account management. Its
-     * only destination is the School Submission Monitoring page.
+     * A PSDS monitors AIP, OPCRF, WFP and school-head MOV progress for schools
+     * in assigned districts ({@see assignedDistrictIds()}). MOV files are
+     * read-only; the role cannot author, upload, review, approve or manage
+     * accounts. Its only workspace is School Submission Monitoring.
      */
     public function isPsdsRole(): bool
     {

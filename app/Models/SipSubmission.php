@@ -53,6 +53,8 @@ class SipSubmission extends Model
             return false;
         }
 
-        return $user->role !== 'user' || (int) $user->school_id === (int) $this->school_id;
+        return $user->hasAdminAccess()
+            || $user->role !== 'user'
+            || (int) $user->school_id === (int) $this->school_id;
     }
 }

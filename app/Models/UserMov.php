@@ -187,8 +187,8 @@ class UserMov extends Model
 
     /**
      * Whether this account may read the file: its owner or a superadmin,
-     * plus the SDS Viewer/Validator while the owner's full OPCRF is assigned
-     * to them. The single place both the view and download routes ask.
+     * an assigned SDS reviewer, or the PSDS assigned to the owner's district.
+     * The single place the view and download routes ask.
      */
     public function canBeAccessedBy(?User $user): bool
     {
@@ -198,6 +198,16 @@ class UserMov extends Model
 
         if ($this->user_id === $user->id || $user->is_superadmin) {
             return true;
+        }
+
+        if ($user->isPsdsRole()) {
+            $owner = $this->user()
+                ->where('role', 'user')
+                ->where('is_superadmin', false)
+                ->whereNotNull('school_id')
+                ->first(['id', 'school_id']);
+
+            return $owner !== null && $user->canMonitorSchool((int) $owner->school_id);
         }
 
         return $user->canReviewAllOpcrfSubmissions()

@@ -37,10 +37,8 @@ use Tests\TestCase;
  * (user_district_assignments), and it may see — and only see — the AIP,
  * OPCRF and WFP submission status of the schools in those districts.
  *
- * It carries no OPCRF, MOV, AIP, WFP, checking or administrative
- * destination of its own: its module is the School Submission Monitoring
- * page alone, and every other page refuses it with the same 404 an
- * uninvited role always gets.
+ * It carries no authoring, review, checking or administrative destination:
+ * its two workspaces are read-only submission and MOV monitoring pages.
  */
 class PsdsRoleTest extends TestCase
 {
@@ -268,9 +266,9 @@ class PsdsRoleTest extends TestCase
         Livewire::actingAs($psds)
             ->test(Sidebar::class)
             ->assertSee('School Submission Monitoring')
-            // No module of its own beyond monitoring: not the staff pages…
+            ->assertSee('MOV Monitoring')
+            // No authoring or administrative pages…
             ->assertDontSee('OPCRF')
-            ->assertDontSee('MOV')
             ->assertDontSee('AIP')
             ->assertDontSee('Monthly Expenditure')
             ->assertDontSee('Per Line Item Expenditure')
@@ -296,6 +294,13 @@ class PsdsRoleTest extends TestCase
             ->get(route('psds.monitoring'))
             ->assertOk()
             ->assertSee('School Submission Monitoring');
+
+        $this->actingAs($psds)
+            ->get(route('psds.mov-monitoring'))
+            ->assertOk()
+            ->assertSee('MOV Monitoring')
+            ->assertSee('MOV progress by school')
+            ->assertDontSee('AIP status');
     }
 
     public function test_the_monitoring_page_is_refused_to_every_other_role(): void
@@ -312,6 +317,10 @@ class PsdsRoleTest extends TestCase
         ] as $outsider) {
             $this->actingAs($outsider)
                 ->get(route('psds.monitoring'))
+                ->assertNotFound();
+
+            $this->actingAs($outsider)
+                ->get(route('psds.mov-monitoring'))
                 ->assertNotFound();
         }
     }

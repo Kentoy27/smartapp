@@ -1,7 +1,7 @@
 @extends('layouts.dashboard')
 
-@section('title', 'School Submission Monitoring — SmartApp')
+@section('title', ($monitoringMode ?? 'all') === 'mov' ? 'MOV Monitoring — SmartApp' : 'School Submission Monitoring — SmartApp')
 
 @section('content')
-    <livewire:psds-monitoring />
+    <livewire:psds-monitoring :mode="$monitoringMode ?? 'all'" />
 @endsection

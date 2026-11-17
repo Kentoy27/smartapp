@@ -112,6 +112,19 @@ class SipPageTest extends TestCase
             $this->get(route('sip.download', $submission))->assertOk();
             $this->get(route('sip.preview', $submission))->assertOk();
         }
+
+        $superadmin = User::factory()->create(['role' => 'user', 'is_superadmin' => true]);
+        Livewire::actingAs($superadmin)->test(SipTable::class)
+            ->call('openPreview', $submissions[0]->id)
+            ->assertSet('previewSubmissionId', $submissions[0]->id)
+            ->assertSee('data-pdf-url="'.route('sip.preview', $submissions[0]).'"', false);
+
+        foreach ($submissions as $submission) {
+            $this->actingAs($superadmin)
+                ->get(route('sip.download', $submission))
+                ->assertOk();
+            $this->get(route('sip.preview', $submission))->assertOk();
+        }
     }
 
     public function test_sip_is_not_available_to_guests_or_finance_roles(): void

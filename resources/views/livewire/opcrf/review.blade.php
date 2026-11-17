@@ -25,6 +25,18 @@
             <div class="card-title">
                 {{ auth()->user()->canReviewAllOpcrfSubmissions() ? 'Full OPCRF submissions to validate' : 'All OPCRF submissions' }}
             </div>
+            @if (auth()->user()->canManageUsersAndSchools() && $this->approvableSubmissionCount() > 0)
+                <button
+                    type="button"
+                    class="btn-primary"
+                    wire:click="openApproveAllModal"
+                    wire:loading.attr="disabled"
+                    wire:target="openApproveAllModal"
+                >
+                    <x-icon name="check" :size="14" />
+                    <span>Approve All Pending ({{ $this->approvableSubmissionCount() }})</span>
+                </button>
+            @endif
         </div>
         @if ($this->submissions->isEmpty())
             <p class="card-text">
@@ -342,34 +354,40 @@
                                         <span wire:loading wire:target="validateAndForward">Forwarding…</span>
                                     </button>
                                 </div>
-                            @elseif ($this->reviewSubmission()->isAssignedTo(auth()->user()))
+                            @elseif ($this->reviewSubmission()->isAssignedTo(auth()->user()) || auth()->user()->canManageUsersAndSchools())
                                 <p class="opcrf-review-card-desc">
-                                    Review the submission and choose an appropriate action.
-                                    <strong>Approve</strong> records your approval and routes it to the next reviewer when one is configured,
-                                    or choose <strong>Return for Revision</strong> to send it back to the staff member.
-                                    The final reviewer’s approval ends the review chain.
+                                    @if (auth()->user()->canManageUsersAndSchools())
+                                        Review the submission and approve it directly as the final approving authority. It will not be routed to a Superadmin.
+                                    @else
+                                        Review the submission and choose an appropriate action.
+                                        <strong>Approve</strong> records your approval and routes it to the next reviewer when one is configured,
+                                        or choose <strong>Return for Revision</strong> to send it back to the staff member.
+                                        The final reviewer’s approval ends the review chain.
+                                    @endif
                                 </p>
 
                                 <div class="opcrf-decision-actions">
-                                    <button
-                                        type="button"
-                                        class="btn-ghost"
-                                        wire:click="returnSubmission"
-                                        wire:loading.attr="disabled"
-                                        wire:target="returnSubmission"
-                                        title="Send it back to the staff member for revision"
-                                    >
-                                        <x-icon name="undo-2" :size="14" />
-                                        <span wire:loading.remove wire:target="returnSubmission">Return for Revision</span>
-                                        <span wire:loading wire:target="returnSubmission">Returning…</span>
-                                    </button>
+                                    @unless (auth()->user()->canManageUsersAndSchools())
+                                        <button
+                                            type="button"
+                                            class="btn-ghost"
+                                            wire:click="returnSubmission"
+                                            wire:loading.attr="disabled"
+                                            wire:target="returnSubmission"
+                                            title="Send it back to the staff member for revision"
+                                        >
+                                            <x-icon name="undo-2" :size="14" />
+                                            <span wire:loading.remove wire:target="returnSubmission">Return for Revision</span>
+                                            <span wire:loading wire:target="returnSubmission">Returning…</span>
+                                        </button>
+                                    @endunless
                                     <button
                                         type="button"
                                         class="btn-primary"
                                         wire:click="approveSubmission"
                                         wire:loading.attr="disabled"
                                         wire:target="approveSubmission"
-                                        title="Approve and route to the next reviewer, when configured"
+                                        title="{{ auth()->user()->canManageUsersAndSchools() ? 'Record final Administrator approval' : 'Approve and route to the next reviewer, when configured' }}"
                                     >
                                         <x-icon name="shield" :size="14" />
                                         <span wire:loading.remove wire:target="approveSubmission">Approve</span>
@@ -488,6 +506,37 @@
                         <button type="button" class="btn-danger" wire:click="confirmDelete" wire:loading.attr="disabled" wire:target="confirmDelete">
                             <span wire:loading.remove wire:target="confirmDelete">Delete Submission</span>
                             <span wire:loading wire:target="confirmDelete">Deleting…</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    @endif
+
+    @if ($showApproveAllModal)
+        <div
+            class="modal-backdrop is-open"
+            x-data
+            @keydown.escape.window="$wire.closeApproveAllModal()"
+            @click.self="$wire.closeApproveAllModal()"
+            role="presentation"
+        >
+            <div class="modal modal--confirmation" role="dialog" aria-modal="true" aria-labelledby="approveAllTitle" @click.stop>
+                <div class="modal-head">
+                    <h2 id="approveAllTitle">Approve all pending OPCRFs?</h2>
+                    <button type="button" class="modal-close" wire:click="closeApproveAllModal" aria-label="Close" title="Close">×</button>
+                </div>
+                <div class="modal-form">
+                    <p class="delete-modal-description">
+                        This will give final Administrator approval to
+                        <strong>{{ $this->approvableSubmissionCount() }}</strong>
+                        pending submission(s), without routing them to a Superadmin.
+                    </p>
+                    <div class="modal-actions">
+                        <button type="button" class="btn-ghost" wire:click="closeApproveAllModal">Cancel</button>
+                        <button type="button" class="btn-primary" wire:click="approveAllPending" wire:loading.attr="disabled" wire:target="approveAllPending">
+                            <span wire:loading.remove wire:target="approveAllPending">Approve All</span>
+                            <span wire:loading wire:target="approveAllPending">Approving…</span>
                         </button>
                     </div>
                 </div>
