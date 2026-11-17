@@ -54,7 +54,6 @@
 
     @if ($user->hasAdminAccess())
         <livewire:admin-dashboard-stats />
-        <livewire:opcrf-analytics />
 
         {{-- Every school's uploaded Work and Financial Plan — the other
              half of the WfpUpload flow on /wfp, listed here so the

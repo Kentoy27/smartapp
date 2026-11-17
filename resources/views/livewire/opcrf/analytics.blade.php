@@ -81,6 +81,45 @@
         </div>
 
         <div class="opcrf-analytics-section">
+            <div class="opcrf-analytics-section-title">Review workflow</div>
+            <div class="opcrf-workflow-flow" role="list" aria-label="OPCRF review workflow">
+                <div class="opcrf-workflow-flow__step" role="listitem">
+                    <span class="opcrf-workflow-flow__number">01</span>
+                    <strong>School Head</strong>
+                    <span>Submits full OPCRF</span>
+                </div>
+                <span class="opcrf-workflow-flow__arrow" aria-hidden="true">→</span>
+                <div class="opcrf-workflow-flow__step" role="listitem">
+                    <span class="opcrf-workflow-flow__number">02</span>
+                    <strong>SDS Validator</strong>
+                    <span>Checks Parts I–IV</span>
+                </div>
+                <span class="opcrf-workflow-flow__arrow" aria-hidden="true">→</span>
+                <div class="opcrf-workflow-flow__step" role="listitem">
+                    <span class="opcrf-workflow-flow__number">03</span>
+                    <strong>Ma’am Eve</strong>
+                    <span>Reviews the OPCRF</span>
+                </div>
+                <span class="opcrf-workflow-flow__arrow" aria-hidden="true">→</span>
+                <div class="opcrf-workflow-flow__step" role="listitem">
+                    <span class="opcrf-workflow-flow__number">04</span>
+                    <strong>Sir SY</strong>
+                    <span>Completes next review</span>
+                </div>
+                <span class="opcrf-workflow-flow__arrow" aria-hidden="true">→</span>
+                <div class="opcrf-workflow-flow__step opcrf-workflow-flow__step--approved" role="listitem">
+                    <span class="opcrf-workflow-flow__number">05</span>
+                    <strong>Approved</strong>
+                    <span>Review complete</span>
+                </div>
+            </div>
+            <div class="opcrf-workflow-flow__return">
+                <span aria-hidden="true">↩</span>
+                <span><strong>Return for revision</strong> sends the OPCRF back to the School Head for updates.</span>
+            </div>
+        </div>
+
+        <div class="opcrf-analytics-section">
             <div class="opcrf-analytics-section-title">Latest submissions</div>
 
             <ul class="opcrf-analytics-recent">

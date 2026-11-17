@@ -4,6 +4,7 @@ namespace App\Livewire;
 
 use App\Models\AipPlan;
 use App\Models\OpcrfSubmission;
+use App\Models\SipSubmission;
 use App\Models\User;
 use App\Models\WfpSubmission;
 use Illuminate\Database\Eloquent\Builder;
@@ -13,7 +14,7 @@ use Livewire\Attributes\Computed;
 use Livewire\Component;
 
 /**
- * Counts submitted School Head documents visible in the Viewer's review areas.
+ * Summarizes the viewer's review queues and visible School Improvement Plans.
  */
 class ViewerSubmissionStats extends Component
 {
@@ -23,13 +24,14 @@ class ViewerSubmissionStats extends Component
     }
 
     /**
-     * Current submissions and their workflow stages across AIP, OPCRF, and WFP.
+     * Current review submissions, workflow stages, and visible SIP records.
      *
      * @return array{
      *     total: int,
      *     aip: int,
      *     opcrf: int,
      *     wfp: int,
+     *     sip: int,
      *     awaiting: int,
      *     in_review: int,
      *     returned: int,
@@ -47,17 +49,16 @@ class ViewerSubmissionStats extends Component
             'status',
         );
         $opcrf = $this->statusCounts(
-            OpcrfSubmission::query()
-                ->whereHas('user', fn (Builder $user): Builder => $user
-                    ->where('role', 'user')
-                    ->where('is_superadmin', false))
-                ->whereNotNull('submitted_at'),
+            OpcrfSubmission::query()->awaitingSdsValidation(),
             'status',
         );
         $wfp = $this->statusCounts(
             WfpSubmission::query()->where('school_division', $viewer->activeDivision()),
             'review_status',
         );
+        $sipCount = SipSubmission::query()
+            ->whereIn('division', $viewer->authorizedDivisions())
+            ->count();
 
         $stages = ['awaiting' => 0, 'in_review' => 0, 'returned' => 0, 'approved' => 0];
 
@@ -82,6 +83,7 @@ class ViewerSubmissionStats extends Component
             'aip' => $aipCount,
             'opcrf' => $opcrfCount,
             'wfp' => $wfpCount,
+            'sip' => $sipCount,
             ...$stages,
         ];
     }

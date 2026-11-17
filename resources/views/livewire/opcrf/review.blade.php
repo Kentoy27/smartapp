@@ -38,9 +38,25 @@
                 </button>
             @endif
         </div>
+        <div class="card-head users-toolbar">
+            <div class="users-search">
+                <input
+                    type="search"
+                    placeholder="Search employee, username, position, or review period…"
+                    wire:model.live.debounce.300ms="search"
+                    aria-label="Search OPCRF submissions"
+                >
+
+                @if (trim($search) !== '')
+                    <button type="button" class="users-clear" wire:click="clearSearch" title="Clear search">×</button>
+                @endif
+            </div>
+        </div>
         @if ($this->submissions->isEmpty())
             <p class="card-text">
-                @if (auth()->user()->canReviewAllOpcrfSubmissions())
+                @if (trim($search) !== '')
+                    No OPCRF submissions match your search.
+                @elseif (auth()->user()->canReviewAllOpcrfSubmissions())
                     No full Parts I–IV OPCRFs are waiting for validation.
                 @else
                     Nothing to review yet — submissions appear here the moment a
@@ -244,12 +260,13 @@
                                     'rateeSignature' => $this->reviewSubmission()->rateeSignature(),
                                     'reviewSignatures' => $this->reviewSignatures,
                                     'reviewerRemarks' => $this->objectiveRemarks,
-                                    'canEditObjectiveRemarks' => $this->reviewSubmission()->isAssignedTo(auth()->user())
-                                        || (auth()->user()->canReviewAllOpcrfSubmissions()
-                                            && (int) $this->reviewSubmission()->assigned_to === (int) auth()->id()),
+                                    'canEditObjectiveRemarks' => auth()->user()->canReviewAllOpcrfSubmissions()
+                                        ? $this->reviewSubmission()->canBeViewedBySdsViewer(auth()->user())
+                                        : $this->reviewSubmission()->isAssignedTo(auth()->user()),
                                     'showMovReview' => $this->reviewSubmission()->opcrf_part === \App\Models\OpcrfSubmission::FULL_WORKBOOK
                                         && (auth()->user()->hasAdminAccess()
                                             || auth()->user()->canReviewAllOpcrfSubmissions()),
+                                    'showPartFilter' => auth()->user()->canReviewAllOpcrfSubmissions(),
                                     'workbook' => $this->reviewWorkbook ?? ['tabs' => [], 'part_two' => ['sections' => [], 'total_rows' => [], 'signers' => [], 'scale' => ['title' => '', 'levels' => []]], 'part_three' => ['components' => [], 'agreement' => [], 'overall' => null, 'rating' => '', 'rating_table' => [], 'signatures' => []], 'part_four' => ['office_plan' => [], 'office_feedback' => '', 'development_plan' => [], 'development_feedback' => '', 'signers' => [], 'sections' => []], 'extra_sheets' => []],
                                     'uid' => 'rv',
                                 ])
@@ -326,32 +343,35 @@
                             @if (auth()->user()->canReviewAllOpcrfSubmissions())
                                 <p class="opcrf-review-card-desc">
                                     Check all four parts of this submitted workbook and add any objective-level validator notes.
-                                    This action records validation and sends the workbook to the first Superadmin for review.
+                                    This action records validation and sends the workbook to Ma'am Eve's OPCRF table for review.
                                 </p>
-                                <label for="opcrfValidatorRemarks" class="opcrf-review-card-desc">Validation note (optional)</label>
-                                <textarea
-                                    id="opcrfValidatorRemarks"
-                                    class="form-control"
-                                    rows="3"
-                                    maxlength="2000"
-                                    wire:model="reviewRemarks"
-                                    placeholder="Add a general validation note for the Superadmin"
-                                ></textarea>
-                                @error('reviewRemarks')
+                                @error('review')
                                     <p class="field-error" role="alert">{{ $message }}</p>
                                 @enderror
                                 <div class="opcrf-decision-actions">
+                                    <button
+                                        type="button"
+                                        class="btn-ghost"
+                                        wire:click="returnSubmission"
+                                        wire:loading.attr="disabled"
+                                        wire:target="returnSubmission"
+                                        title="Return the full OPCRF to the School Head for revision"
+                                    >
+                                        <x-icon name="undo-2" :size="14" />
+                                        <span wire:loading.remove wire:target="returnSubmission">Return to School Head for Revision</span>
+                                        <span wire:loading wire:target="returnSubmission">Returning to School Head…</span>
+                                    </button>
                                     <button
                                         type="button"
                                         class="btn-primary"
                                         wire:click="validateAndForward"
                                         wire:loading.attr="disabled"
                                         wire:target="validateAndForward"
-                                        title="Record validation and forward the full workbook"
+                                        title="Record validation and forward the full workbook to Ma'am Eve"
                                     >
                                         <x-icon name="check" :size="14" />
-                                        <span wire:loading.remove wire:target="validateAndForward">Validate and Forward to Superadmin</span>
-                                        <span wire:loading wire:target="validateAndForward">Forwarding…</span>
+                                        <span wire:loading.remove wire:target="validateAndForward">Validate and Forward to Ma'am Eve</span>
+                                        <span wire:loading wire:target="validateAndForward">Forwarding to Ma'am Eve…</span>
                                     </button>
                                 </div>
                             @elseif ($this->reviewSubmission()->isAssignedTo(auth()->user()) || auth()->user()->canManageUsersAndSchools())

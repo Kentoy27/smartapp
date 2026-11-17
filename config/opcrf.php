@@ -80,7 +80,7 @@ return [
     | they move to the first superadmin. When unset, the first viewer by
     | username receives them.
     */
-    'validator_route' => env('OPCRF_VALIDATOR_ROUTE', ''),
+    'validator_route' => env('OPCRF_VALIDATOR_ROUTE', 'sdsview'),
 
     /*
     |----------------------------------------------------------------------

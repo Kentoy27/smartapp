@@ -9,12 +9,13 @@
      null when the submission carries no stamped workbook to show), and
      $reviewSignatures (reviewer signatures keyed by normalized signer role).
 
-     Alpine holds the active tab; [data-sheet] sections show/hide without
-     any Livewire round-trip. --}}
+     Alpine holds the active tab and optional Part I filter; sheet sections
+     show/hide without any Livewire round-trip. --}}
 @php $wbUid = $uid ?? 'wb'; @endphp
 
 <div
     class="opcrf-excelwin"
+    data-part-filter="all"
     x-data="{ tab: 'part1' }"
     :data-active="tab"
 >
@@ -31,6 +32,7 @@
                 'reviewerRemarks' => $reviewerRemarks ?? [],
                 'canEditObjectiveRemarks' => $canEditObjectiveRemarks ?? false,
                 'showMovReview' => $showMovReview ?? false,
+                'partFilterEnabled' => $showPartFilter ?? false,
             ])
         </div>
 
@@ -41,6 +43,49 @@
             'reviewSignatures' => $reviewSignatures ?? [],
         ])
     </div>
+
+    @if ($showPartFilter ?? false)
+        <div
+            class="opcrf-excelwin-tabs opcrf-excelwin-part-filter"
+            role="group"
+            aria-label="Filter Part I sections"
+            @click="$event.target.closest('button') && ($el.closest('.opcrf-excelwin').dataset.partFilter = $event.target.closest('button').dataset.partFilterValue); $el.querySelectorAll('button').forEach(button => { const active = button.dataset.partFilterValue === $el.closest('.opcrf-excelwin').dataset.partFilter; button.classList.toggle('is-active', active); button.setAttribute('aria-pressed', active); })"
+        >
+            <span class="opcrf-excelwin-part-filter-label">Show:</span>
+            <button
+                type="button"
+                class="opcrf-excelwin-tab is-active"
+                data-part-filter-value="all"
+                aria-pressed="true"
+            >
+                All Part I
+            </button>
+            <button
+                type="button"
+                class="opcrf-excelwin-tab"
+                data-part-filter-value="I-A"
+                aria-pressed="false"
+            >
+                PART I-A
+            </button>
+            <button
+                type="button"
+                class="opcrf-excelwin-tab"
+                data-part-filter-value="I-B"
+                aria-pressed="false"
+            >
+                PART I-B
+            </button>
+            <button
+                type="button"
+                class="opcrf-excelwin-tab"
+                data-part-filter-value="I-C"
+                aria-pressed="false"
+            >
+                PART I-C
+            </button>
+        </div>
+    @endif
 
     {{-- SHEET-TAB STRIP: Excel's bottom tab bar — one sheet at a time,
          opening on PART I. Tabs only appear for content the file

@@ -4,11 +4,11 @@
         <div>
             <span class="viewer-submission-overview__eyebrow">REVIEW WORKSPACE</span>
             <h2 id="viewer-submission-title">School Head submissions</h2>
-            <p>Submitted AIP, OPCRF, and WFP documents in your review areas.</p>
+            <p>Review submitted AIP, OPCRF, and WFP documents, and browse SIP records.</p>
         </div>
         <span class="viewer-submission-overview__total">
             <strong>{{ number_format($stats['total']) }}</strong>
-            <span>documents submitted</span>
+            <span>review submissions</span>
         </span>
     </div>
 
@@ -17,19 +17,25 @@
             <span class="viewer-submission-card__icon"><x-icon name="file-spreadsheet" :size="19" /></span>
             <span class="viewer-submission-card__label">AIP Review</span>
             <strong>{{ number_format($stats['aip']) }}</strong>
-            <span class="viewer-submission-card__link">View submitted AIPs <span aria-hidden="true">→</span></span>
+            <span class="viewer-submission-card__link">Open AIP Review <span aria-hidden="true">→</span></span>
         </a>
-        <a class="viewer-submission-card viewer-submission-card--opcrf" href="{{ route('opcrf.index') }}" wire:navigate.hover>
+        <a class="viewer-submission-card viewer-submission-card--opcrf" href="{{ route('opcrf.review') }}" wire:navigate.hover>
             <span class="viewer-submission-card__icon"><x-icon name="eye" :size="19" /></span>
-            <span class="viewer-submission-card__label">OPCRF Review</span>
+            <span class="viewer-submission-card__label">OPCRF</span>
             <strong>{{ number_format($stats['opcrf']) }}</strong>
-            <span class="viewer-submission-card__link">View submitted OPCRFs <span aria-hidden="true">→</span></span>
+            <span class="viewer-submission-card__link">Open OPCRF Review <span aria-hidden="true">→</span></span>
         </a>
         <a class="viewer-submission-card viewer-submission-card--wfp" href="{{ route('wfp.submissions.index') }}" wire:navigate.hover>
             <span class="viewer-submission-card__icon"><x-icon name="chart-column" :size="19" /></span>
             <span class="viewer-submission-card__label">WFP Review</span>
             <strong>{{ number_format($stats['wfp']) }}</strong>
-            <span class="viewer-submission-card__link">View submitted WFPs <span aria-hidden="true">→</span></span>
+            <span class="viewer-submission-card__link">Open WFP Review <span aria-hidden="true">→</span></span>
+        </a>
+        <a class="viewer-submission-card viewer-submission-card--sip" href="{{ route('sip.index') }}" wire:navigate.hover>
+            <span class="viewer-submission-card__icon"><x-icon name="school" :size="19" /></span>
+            <span class="viewer-submission-card__label">SIP</span>
+            <strong>{{ number_format($stats['sip']) }}</strong>
+            <span class="viewer-submission-card__link">Browse SIP Records <span aria-hidden="true">→</span></span>
         </a>
     </div>
 
@@ -37,9 +43,9 @@
         <div class="viewer-submission-flow__heading">
             <div>
                 <h3 id="viewer-submission-flow-title">Submission workflow</h3>
-                <p>Current status across the documents shown above</p>
+                <p>Current status across AIP, OPCRF, and WFP review queues</p>
             </div>
-            <span>{{ number_format($stats['total']) }} total</span>
+            <span>{{ number_format($stats['total']) }} submissions</span>
         </div>
 
         <div class="viewer-submission-flow__diagram" role="group" aria-label="Submission status flow">

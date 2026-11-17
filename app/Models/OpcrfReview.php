@@ -6,9 +6,9 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * One entry in a submission's review history: a superadmin's action
- * (compliance/approve, forward, return-for-revision) with their general and
- * objective remarks and the routing (from → to). Rows are immutable — the trail is the record.
+ * One entry in a submission's review history: a validator or superadmin's
+ * action with their general and objective remarks and routing (from → to).
+ * Rows are immutable — the trail is the record.
  *
  * Actions:
  *   compliance — the reviewer approved the submission (status →

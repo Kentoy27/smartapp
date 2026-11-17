@@ -814,6 +814,25 @@ class OpcrfSubmission extends Model
     }
 
     /**
+     * Full OPCRF workbooks currently listed in the SDS Viewer/Validator queue.
+     *
+     * Keep this shared by the review page and dashboard so its count cannot
+     * drift from the rows viewers can actually open.
+     */
+    public function scopeAwaitingSdsValidation(Builder $query): Builder
+    {
+        return $query
+            ->where('opcrf_part', self::FULL_WORKBOOK)
+            ->whereHas('assignedTo', fn (Builder $assigned): Builder => $assigned
+                ->where('role', 'viewer')
+                ->where('is_superadmin', false))
+            ->whereHas('user', fn (Builder $owner): Builder => $owner
+                ->where('role', 'user')
+                ->where('is_superadmin', false))
+            ->whereIn('status', [self::STATUS_PENDING, self::STATUS_RESUBMITTED]);
+    }
+
+    /**
      * Submissions still awaiting the given superadmin's own action: the ones
      * they can see, held by them (or by nobody), and not yet decided.
      *
@@ -957,7 +976,10 @@ class OpcrfSubmission extends Model
     {
         return $user?->canReviewAllOpcrfSubmissions() === true
             && $this->opcrf_part === self::FULL_WORKBOOK
-            && (int) $this->assigned_to === (int) $user->id
+            && $this->assignedTo()
+                ->where('role', 'viewer')
+                ->where('is_superadmin', false)
+                ->exists()
             && in_array($this->status, [self::STATUS_PENDING, self::STATUS_RESUBMITTED], true)
             && $this->user()
                 ->where('role', 'user')
@@ -979,10 +1001,6 @@ class OpcrfSubmission extends Model
     ): bool {
         if (
             ! $validator->canReviewAllOpcrfSubmissions()
-            || $this->opcrf_part !== self::FULL_WORKBOOK
-            || ! $this->hasFile()
-            || (int) $this->assigned_to !== (int) $validator->id
-            || ! in_array($this->status, [self::STATUS_PENDING, self::STATUS_RESUBMITTED], true)
             || ! $recipient->hasAdminAccess()
             || (int) $recipient->id === (int) $validator->id
         ) {
@@ -990,10 +1008,22 @@ class OpcrfSubmission extends Model
         }
 
         return DB::transaction(function () use ($validator, $recipient, $remarks, $objectiveRemarks): bool {
-            $reviewedAt = now();
-            $currentStatus = (string) $this->status;
+            $submission = static::query()
+                ->lockForUpdate()
+                ->find($this->id);
 
-            $this->reviews()->create([
+            if (
+                ! $submission instanceof self
+                || ! $submission->canBeViewedBySdsViewer($validator)
+                || ! $submission->hasFile()
+            ) {
+                return false;
+            }
+
+            $reviewedAt = now();
+            $currentStatus = (string) $submission->status;
+
+            $submission->reviews()->create([
                 'reviewer_id' => $validator->id,
                 'action' => OpcrfReview::ACTION_VALIDATE,
                 'remarks' => $remarks,
@@ -1004,12 +1034,12 @@ class OpcrfSubmission extends Model
                 'reviewed_at' => $reviewedAt,
             ]);
 
-            if (! $this->forwardTo($validator, $recipient)) {
+            if (! $submission->forwardTo($validator, $recipient)) {
                 throw new \LogicException('The submission could not be forwarded to the superadmin.');
             }
 
-            $this->reviewer_id = $recipient->id;
-            $this->save();
+            $submission->reviewer_id = $recipient->id;
+            $submission->save();
 
             return true;
         });

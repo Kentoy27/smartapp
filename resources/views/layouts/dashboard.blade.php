@@ -9,7 +9,7 @@
     {{-- The version is bumped whenever dashboard.css changes: browsers that
          cached an older copy keep painting the stale sheet at the same URL,
          which is why a broken stylesheet can survive a fresh deploy. --}}
-    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=61">
+    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=64">
     <title>@yield('title', 'Dashboard — SmartApp')</title>
     <script>
         /* Apply the saved theme before first paint to avoid a flash.
@@ -2947,6 +2947,12 @@
             display: block;
         }
 
+        .opcrf-excelwin[data-part-filter="I-A"] [data-sheet="part1"] .opcrf-sheet-part:not([data-part-filter="I-A"]),
+        .opcrf-excelwin[data-part-filter="I-B"] [data-sheet="part1"] .opcrf-sheet-part:not([data-part-filter="I-B"]),
+        .opcrf-excelwin[data-part-filter="I-C"] [data-sheet="part1"] .opcrf-sheet-part:not([data-part-filter="I-C"]) {
+            display: none;
+        }
+
         /* Excel's bottom tab bar. */
         .opcrf-excelwin-tabs {
             display: flex;
@@ -2988,6 +2994,20 @@
         .opcrf-excelwin-tab:focus-visible {
             outline: 2px solid #1f3864;
             outline-offset: -2px;
+        }
+
+        .opcrf-excelwin-part-filter {
+            border-top: 0;
+            padding-top: 0;
+        }
+
+        .opcrf-excelwin-part-filter-label {
+            align-self: center;
+            color: var(--text-muted);
+            font-size: 0.8125rem;
+            font-weight: 600;
+            padding: 0 6px;
+            white-space: nowrap;
         }
 
         /* Let the complete workbook flow with the review modal's vertical
@@ -5359,6 +5379,86 @@
             height: 8px;
             border-radius: 50%;
             flex-shrink: 0;
+        }
+
+        .opcrf-workflow-flow {
+            display: flex;
+            align-items: stretch;
+            gap: 8px;
+            overflow-x: auto;
+            padding: 2px 2px 10px;
+        }
+
+        .opcrf-workflow-flow__step {
+            display: flex;
+            flex: 1 0 132px;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 132px;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: var(--bg-elevated);
+        }
+
+        .opcrf-workflow-flow__number {
+            color: var(--primary);
+            font-size: 0.6875rem;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+        }
+
+        .opcrf-workflow-flow__step strong {
+            color: var(--text-strong);
+            font-size: 0.8125rem;
+        }
+
+        .opcrf-workflow-flow__step > span:last-child {
+            color: var(--text-muted);
+            font-size: 0.7rem;
+            line-height: 1.4;
+        }
+
+        .opcrf-workflow-flow__step--approved {
+            border-color: var(--ok);
+            background: var(--ok-soft);
+        }
+
+        .opcrf-workflow-flow__step--approved .opcrf-workflow-flow__number,
+        .opcrf-workflow-flow__step--approved strong {
+            color: var(--ok);
+        }
+
+        .opcrf-workflow-flow__arrow {
+            display: flex;
+            flex: 0 0 auto;
+            align-items: center;
+            color: var(--text-faint);
+            font-weight: 700;
+        }
+
+        .opcrf-workflow-flow__return {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 8px;
+            padding: 10px 12px;
+            border: 1px solid var(--warn-soft);
+            border-radius: 8px;
+            background: var(--warn-soft);
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            line-height: 1.45;
+        }
+
+        .opcrf-workflow-flow__return > span:first-child,
+        .opcrf-workflow-flow__return strong {
+            color: var(--warn);
+        }
+
+        .opcrf-workflow-flow__return > span:first-child {
+            font-size: 1rem;
+            font-weight: 800;
         }
 
         .opcrf-analytics-recent {

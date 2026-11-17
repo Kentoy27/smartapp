@@ -89,7 +89,13 @@
             ];
         @endphp
 
-        <div class="opcrf-sheet-part" wire:key="part-{{ $part['key'] !== '' ? $part['key'] : $pi }}-{{ $full ? 'staff' : 'review' }}">
+        <div
+            class="opcrf-sheet-part"
+            @if ($partFilterEnabled ?? false)
+                data-part-filter="{{ $part['key'] }}"
+            @endif
+            wire:key="part-{{ $part['key'] !== '' ? $part['key'] : $pi }}-{{ $full ? 'staff' : 'review' }}"
+        >
             @if ($part['title'] !== '')
                 <div class="opcrf-sheet-partbanner">
                     <span class="opcrf-sheet-partkey">PART {{ $part['key'] }}</span>
@@ -251,7 +257,7 @@
                                                     wire:model.defer="objectiveRemarks.{{ $pi }}.{{ $ei }}"
                                                     rows="3"
                                                     maxlength="2000"
-                                                    aria-label="Superadmin remarks for Part {{ $part['key'] }} objective {{ $entry['number'] }}"
+                                                    aria-label="{{ auth()->user()->canReviewAllOpcrfSubmissions() ? 'Validator' : 'Superadmin' }} remarks for Part {{ $part['key'] }} objective {{ $entry['number'] }}"
                                                     placeholder="Add remarks for objective {{ $entry['number'] }}…"
                                                 ></textarea>
                                             @else

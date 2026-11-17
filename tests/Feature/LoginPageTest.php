@@ -118,7 +118,7 @@ class LoginPageTest extends TestCase
         $this->get('/home')
             ->assertOk()
             ->assertSee('ADMIN WORKSPACE')
-            ->assertSeeLivewire('opcrf-analytics')
+            ->assertSee('Statistics')
             ->assertDontSee('STAFF WORKSPACE');
 
         $this->get(route('users.index'))->assertOk();

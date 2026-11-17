@@ -16,9 +16,25 @@ use Livewire\Component;
  */
 class AdminDashboardStats extends Component
 {
+    public bool $showStatisticsModal = false;
+
     public function mount(): void
     {
         abort_unless(Auth::user()?->hasAdminAccess(), 404);
+    }
+
+    public function openStatistics(): void
+    {
+        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+
+        $this->showStatisticsModal = true;
+    }
+
+    public function closeStatistics(): void
+    {
+        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+
+        $this->showStatisticsModal = false;
     }
 
     #[Computed]

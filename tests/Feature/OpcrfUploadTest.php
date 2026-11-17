@@ -111,11 +111,12 @@ class OpcrfUploadTest extends TestCase
     public function test_full_workbook_upload_keeps_part_one_separate_and_syncs_approved_part_one(): void
     {
         Carbon::setTestNow('2026-06-15 10:00:00');
+        config(['opcrf.validator_route' => 'sds view']);
         $user = $this->staffUser();
         $validator = User::create([
             'name' => 'SDS Viewer',
-            'username' => 'validator',
-            'email' => 'validator@example.com',
+            'username' => 'sdsview',
+            'email' => 'sds-view@example.com',
             'password' => Hash::make('password123'),
             'role' => 'viewer',
             'is_superadmin' => false,

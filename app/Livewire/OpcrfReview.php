@@ -107,8 +107,8 @@ class OpcrfReview extends Component
     }
 
     /**
-     * The SDS Viewer/Validator gets only full workbooks currently waiting
-     * in their validation queue. Superadmins keep their existing routed view.
+     * SDS Viewers share pending full workbooks assigned to the SDS role.
+     * Superadmins keep their existing routed view.
      */
     private function queueQuery(): Builder
     {
@@ -116,10 +116,7 @@ class OpcrfReview extends Component
         abort_unless($user instanceof User && $this->canAccessQueue(), 404);
 
         if ($user->canReviewAllOpcrfSubmissions()) {
-            return OpcrfSubmission::query()
-                ->where('opcrf_part', OpcrfSubmission::FULL_WORKBOOK)
-                ->where('assigned_to', $user->id)
-                ->whereIn('status', [OpcrfSubmission::STATUS_PENDING, OpcrfSubmission::STATUS_RESUBMITTED]);
+            return OpcrfSubmission::query()->awaitingSdsValidation();
         }
 
         return OpcrfSubmission::query()->visibleTo($user);
@@ -216,6 +213,8 @@ class OpcrfReview extends Component
      */
     public int $perPage = 10;
 
+    public string $search = '';
+
     /**
      * Match the app's own table look.
      * (Must be public: Livewire's pagination feature resolves it via __call.)
@@ -231,12 +230,41 @@ class OpcrfReview extends Component
     #[Computed]
     public function submissions()
     {
+        $search = trim($this->search);
+
         return $this->queueQuery()
+            ->when($search !== '', function (Builder $submissions) use ($search): void {
+                $term = '%'.$search.'%';
+
+                $submissions->where(function (Builder $matches) use ($term): void {
+                    $matches
+                        ->where('employee_name', 'like', $term)
+                        ->orWhere('position', 'like', $term)
+                        ->orWhere('review_period', 'like', $term)
+                        ->orWhere('division_office', 'like', $term)
+                        ->orWhere('account_name', 'like', $term)
+                        ->orWhere('status', 'like', $term)
+                        ->orWhereHas('user', fn (Builder $user): Builder => $user
+                            ->where('name', 'like', $term)
+                            ->orWhere('username', 'like', $term));
+                });
+            })
             ->with(['user', 'movs', 'approvedBy', 'reviewer', 'assignedTo', 'latestReview.reviewer'])
             ->withCount('movs')
             ->orderByDesc('submitted_at')
             ->orderByDesc('id')
             ->paginate($this->perPage);
+    }
+
+    public function updatedSearch(): void
+    {
+        $this->resetPage();
+    }
+
+    public function clearSearch(): void
+    {
+        $this->search = '';
+        $this->resetPage();
     }
 
     public function approvableSubmissionCount(): int
@@ -334,7 +362,9 @@ class OpcrfReview extends Component
         $this->reviewMovNumber = null;
         $this->reviewRemarks = '';
         $submission = $this->queueQuery()->findOrFail($submissionId);
-        $this->objectiveRemarks = $submission->reviewer_remarks ?? [];
+        $this->objectiveRemarks = Auth::user()?->canReviewAllOpcrfSubmissions()
+            ? []
+            : ($submission->reviewer_remarks ?? []);
         $this->resetValidation();
         $this->showReview = true;
 
@@ -367,7 +397,8 @@ class OpcrfReview extends Component
 
     /**
      * Open the numbered MOV evidence submitted by the owner of the OPCRF.
-     * The assignment check mirrors the review action controls.
+     * SDS Viewers may use the shared role queue; superadmins must hold the
+     * assigned review step.
      */
     public function openMovEvidence(int $submissionId, int $movNumber): void
     {
@@ -385,9 +416,8 @@ class OpcrfReview extends Component
 
         abort_unless($this->showReview && $this->reviewId === $submission->id, 404);
         abort_unless(
-            $submission->isAssignedTo($user)
-                || ($user->canReviewAllOpcrfSubmissions()
-                    && (int) $submission->assigned_to === (int) $user->id),
+            ($user->canReviewAllOpcrfSubmissions() && $submission->canBeViewedBySdsViewer($user))
+                || ($user->hasAdminAccess() && $submission->isAssignedTo($user)),
             403
         );
         abort_unless($submission->opcrf_part === OpcrfSubmission::FULL_WORKBOOK, 404);
@@ -586,7 +616,12 @@ class OpcrfReview extends Component
      */
     public function returnSubmission(): void
     {
-        abort_unless(Auth::user()?->hasAdminAccess(), 404);
+        $reviewer = Auth::user();
+        $isValidator = $reviewer instanceof User && $reviewer->canReviewAllOpcrfSubmissions();
+        abort_unless(
+            $reviewer instanceof User && ($reviewer->hasAdminAccess() || $isValidator),
+            404
+        );
 
         $submission = $this->reviewSubmission();
 
@@ -594,14 +629,21 @@ class OpcrfReview extends Component
             abort(403);
         }
 
-        // Same act-guard as compliance: the current holder decides; the
-        // original reviewer of a forwarded submission is read-only.
-        abort_unless($submission->isAssignedTo(Auth::user()), 403);
-
         $objectiveRemarks = $this->validatedObjectiveRemarks();
-        $submission->forceFill(['reviewer_remarks' => $objectiveRemarks])->save();
+        DB::transaction(function () use ($submission, $reviewer, $isValidator, $objectiveRemarks): void {
+            $lockedSubmission = OpcrfSubmission::query()
+                ->lockForUpdate()
+                ->findOrFail($submission->id);
 
-        $submission->returnForRevision(Auth::user(), objectiveRemarks: $objectiveRemarks);
+            if ($isValidator) {
+                abort_unless($lockedSubmission->canBeViewedBySdsViewer($reviewer), 409);
+            } else {
+                abort_unless($lockedSubmission->isAssignedTo($reviewer), 403);
+            }
+
+            $lockedSubmission->forceFill(['reviewer_remarks' => $objectiveRemarks])->save();
+            $lockedSubmission->returnForRevision($reviewer, objectiveRemarks: $objectiveRemarks);
+        });
 
         $this->showReview = false;
         $this->reviewId = null;
@@ -612,7 +654,9 @@ class OpcrfReview extends Component
 
         unset($this->submissions, $this->reviewSubmission, $this->reviewMovs, $this->reviewSheet, $this->reviewSheetRating, $this->reviewWorkbook, $this->reviewHistory);
 
-        $this->successMessage = 'OPCR returned for revision.';
+        $this->successMessage = $isValidator
+            ? 'Full OPCRF returned to the School Head for revision.'
+            : 'OPCR returned for revision.';
 
         $this->dispatch('opcrf-submission-approved')->to(OpcrfMovs::class);
         $this->dispatch('opcrf-submission-approved');
@@ -712,8 +756,8 @@ class OpcrfReview extends Component
     }
 
     /**
-     * The SDS Viewer/Validator checks a full workbook, records its remarks,
-     * and forwards it to the configured first superadmin (Eve).
+     * The SDS Viewer/Validator records objective-level notes and forwards a
+     * full workbook to the configured first superadmin (Eve).
      */
     public function validateAndForward(): void
     {
@@ -721,34 +765,24 @@ class OpcrfReview extends Component
         abort_unless($validator instanceof User && $validator->canReviewAllOpcrfSubmissions(), 404);
 
         $submission = $this->reviewSubmission();
-        abort_unless(
-            $submission !== null
-                && $submission->opcrf_part === OpcrfSubmission::FULL_WORKBOOK
-                && (int) $submission->assigned_to === (int) $validator->id,
-            403
-        );
+        abort_unless($submission !== null && $submission->canBeViewedBySdsViewer($validator), 403);
         abort_unless($submission->hasFile() && $this->reviewWorkbook !== null, 422);
 
-        $this->validate([
-            'reviewRemarks' => ['nullable', 'string', 'max:2000'],
-        ]);
         $objectiveRemarks = $this->validatedObjectiveRemarks();
         $recipient = $this->resolveInitialReviewer();
 
         if ($recipient === null) {
-            $this->addError('reviewRemarks', 'No Superadmin reviewer is available to receive this validated OPCRF.');
+            $this->addError('review', 'No Superadmin reviewer is available to receive this validated OPCRF.');
 
             return;
         }
 
         DB::transaction(function () use ($submission, $validator, $recipient, $objectiveRemarks): void {
-            $submission->forceFill(['reviewer_remarks' => $objectiveRemarks])->save();
             abort_unless(
                 $submission->validateAndForwardToSuperadmin(
                     $validator,
                     $recipient,
-                    trim($this->reviewRemarks) !== '' ? trim($this->reviewRemarks) : null,
-                    $objectiveRemarks,
+                    objectiveRemarks: $objectiveRemarks,
                 ),
                 409
             );
@@ -762,7 +796,7 @@ class OpcrfReview extends Component
         $this->resetValidation();
         unset($this->submissions, $this->reviewSubmission, $this->reviewSheet, $this->reviewWorkbook, $this->reviewHistory);
 
-        $this->successMessage = 'Full OPCRF validated and forwarded to Superadmin '.$recipient->username.'.';
+        $this->successMessage = "Full OPCRF validated and forwarded to Ma'am Eve's OPCRF table.";
         $this->dispatch('opcrf-submission-forwarded');
     }
 

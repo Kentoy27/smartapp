@@ -141,6 +141,14 @@ class OpcrfReviewTest extends TestCase
         Storage::fake('local');
         config(['opcrf.review_route' => 'Eve']);
         $viewer = $this->sdsValidator();
+        $otherViewer = User::create([
+            'name' => 'Second SDS Viewer',
+            'username' => 'second-validator',
+            'email' => 'second-validator@example.com',
+            'password' => Hash::make('password123'),
+            'role' => 'viewer',
+            'is_superadmin' => false,
+        ]);
         $eve = $this->superadmin();
         $eve->update(['username' => 'Eve']);
         $staff = $this->staffUser();
@@ -155,45 +163,64 @@ class OpcrfReviewTest extends TestCase
             'file_original_name' => 'full-opcrf.xlsx',
         ]);
 
-        Livewire::actingAs($viewer)
+        Livewire::actingAs($otherViewer)
             ->test(OpcrfReview::class)
             ->assertSee('Full OPCRF submissions to validate')
             ->assertSee('Full OPCRF (Parts I–IV)')
             ->call('openReview', $submission->id)
-            ->assertSee('Validate and Forward to Superadmin')
+            ->assertSee("Validate and Forward to Ma'am Eve")
+            ->assertSee('Validator Remarks')
+            ->assertSee('Filter Part I sections')
+            ->assertSee('All Part I')
+            ->assertSee('PART I-A')
+            ->assertSee('PART I-B')
+            ->assertSee('PART I-C')
+            ->assertSee('wire:model.defer="objectiveRemarks.0.0"', false)
+            ->assertDontSee('opcrfValidatorRemarks')
             ->assertSee('Review MOV #1')
             ->assertDontSee('>Approve</span>', false)
-            ->assertDontSee('Return for Revision')
+            ->assertSee('Return to School Head for Revision')
+            ->set('objectiveRemarks.0.0', 'Validator note for objective 1.')
             ->call('openMovEvidence', $submission->id, 1)
             ->assertSet('reviewMovNumber', 1)
             ->assertSee('MOV 1 Evidence')
             ->call('closeMovEvidence')
-            ->set('reviewRemarks', 'Checked all four parts.')
             ->call('validateAndForward')
             ->assertSet('showReview', false)
-            ->assertSet('successMessage', 'Full OPCRF validated and forwarded to Superadmin Eve.');
+            ->assertSet('successMessage', "Full OPCRF validated and forwarded to Ma'am Eve's OPCRF table.");
 
         $submission->refresh();
         $this->assertSame(OpcrfSubmission::STATUS_FORWARDED, $submission->status);
         $this->assertSame($eve->id, $submission->reviewer_id);
         $this->assertSame($eve->id, $submission->assigned_to);
         $this->assertNull($submission->approved_at);
+        $this->assertNull($submission->reviewer_remarks);
         $this->assertDatabaseHas('opcrf_reviews', [
             'opcrf_submission_id' => $submission->id,
-            'reviewer_id' => $viewer->id,
+            'reviewer_id' => $otherViewer->id,
             'action' => 'validate',
-            'remarks' => 'Checked all four parts.',
+            'remarks' => null,
         ]);
+        $validationReview = $submission->reviews()
+            ->where('action', 'validate')
+            ->firstOrFail();
+        $this->assertSame(
+            [0 => [0 => 'Validator note for objective 1.']],
+            $validationReview->objective_remarks
+        );
         $this->assertDatabaseHas('opcrf_reviews', [
             'opcrf_submission_id' => $submission->id,
-            'reviewer_id' => $viewer->id,
+            'reviewer_id' => $otherViewer->id,
             'action' => 'forward',
             'to_id' => $eve->id,
         ]);
 
         Livewire::actingAs($eve)
             ->test(OpcrfReview::class)
-            ->assertSee($submission->employee_name)
+            ->call('openReview', $submission->id)
+            ->assertSee('Superadmin Remarks')
+            ->assertSet('objectiveRemarks', [])
+            ->assertSee('Validator note for objective 1.')
             ->assertSee('Pending Review');
 
         $sy = $this->otherSuperadmin();
@@ -204,7 +231,70 @@ class OpcrfReviewTest extends TestCase
             ->assertSee($submission->employee_name);
     }
 
-    public function test_sds_viewer_queue_excludes_commitment_and_unassigned_full_workbooks(): void
+    public function test_viewer_can_return_a_full_workbook_to_the_school_head_for_revision(): void
+    {
+        Storage::fake('local');
+        $assignedViewer = $this->sdsValidator();
+        $viewer = User::create([
+            'name' => 'Second SDS Viewer',
+            'username' => 'second-validator',
+            'email' => 'second-validator@example.com',
+            'password' => Hash::make('password123'),
+            'role' => 'viewer',
+            'is_superadmin' => false,
+        ]);
+        $staff = $this->staffUser();
+        $workbookPath = $this->buildFullOpcrfWorkbook();
+        $storedPath = 'opcrf-submissions/'.$staff->id.'/full-opcrf.xlsx';
+        Storage::disk('local')->put($storedPath, file_get_contents($workbookPath));
+        $submission = $this->createSubmission($staff, [
+            'opcrf_part' => OpcrfSubmission::FULL_WORKBOOK,
+            'reviewer_id' => $assignedViewer->id,
+            'assigned_to' => $assignedViewer->id,
+            'file_path' => $storedPath,
+            'file_original_name' => 'full-opcrf.xlsx',
+        ]);
+
+        Livewire::actingAs($viewer)
+            ->test(OpcrfReview::class)
+            ->call('openReview', $submission->id)
+            ->assertSee('Return to School Head for Revision')
+            ->set('objectiveRemarks.0.0', 'Validator return note for objective 1.')
+            ->call('returnSubmission')
+            ->assertSet('showReview', false)
+            ->assertSet('successMessage', 'Full OPCRF returned to the School Head for revision.');
+
+        $submission->refresh();
+        $this->assertSame(OpcrfSubmission::STATUS_RETURNED, $submission->status);
+        $this->assertSame($viewer->id, $submission->reviewer_id);
+        $this->assertNull($submission->assigned_to);
+        $this->assertSame(
+            [0 => [0 => 'Validator return note for objective 1.']],
+            $submission->reviewer_remarks
+        );
+        $this->assertDatabaseHas('opcrf_reviews', [
+            'opcrf_submission_id' => $submission->id,
+            'reviewer_id' => $viewer->id,
+            'action' => 'return',
+            'remarks' => null,
+            'new_status' => OpcrfSubmission::STATUS_RETURNED,
+        ]);
+        $returnReview = $submission->reviews()
+            ->where('action', 'return')
+            ->firstOrFail();
+        $this->assertSame(
+            [0 => [0 => 'Validator return note for objective 1.']],
+            $returnReview->objective_remarks
+        );
+
+        Livewire::actingAs($staff)
+            ->test(OpcrfMovs::class)
+            ->call('openRevise', $submission->id)
+            ->assertSee('Validator Remarks')
+            ->assertSee('Validator return note for objective 1.');
+    }
+
+    public function test_sds_viewer_queue_excludes_commitment_unassigned_and_forwarded_full_workbooks(): void
     {
         $viewer = $this->sdsValidator();
         $staff = $this->staffUser();
@@ -218,18 +308,26 @@ class OpcrfReviewTest extends TestCase
             'reviewer_id' => null,
             'assigned_to' => null,
         ]);
+        $forwardedFull = $this->createSubmission($staff, [
+            'opcrf_part' => OpcrfSubmission::FULL_WORKBOOK,
+            'status' => OpcrfSubmission::STATUS_FORWARDED,
+            'reviewer_id' => $viewer->id,
+            'assigned_to' => $viewer->id,
+        ]);
 
         $component = Livewire::actingAs($viewer)->test(OpcrfReview::class)
             ->assertDontSee($commitment->employee_name)
-            ->assertDontSee($unassignedFull->employee_name);
+            ->assertDontSee($unassignedFull->employee_name)
+            ->assertDontSee($forwardedFull->employee_name);
 
         $component->call('openReview', $commitment->id)->assertNotFound();
         $component->call('openReview', $unassignedFull->id)->assertNotFound();
+        $component->call('openReview', $forwardedFull->id)->assertNotFound();
         $component->call('approveSubmission')->assertNotFound();
         $component->call('returnSubmission')->assertNotFound();
     }
 
-    public function test_only_the_assigned_full_opcrf_validator_can_preview_the_submitters_mov(): void
+    public function test_all_sds_viewers_can_preview_the_full_opcrf_submitters_mov(): void
     {
         Storage::fake('local');
         config(['mov.disk' => 'local']);
@@ -283,7 +381,7 @@ class OpcrfReviewTest extends TestCase
 
         $this->actingAs($otherViewer)
             ->get(route('mov.preview', $mov))
-            ->assertForbidden();
+            ->assertOk();
 
         $submission->update(['assigned_to' => null]);
 
@@ -319,6 +417,32 @@ class OpcrfReviewTest extends TestCase
         $component->call('refreshSubmissions');
 
         $component->assertSee('Jane D. Doe');
+    }
+
+    public function test_review_table_search_filters_submissions_and_can_be_cleared(): void
+    {
+        $admin = $this->superadmin();
+        $staff = $this->staffUser();
+        $matching = $this->createSubmission($staff, [
+            'employee_name' => 'Alex Matching',
+            'position' => 'School Principal',
+        ]);
+        $other = $this->createSubmission($staff, [
+            'employee_name' => 'Sam Other',
+            'position' => 'Teacher I',
+        ]);
+
+        $component = Livewire::actingAs($admin)
+            ->test(OpcrfReview::class)
+            ->assertSee('Search OPCRF submissions')
+            ->set('search', 'principal')
+            ->assertSee($matching->employee_name)
+            ->assertDontSee($other->employee_name);
+
+        $component->call('clearSearch')
+            ->assertSet('search', '')
+            ->assertSee($matching->employee_name)
+            ->assertSee($other->employee_name);
     }
 
     public function test_opening_the_review_shows_the_submission_details(): void
@@ -501,6 +625,7 @@ class OpcrfReviewTest extends TestCase
             ->test(OpcrfReview::class)
             ->call('openReview', $submission->id)
             ->assertSee('Superadmin Remarks')
+            ->assertDontSee('Filter Part I sections')
             ->assertSee('wire:model.defer="objectiveRemarks.0.0"', false)
             ->set('objectiveRemarks.0.0', 'Clarify the target measurement.')
             ->call('approveSubmission');

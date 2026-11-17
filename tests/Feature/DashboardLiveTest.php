@@ -136,6 +136,7 @@ class DashboardLiveTest extends TestCase
                 ->test(\App\Livewire\AdminDashboardStats::class)
                 ->assertSee('System Overview')
                 ->assertSee('Across all schools')
+                ->assertSee('Statistics')
                 ->assertSeeInOrder([
                     'Schools', '1',
                     'School Heads', '1',
@@ -143,6 +144,15 @@ class DashboardLiveTest extends TestCase
                     'WFP Uploads', '1',
                     'MOV Uploads', '0',
                 ]);
+
+            Livewire::actingAs($account)
+                ->test(\App\Livewire\AdminDashboardStats::class)
+                ->call('openStatistics')
+                ->assertSet('showStatisticsModal', true)
+                ->assertSee('OPCRF Statistics Overview')
+                ->assertSee('Review workflow')
+                ->assertSee('SDS Validator')
+                ->assertSee('Sir SY');
 
             $this->actingAs($account)
                 ->get(route('home'))

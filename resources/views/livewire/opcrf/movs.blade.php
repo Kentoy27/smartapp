@@ -172,19 +172,25 @@
                 </div>
 
                 <div class="modal-form">
+                    @php($returnReview = $this->resubmitSubmission->latestReview)
+                    @php($returnObjectiveRemarks = $returnReview?->objective_remarks ?? $this->resubmitSubmission->reviewer_remarks ?? [])
                     <div class="opcrf-action-required-remarks opcrf-revise-remarks">
                         <div class="opcrf-action-required-remarks-label">
-                            Superadmin Remarks @if ($this->resubmitSubmission->latestReview?->reviewer)
-                                — {{ $this->resubmitSubmission->latestReview->reviewer->username }}@endif
+                            {{ $returnReview?->reviewer?->canReviewAllOpcrfSubmissions() ? 'Validator Remarks' : 'Superadmin Remarks' }}
+                            @if ($returnReview?->reviewer)
+                                — {{ $returnReview->reviewer->username }}
+                            @endif
                         </div>
                         <p class="opcrf-action-required-remarks-text">
-                            {{ $this->resubmitSubmission->latestReview?->remarks !== null && trim((string) $this->resubmitSubmission->latestReview?->remarks) !== ''
-                                ? $this->resubmitSubmission->latestReview->remarks
-                                : 'No remarks were provided — please review your submission and correct any missing or inconsistent details.' }}
+                            {{ $returnReview?->remarks !== null && trim((string) $returnReview?->remarks) !== ''
+                                ? $returnReview->remarks
+                                : (empty($returnObjectiveRemarks)
+                                    ? 'No remarks were provided — please review your submission and correct any missing or inconsistent details.'
+                                    : 'Please review the objective-level remarks below and correct the noted items.') }}
                         </p>
                     </div>
 
-                    @foreach ($this->resubmitSubmission->reviewer_remarks ?? [] as $partIndex => $objectives)
+                    @foreach ($returnObjectiveRemarks as $partIndex => $objectives)
                         @foreach ($objectives as $objectiveIndex => $remark)
                             @if (is_string($remark) && trim($remark) !== '')
                                 <div class="opcrf-action-required-remarks opcrf-revise-remarks">

@@ -214,7 +214,12 @@ class UserMov extends Model
             && OpcrfSubmission::query()
                 ->where('user_id', $this->user_id)
                 ->where('opcrf_part', OpcrfSubmission::FULL_WORKBOOK)
-                ->where('assigned_to', $user->id)
+                ->whereHas('assignedTo', fn ($assigned) => $assigned
+                    ->where('role', 'viewer')
+                    ->where('is_superadmin', false))
+                ->whereHas('user', fn ($owner) => $owner
+                    ->where('role', 'user')
+                    ->where('is_superadmin', false))
                 ->whereIn('status', [
                     OpcrfSubmission::STATUS_PENDING,
                     OpcrfSubmission::STATUS_RESUBMITTED,

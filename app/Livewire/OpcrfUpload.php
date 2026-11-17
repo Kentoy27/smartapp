@@ -298,11 +298,13 @@ class OpcrfUpload extends Component
         $configured = trim((string) config('opcrf.validator_route', ''));
 
         if ($configured !== '') {
+            $normalizedConfigured = $this->normalizeRouteUsername($configured);
             $validator = User::query()
                 ->where('role', 'viewer')
                 ->where('is_superadmin', false)
-                ->where('username', $configured)
-                ->first();
+                ->orderBy('username')
+                ->get()
+                ->first(fn (User $candidate): bool => $this->normalizeRouteUsername($candidate->username) === $normalizedConfigured);
 
             if ($validator !== null) {
                 return $validator;
@@ -314,6 +316,11 @@ class OpcrfUpload extends Component
             ->where('is_superadmin', false)
             ->orderBy('username')
             ->first();
+    }
+
+    private function normalizeRouteUsername(string $username): string
+    {
+        return preg_replace('/[^a-z0-9]/', '', strtolower($username)) ?? '';
     }
 
     private function canUploadSubmission(?OpcrfSubmission $submission): bool
