@@ -334,19 +334,33 @@
                     </div>
 
                     <div class="modal-form">
-                        <p>
-                            Reset <strong>{{ $resetPasswordUsername }}</strong>'s password to
-                            <strong>{{ $resetPasswordDefault }}</strong> (their School ID)?
-                            This ID is not private; share it securely and advise them to choose a new password.
-                        </p>
+                        @if ($resetPasswordTemporaryPassword !== '')
+                            <p role="status">
+                                A temporary password was created for <strong>{{ $resetPasswordUsername }}</strong>.
+                                Share it securely. They must choose a new password before using SmartApp.
+                            </p>
+                            <div class="field">
+                                <label for="temporaryPassword">Temporary password (shown once)</label>
+                                <input id="temporaryPassword" type="text" readonly value="{{ $resetPasswordTemporaryPassword }}" onfocus="this.select()">
+                            </div>
 
-                        <div class="modal-actions">
-                            <button type="button" class="btn-ghost" wire:click="closeResetPasswordModal">Cancel</button>
-                            <button type="button" class="btn-primary" wire:click="confirmResetPassword" wire:loading.attr="disabled" wire:target="confirmResetPassword">
-                                <span wire:loading.remove wire:target="confirmResetPassword">Reset Password</span>
-                                <span wire:loading wire:target="confirmResetPassword">Resetting…</span>
-                            </button>
-                        </div>
+                            <div class="modal-actions">
+                                <button type="button" class="btn-primary" wire:click="closeResetPasswordModal">Done</button>
+                            </div>
+                        @else
+                            <p>
+                                Create a random temporary password for <strong>{{ $resetPasswordUsername }}</strong>?
+                                Their current sessions will be signed out, and they must choose a new password at their next sign-in.
+                            </p>
+
+                            <div class="modal-actions">
+                                <button type="button" class="btn-ghost" wire:click="closeResetPasswordModal">Cancel</button>
+                                <button type="button" class="btn-primary" wire:click="confirmResetPassword" wire:loading.attr="disabled" wire:target="confirmResetPassword">
+                                    <span wire:loading.remove wire:target="confirmResetPassword">Reset Password</span>
+                                    <span wire:loading wire:target="confirmResetPassword">Resetting…</span>
+                                </button>
+                            </div>
+                        @endif
                     </div>
                 </div>
             </div>

@@ -54,9 +54,18 @@ class LoginController extends Controller
         }
 
         $request->session()->regenerate();
+        $user = Auth::user();
+
+        if ($user instanceof User) {
+            $request->session()->put(
+                'auth_password_fingerprint',
+                hash('sha256', $user->getAuthPassword()),
+            );
+            $request->session()->forget('password_change_google_authenticated');
+        }
 
         return redirect()
-            ->route('home')
+            ->route($user instanceof User && $user->must_change_password ? 'password.change' : 'home')
             ->with('success', 'Login successful. Welcome back!')
             ->with('success_title', 'Login successful');
     }

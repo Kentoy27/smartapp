@@ -63,6 +63,23 @@ class UserDeviceSession extends Model
             ->update(['logged_out_at' => now(), 'updated_at' => now()]);
     }
 
+    public static function endAllSessions(User $user): void
+    {
+        static::query()
+            ->where('user_id', $user->id)
+            ->whereNull('logged_out_at')
+            ->update(['logged_out_at' => now(), 'updated_at' => now()]);
+    }
+
+    public static function wasRevoked(User $user, string $sessionId): bool
+    {
+        return static::query()
+            ->where('user_id', $user->id)
+            ->where('session_hash', hash('sha256', $sessionId))
+            ->whereNotNull('logged_out_at')
+            ->exists();
+    }
+
     public function isCurrentSession(string $sessionId): bool
     {
         return hash_equals($this->session_hash, hash('sha256', $sessionId));

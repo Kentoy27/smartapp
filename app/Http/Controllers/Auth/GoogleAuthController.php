@@ -56,6 +56,12 @@ class GoogleAuthController extends Controller
 
         Auth::login($user, remember: true);
         session()->regenerate();
+        session()->put('auth_password_fingerprint', hash('sha256', $user->getAuthPassword()));
+        session()->forget('password_change_google_authenticated');
+
+        if ($user->must_change_password) {
+            session()->put('password_change_google_authenticated', true);
+        }
 
         return redirect()->route('home');
     }

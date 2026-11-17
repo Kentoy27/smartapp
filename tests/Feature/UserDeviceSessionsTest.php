@@ -41,6 +41,18 @@ class UserDeviceSessionsTest extends TestCase
         }
     }
 
+    public function test_download_app_modal_shows_install_steps_for_iphone_and_ipad(): void
+    {
+        Livewire::actingAs(User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]))
+            ->test(DownloadAppModal::class)
+            ->call('openModal')
+            ->assertSee('IPHONE &amp; IPAD')
+            ->assertSee('Install SmartApp on iPhone or iPad')
+            ->assertSee('iOS cannot install Android APK files')
+            ->assertSee('Add to Home Screen')
+            ->assertSee('Tap Add');
+    }
+
     public function test_device_modal_lists_all_active_sessions_for_only_the_signed_in_user(): void
     {
         $user = User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]);

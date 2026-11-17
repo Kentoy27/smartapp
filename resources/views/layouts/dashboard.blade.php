@@ -11,7 +11,7 @@
     {{-- The version is bumped whenever dashboard.css changes: browsers that
          cached an older copy keep painting the stale sheet at the same URL,
          which is why a broken stylesheet can survive a fresh deploy. --}}
-    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=67">
+    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=68">
     <title>@yield('title', 'Dashboard — SmartApp')</title>
     <script>
         /* Apply the saved theme before first paint to avoid a flash.
@@ -8044,6 +8044,103 @@
             .header .user-info { gap: 10px; }
             .header .user-info .name { display: none; }
         }
+
+        /* ---------- SHARED APP RESPONSIVENESS ---------- */
+        @media (max-width: 768px) {
+            html,
+            body {
+                width: 100%;
+                min-width: 320px;
+                overflow-x: clip;
+            }
+
+            .layout,
+            .content-area,
+            .main {
+                min-width: 0;
+                width: 100%;
+            }
+
+            .main > * {
+                max-width: 100%;
+                min-width: 0;
+            }
+
+            .table-wrap {
+                max-width: 100%;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .modal-backdrop {
+                align-items: center;
+                padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
+            }
+
+            .modal,
+            .modal--wide,
+            .aip-preview-modal,
+            .aip-review-modal {
+                width: 100%;
+                min-width: 0;
+                max-width: 100%;
+                max-height: calc(100dvh - 24px);
+                overscroll-behavior: contain;
+            }
+
+            .user-dropdown {
+                right: 0;
+                max-width: calc(100vw - 20px);
+            }
+        }
+
+        @media (max-width: 480px) {
+            .main {
+                padding: 12px;
+            }
+
+            .main .page-header {
+                overflow-wrap: anywhere;
+                margin-bottom: 16px;
+            }
+
+            .main .page-header h1 {
+                font-size: clamp(1.25rem, 6vw, 1.5rem);
+            }
+
+            .main .card,
+            .main .stat-card {
+                padding: 16px;
+            }
+
+            .card-head,
+            .users-toolbar {
+                align-items: stretch;
+            }
+
+            .users-search {
+                flex: 1 1 100%;
+                max-width: none;
+                min-width: 0;
+            }
+
+            .users-add-btn {
+                margin-left: 0;
+            }
+
+            .footer {
+                position: relative;
+                flex-direction: column;
+                gap: 4px;
+                padding: 12px 16px;
+                overflow-wrap: anywhere;
+            }
+
+            .footer-credits {
+                position: static;
+                right: auto;
+            }
+        }
     </style>
 </head>
 <body>
@@ -8143,7 +8240,7 @@
 
             <!-- FOOTER -->
             <footer class="footer">
-                <span>&copy; {{ date('Y') }} SmartApp &mdash; All rights reserved</span>
+                <span>&copy; {{ date('Y') }} SmartApp &mdash; All rights reserved &middot; Web Application Version 0.1.7</span>
                 <button type="button" class="footer-credits" id="creditsTrigger" aria-haspopup="dialog" aria-controls="creditsModal">
                     Credits
                 </button>

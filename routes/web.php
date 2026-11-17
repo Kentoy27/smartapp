@@ -3,6 +3,7 @@
 use App\Http\Controllers\AipUploadController;
 use App\Http\Controllers\Auth\GoogleAuthController;
 use App\Http\Controllers\Auth\LoginController;
+use App\Http\Controllers\Auth\ForcedPasswordChangeController;
 use App\Http\Controllers\DashboardController;
 use App\Models\AipPlan;
 use App\Models\AipReview;
@@ -115,9 +116,16 @@ Route::get('/logout', function () {
 Route::get('/auth/google/redirect', [GoogleAuthController::class, 'redirect'])->name('google.redirect')->middleware('guest');
 Route::get('/auth/google/callback', [GoogleAuthController::class, 'callback'])->name('google.callback');
 
-Route::get('/home', [DashboardController::class, 'index'])->middleware(['auth'])->name('home');
-
 Route::middleware(['auth'])->group(function () {
+    Route::get('/password/change', [ForcedPasswordChangeController::class, 'show'])->name('password.change');
+    Route::post('/password/change', [ForcedPasswordChangeController::class, 'update'])->name('password.change.update');
+});
+
+Route::get('/home', [DashboardController::class, 'index'])
+    ->middleware(['auth', 'password.change.required'])
+    ->name('home');
+
+Route::middleware(['auth', 'password.change.required'])->group(function () {
     /* ------------------------------------------------------------------
      * The financial division the account is working in. The choice is a
      * preference held in the session; it is only ever honoured while the

@@ -7,8 +7,10 @@ use App\Livewire\Concerns\ManagesAssignedSchools;
 use App\Models\District;
 use App\Models\School;
 use App\Models\User;
+use App\Models\UserDeviceSession;
 use App\Support\SchoolDivision;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
 use Livewire\Attributes\Computed;
@@ -27,6 +29,14 @@ class UsersTable extends Component
     public function mount(): void
     {
         abort_unless(Auth::user()?->canManageUsersAndSchools(), 404);
+    }
+
+    private function authorizeManager(): User
+    {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canManageUsersAndSchools(), 403);
+
+        return $user;
     }
 
     /**
@@ -70,7 +80,7 @@ class UsersTable extends Component
 
     public string $resetPasswordUsername = '';
 
-    public string $resetPasswordDefault = '';
+    public string $resetPasswordTemporaryPassword = '';
 
     /**
      * The employee's real name.
@@ -228,7 +238,7 @@ class UsersTable extends Component
 
     public function openCreateModal(): void
     {
-        abort_if($this->isViewer(), 403);
+        $this->authorizeManager();
 
         $this->resetForm();
         $this->resetValidation();
@@ -240,7 +250,7 @@ class UsersTable extends Component
 
     public function openEditModal(User $user): void
     {
-        abort_if($this->isViewer(), 403);
+        $this->authorizeManager();
 
         $this->resetForm();
         $this->resetValidation();
@@ -289,6 +299,7 @@ class UsersTable extends Component
 
     public function openRoleModal(User $user): void
     {
+        $this->authorizeManager();
         abort_unless($this->canAssignRoles(), 403);
         abort_if($user->is($this->authenticatedUser()), 403);
 
@@ -310,6 +321,7 @@ class UsersTable extends Component
 
     public function updateRole(): void
     {
+        $this->authorizeManager();
         abort_unless($this->canAssignRoles(), 403);
 
         $validated = $this->validate([
@@ -342,7 +354,7 @@ class UsersTable extends Component
 
     public function openDeleteModal(User $user): void
     {
-        abort_if($this->isViewer(), 403);
+        $this->authorizeManager();
         abort_if($user->is($this->authenticatedUser()), 403);
 
         $this->deleteUserId = $user->id;
@@ -359,7 +371,7 @@ class UsersTable extends Component
 
     public function confirmDelete(): void
     {
-        abort_if($this->isViewer(), 403);
+        $this->authorizeManager();
 
         $user = User::findOrFail($this->deleteUserId);
         abort_if($user->is($this->authenticatedUser()), 403);
@@ -374,11 +386,12 @@ class UsersTable extends Component
 
     public function openResetPasswordModal(User $user): void
     {
+        $this->authorizeManager();
         abort_unless($this->canResetPassword($user), 403);
 
         $this->resetPasswordUserId = $user->id;
         $this->resetPasswordUsername = $user->username;
-        $this->resetPasswordDefault = $this->schoolIdForPasswordReset($user) ?? '';
+        $this->resetPasswordTemporaryPassword = '';
         $this->showResetPasswordModal = true;
     }
 
@@ -387,24 +400,28 @@ class UsersTable extends Component
         $this->showResetPasswordModal = false;
         $this->resetPasswordUserId = null;
         $this->resetPasswordUsername = '';
-        $this->resetPasswordDefault = '';
+        $this->resetPasswordTemporaryPassword = '';
     }
 
     public function confirmResetPassword(): void
     {
-        abort_unless($this->authenticatedUser()?->canManageUsersAndSchools(), 403);
+        $this->authorizeManager();
 
         $user = User::with('school')->findOrFail($this->resetPasswordUserId);
         abort_unless($this->canResetPassword($user), 403);
 
-        $schoolId = $this->schoolIdForPasswordReset($user);
-        abort_unless($schoolId !== null, 403);
-
-        $user->forceFill(['password' => $schoolId])->save();
+        $temporaryPassword = Str::random(40);
+        $user->forceFill([
+            'password' => $temporaryPassword,
+            'must_change_password' => true,
+            'remember_token' => Str::random(60),
+        ])->save();
+        UserDeviceSession::endAllSessions($user);
         $username = $user->username;
 
-        $this->closeResetPasswordModal();
-        $this->successMessage = "Password reset for {$username}. The password is now the School ID.";
+        $this->resetPasswordTemporaryPassword = $temporaryPassword;
+        $this->successMessage = "Password reset for {$username}. They must change the temporary password when they sign in.";
+        $this->announce();
     }
 
     private function resetForm(): void
@@ -593,7 +610,7 @@ class UsersTable extends Component
      */
     public function createUser(): void
     {
-        abort_if($this->isViewer(), 403);
+        $this->authorizeManager();
 
         $validated = $this->validate();
         $selectedRole = $this->canAssignRoles()
@@ -671,7 +688,7 @@ class UsersTable extends Component
      */
     public function updateUser(): void
     {
-        abort_if($this->isViewer(), 403);
+        $this->authorizeManager();
 
         $user = User::findOrFail($this->editingUserId);
 
@@ -698,6 +715,11 @@ class UsersTable extends Component
 
         if (($validated['password'] ?? '') !== '') {
             $user->password = $validated['password']; // hashed by the model cast
+            $user->remember_token = Str::random(60);
+            if (! $user->is($this->authenticatedUser())) {
+                $user->must_change_password = true;
+            }
+            UserDeviceSession::endAllSessions($user);
         }
 
         $user->save();
@@ -757,6 +779,8 @@ class UsersTable extends Component
     #[Computed]
     public function divisions()
     {
+        $this->authorizeManager();
+
         return District::query()->orderBy('name')->get();
     }
 
@@ -767,6 +791,8 @@ class UsersTable extends Component
     #[Computed]
     public function divisionSchools()
     {
+        $this->authorizeManager();
+
         if ($this->school_division === '') {
             return collect();
         }
@@ -800,6 +826,8 @@ class UsersTable extends Component
     #[Computed]
     public function selectedSchool(): ?School
     {
+        $this->authorizeManager();
+
         if ($this->school_id_choice === '') {
             return null;
         }
@@ -880,6 +908,8 @@ class UsersTable extends Component
     #[Computed]
     public function rows()
     {
+        $this->authorizeManager();
+
         return User::query()
             ->when($this->search !== '', function ($query) {
                 $term = '%'.str_replace('%', '\%', $this->search).'%';
@@ -934,7 +964,7 @@ class UsersTable extends Component
 
     public function deleteUser(User $user): void
     {
-        abort_if($this->isViewer(), 403);
+        $this->authorizeManager();
 
         if ($user->is($this->authenticatedUser())) {
             // Refuse to lock yourself out of the system.
@@ -957,7 +987,7 @@ class UsersTable extends Component
 
     public function canManageUsers(): bool
     {
-        return ! $this->isViewer();
+        return (bool) $this->authenticatedUser()?->canManageUsersAndSchools();
     }
 
     public function canChangeRoles(): bool
@@ -969,32 +999,13 @@ class UsersTable extends Component
     {
         return (bool) $this->authenticatedUser()?->canManageUsersAndSchools()
             && $user->role === 'user'
-            && $user->school_id !== null
-            && $this->schoolIdForPasswordReset($user) !== null;
-    }
-
-    private function schoolIdForPasswordReset(User $user): ?string
-    {
-        $schoolId = trim((string) $user->school?->school_id);
-
-        if ($schoolId !== '') {
-            return $schoolId;
-        }
-
-        if (preg_match('/^([0-9]+)@deped\.gov\.ph$/i', trim((string) $user->email), $matches) === 1) {
-            return $matches[1];
-        }
-
-        return null;
-    }
-
-    private function isViewer(): bool
-    {
-        return $this->authenticatedUser()?->role === 'viewer';
+            && $user->school_id !== null;
     }
 
     public function render()
     {
+        $this->authorizeManager();
+
         return view('livewire.users.table', [
             'users' => $this->rows,
         ]);

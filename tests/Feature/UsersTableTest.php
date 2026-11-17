@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\District;
 use App\Models\School;
 use App\Models\User;
+use App\Models\UserDeviceSession;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Livewire\Livewire;
@@ -141,6 +142,24 @@ class UsersTableTest extends TestCase
         $this->assertDatabaseMissing('users', ['id' => $other->id]);
     }
 
+    public function test_a_demoted_administrator_cannot_mutate_an_already_open_users_table(): void
+    {
+        $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
+        $component = Livewire::actingAs($admin)
+            ->test('users-table')
+            ->call('openCreateModal')
+            ->set('name', 'Unauthorized Account')
+            ->set('username', 'unauthorized_account')
+            ->set('email', 'unauthorized@example.com')
+            ->set('password', 'password123');
+
+        $admin->forceFill(['role' => 'budget'])->save();
+
+        $component->call('createUser')->assertForbidden();
+
+        $this->assertDatabaseMissing('users', ['username' => 'unauthorized_account']);
+    }
+
     public function test_delete_modal_requires_confirmation(): void
     {
         $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
@@ -164,7 +183,7 @@ class UsersTableTest extends TestCase
         $this->assertDatabaseMissing('users', ['id' => $other->id]);
     }
 
-    public function test_administrator_can_reset_a_school_heads_password_to_the_school_id(): void
+    public function test_administrator_resets_a_school_heads_password_to_a_temporary_credential(): void
     {
         $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
         [, $school] = $this->createDivisionWithSchool();
@@ -175,21 +194,35 @@ class UsersTableTest extends TestCase
             'password' => 'OldStrongPassword123!',
         ]);
 
-        Livewire::actingAs($admin)
+        UserDeviceSession::recordActivity($schoolHead, 'existing-school-head-session', 'Mozilla/5.0 (Windows NT 10.0)');
+
+        $component = Livewire::actingAs($admin)
             ->test('users-table')
             ->assertSee('Reset Password')
             ->call('openResetPasswordModal', $schoolHead->id)
             ->assertSet('showResetPasswordModal', true)
             ->assertSet('resetPasswordUsername', $schoolHead->username)
-            ->assertSet('resetPasswordDefault', $school->school_id)
             ->call('confirmResetPassword')
-            ->assertSet('showResetPasswordModal', false)
-            ->assertSet('successMessage', "Password reset for {$schoolHead->username}. The password is now the School ID.");
+            ->assertSet('showResetPasswordModal', true)
+            ->assertSet('successMessage', "Password reset for {$schoolHead->username}. They must change the temporary password when they sign in.")
+            ->assertSee('Temporary password (shown once)');
 
-        $this->assertTrue(Hash::check($school->school_id, $schoolHead->fresh()->password));
+        $temporaryPassword = $component->get('resetPasswordTemporaryPassword');
+        $this->assertNotSame($school->school_id, $temporaryPassword);
+        $this->assertTrue(Hash::check($temporaryPassword, $schoolHead->fresh()->password));
+        $this->assertTrue($schoolHead->fresh()->must_change_password);
+        $this->assertNotNull(
+            UserDeviceSession::query()
+                ->where('user_id', $schoolHead->id)
+                ->whereNotNull('logged_out_at')
+                ->value('logged_out_at'),
+        );
+
+        $component->call('closeResetPasswordModal')
+            ->assertSet('resetPasswordTemporaryPassword', '');
     }
 
-    public function test_administrator_can_use_deped_email_school_id_when_school_id_is_missing(): void
+    public function test_administrator_can_reset_a_school_head_even_when_the_school_has_no_public_id(): void
     {
         $admin = User::factory()->create(['is_superadmin' => false, 'role' => 'administrator']);
         [, $school] = $this->createDivisionWithSchool();
@@ -205,11 +238,10 @@ class UsersTableTest extends TestCase
             ->test('users-table')
             ->assertSee('Reset Password')
             ->call('openResetPasswordModal', $schoolHead->id)
-            ->assertSet('resetPasswordDefault', '117881')
-            ->assertSee('117881')
             ->call('confirmResetPassword');
 
-        $this->assertTrue(Hash::check('117881', $schoolHead->fresh()->password));
+        $this->assertTrue($schoolHead->fresh()->must_change_password);
+        $this->assertFalse(Hash::check('117881', $schoolHead->fresh()->password));
     }
 
     public function test_administrator_cannot_reset_passwords_for_accounts_without_a_school_id(): void

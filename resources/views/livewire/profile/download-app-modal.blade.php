@@ -63,6 +63,19 @@
                         @endif
                     </section>
 
+                    <section class="download-app-modal__ios" aria-labelledby="downloadAppIosTitle">
+                        <div>
+                            <span class="download-app-modal__ios-label">IPHONE &amp; IPAD</span>
+                            <h3 id="downloadAppIosTitle">Install SmartApp on iPhone or iPad</h3>
+                            <p>iOS cannot install Android APK files. Add the SmartApp web app to your Home Screen from Safari instead.</p>
+                        </div>
+                        <ol>
+                            <li>Open SmartApp in Safari.</li>
+                            <li>Tap <strong>Share</strong>, then choose <strong>Add to Home Screen</strong>.</li>
+                            <li>Tap <strong>Add</strong>. SmartApp will appear on your Home Screen.</li>
+                        </ol>
+                    </section>
+
                     <div class="download-app-modal__status" x-show="installed" x-cloak role="status">
                         <x-icon name="check-circle" :size="17" />
                         <span>SmartApp is already installed on this device.</span>
@@ -85,7 +98,6 @@
                         <h3>Install from your browser</h3>
                         <ul>
                             <li><strong>Android:</strong> open the browser menu and choose <em>Install app</em> or <em>Add to Home screen</em>.</li>
-                            <li><strong>iPhone or iPad:</strong> in Safari, tap <em>Share</em>, then <em>Add to Home Screen</em>.</li>
                             <li><strong>Computer:</strong> use the install icon in the address bar, or choose <em>Install SmartApp</em> from the browser menu.</li>
                         </ul>
                         <p>Install options depend on your browser. Open SmartApp in a supported, up-to-date browser over a secure connection.</p>

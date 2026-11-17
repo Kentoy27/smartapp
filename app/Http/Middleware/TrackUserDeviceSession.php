@@ -16,9 +16,32 @@ class TrackUserDeviceSession
         $user = Auth::user();
 
         if ($user instanceof User && $request->hasSession()) {
+            $sessionId = $request->session()->getId();
+            $passwordFingerprint = hash('sha256', $user->getAuthPassword());
+            $storedFingerprint = $request->session()->get('auth_password_fingerprint');
+
+            if (
+                UserDeviceSession::wasRevoked($user, $sessionId)
+                || (is_string($storedFingerprint) && ! hash_equals($storedFingerprint, $passwordFingerprint))
+                || ($storedFingerprint === null && $user->must_change_password)
+            ) {
+                UserDeviceSession::endCurrentSession($user, $sessionId);
+                Auth::logout();
+                $request->session()->invalidate();
+                $request->session()->regenerateToken();
+
+                return redirect()
+                    ->route('login')
+                    ->withErrors(['login' => 'Your session expired because your password was reset. Please sign in again.']);
+            }
+
+            if ($storedFingerprint === null) {
+                $request->session()->put('auth_password_fingerprint', $passwordFingerprint);
+            }
+
             UserDeviceSession::recordActivity(
                 $user,
-                $request->session()->getId(),
+                $sessionId,
                 $request->userAgent(),
             );
         }

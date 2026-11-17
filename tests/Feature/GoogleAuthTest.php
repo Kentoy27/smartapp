@@ -103,6 +103,30 @@ class GoogleAuthTest extends TestCase
         $this->assertAuthenticatedAs($existing);
     }
 
+    public function test_google_authenticated_user_can_set_a_new_password_when_required(): void
+    {
+        $existing = User::factory()->create([
+            'email' => 'jane@example.com',
+            'username' => 'janedoe',
+            'google_id' => '1234567890',
+            'must_change_password' => true,
+        ]);
+        $this->mockSocialite($this->fakeGoogleUser());
+
+        $this->get(route('google.callback'))->assertRedirect('/home');
+        $this->get(route('home'))->assertRedirect(route('password.change'));
+        $this->get(route('password.change'))
+            ->assertOk()
+            ->assertSee('set a new password below');
+
+        $this->post(route('password.change.update'), [
+            'password' => 'NewStrongPassword123!',
+            'password_confirmation' => 'NewStrongPassword123!',
+        ])->assertRedirect(route('home'));
+
+        $this->assertFalse($existing->fresh()->must_change_password);
+    }
+
     public function test_google_login_does_not_return_to_an_unavailable_intended_page(): void
     {
         $existing = User::factory()->create([

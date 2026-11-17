@@ -5,7 +5,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/user', function (Illuminate\Http\Request $request) {
     return $request->user();
-})->middleware('auth:sanctum');
+})->middleware(['auth:sanctum', 'password.change.required']);
 
 /*
  * Account Classifications API — Administrator-only master data.
@@ -17,7 +17,7 @@ Route::get('/user', function (Illuminate\Http\Request $request) {
  * superadmins — gets 403). The `pageSize` query parameter paginates the list;
  * `search`, `status` and `sort` filter it.
  */
-Route::middleware(['web', 'auth'])->prefix('admin')->group(function () {
+Route::middleware(['web', 'auth', 'password.change.required'])->prefix('admin')->group(function () {
     Route::get('account-classifications', [AccountClassificationController::class, 'index']);
     Route::post('account-classifications', [AccountClassificationController::class, 'store']);
     // Bulk import (CSV upload or a `rows` array) — defined before the {id}
