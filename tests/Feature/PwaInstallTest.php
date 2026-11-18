@@ -24,6 +24,9 @@ class PwaInstallTest extends TestCase
         $this->assertSame('192x192', $manifest['icons'][0]['sizes']);
         $this->assertSame('image/png', $manifest['icons'][0]['type']);
         $this->assertSame('any maskable', $manifest['icons'][1]['purpose']);
+        $this->assertSame(192, getimagesize(public_path('pwa-icon-192.png'))[0]);
+        $this->assertSame(512, getimagesize(public_path('pwa-icon-512.png'))[0]);
+        $this->assertFileExists(public_path('smartapp-logo.png'));
     }
 
     public function test_service_worker_allows_control_of_the_app_base_path(): void
@@ -43,9 +46,15 @@ class PwaInstallTest extends TestCase
 
         $this->assertFileExists($apkPath);
 
-        $this->get(route('app.android.download'))
+        $response = $this->get(route('app.android.download'));
+
+        $response
             ->assertOk()
             ->assertHeader('content-type', 'application/vnd.android.package-archive')
-            ->assertHeader('content-disposition', 'attachment; filename=SmartApp-Android.apk');
+            ->assertHeader('content-disposition', 'attachment; filename=SmartApp-Android.apk')
+            ->assertHeader('pragma', 'no-cache');
+
+        $this->assertStringContainsString('no-store', $response->headers->get('Cache-Control', ''));
+        $this->assertStringContainsString('no-cache', $response->headers->get('Cache-Control', ''));
     }
 }

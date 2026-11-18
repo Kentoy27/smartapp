@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#f1f5f9">
-    <link rel="icon" type="image/svg+xml" href="{{ public_asset('smap.svg') }}?v=2">
+    <link rel="icon" type="image/png" sizes="192x192" href="{{ public_asset('pwa-icon-192.png') }}?v=5">
     <title>Page Not Found — SmartApp</title>
     <script>
         (function () {

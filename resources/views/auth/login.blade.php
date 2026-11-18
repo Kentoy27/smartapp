@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#f1f5f9">
-    <link rel="icon" type="image/svg+xml" href="{{ public_asset('smap.svg') }}?v=2">
-    <link rel="shortcut icon" href="{{ public_asset('smap.svg') }}?v=2">
+    <link rel="icon" type="image/png" sizes="192x192" href="{{ public_asset('pwa-icon-192.png') }}?v=5">
+    <link rel="shortcut icon" type="image/png" href="{{ public_asset('pwa-icon-192.png') }}?v=5">
     <link rel="stylesheet" href="{{ public_asset('css/login.css') }}?v=1">
     <title>Login — SmartApp</title>
     <script>
@@ -148,115 +148,25 @@
         .login-aside {
             position: relative;
             display: flex;
-            flex-direction: column;
-            gap: 34px;
-            padding: 44px 40px;
-            color: #fff;
+            align-items: center;
+            justify-content: center;
+            padding: 32px;
             overflow: hidden;
             background:
-                radial-gradient(120% 90% at 85% 8%, rgba(255, 255, 255, 0.18), transparent 55%),
-                radial-gradient(110% 90% at 8% 100%, rgba(15, 23, 42, 0.35), transparent 60%),
-                linear-gradient(160deg, #1d4ed8 0%, #3b82f6 55%, #60a5fa 100%);
+                radial-gradient(110% 90% at 85% 8%, rgba(59, 130, 246, 0.12), transparent 58%),
+                linear-gradient(160deg, #eff6ff 0%, #f8fbff 60%, #e0f2fe 100%);
         }
 
-        /* Faint grid overlay echoing the app's background pattern */
         .login-aside::before {
-            content: "";
-            position: absolute;
-            inset: 0;
-            background:
-                linear-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(255, 255, 255, 0.07) 1px, transparent 1px);
-            background-size: 32px 32px;
-            pointer-events: none;
+            display: none;
         }
 
-        .login-aside > * {
-            position: relative;
-        }
-
-        .aside-brand {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .aside-mark {
-            display: grid;
-            place-items: center;
-            width: 38px;
-            height: 38px;
-            border-radius: 10px;
-            background: rgba(255, 255, 255, 0.16);
-            border: 1px solid rgba(255, 255, 255, 0.22);
-            color: #fff;
-        }
-
-        .aside-wordmark {
-            font-size: 1.3rem;
-            font-weight: 700;
-            color: #fff;
-        }
-
-        .aside-wordmark span {
-            font-weight: 400;
-            color: rgba(255, 255, 255, 0.78);
-        }
-
-        .aside-body h2 {
-            font-size: 1.5rem;
-            font-weight: 700;
-            line-height: 1.25;
-            letter-spacing: -0.01em;
-            margin-bottom: 10px;
-        }
-
-        .aside-body > p {
-            font-size: 0.9rem;
-            line-height: 1.6;
-            color: rgba(255, 255, 255, 0.82);
-        }
-
-        .aside-points {
-            list-style: none;
-            margin: 30px 0 0;
-            padding: 0;
-            display: flex;
-            flex-direction: column;
-            gap: 18px;
-        }
-
-        .aside-points li {
-            display: flex;
-            align-items: flex-start;
-            gap: 12px;
-        }
-
-        .point-icon {
-            display: grid;
-            place-items: center;
-            flex-shrink: 0;
-            width: 32px;
-            height: 32px;
-            border-radius: 9px;
-            background: rgba(255, 255, 255, 0.14);
-            border: 1px solid rgba(255, 255, 255, 0.18);
-            color: #fff;
-        }
-
-        .point-text strong {
+        .login-artwork {
             display: block;
-            font-size: 0.875rem;
-            font-weight: 600;
-            color: #fff;
-        }
-
-        .point-text span {
-            display: block;
-            margin-top: 2px;
-            font-size: 0.8rem;
-            line-height: 1.45;
-            color: rgba(255, 255, 255, 0.75);
+            width: 100%;
+            max-height: min(72vh, 700px);
+            object-fit: contain;
+            filter: drop-shadow(0 16px 24px rgba(30, 64, 175, 0.12));
         }
 
         /* On wide screens the panel carries the brand, so the small
@@ -623,7 +533,14 @@
         /* Below 900px the brand panel steps aside and the form stands alone */
         @media (max-width: 899px) {
             .login-aside {
-                display: none;
+                padding: 18px 24px 0;
+                background: transparent;
+            }
+
+            .login-artwork {
+                width: min(100%, 230px);
+                max-height: 230px;
+                filter: none;
             }
 
             .login-shell {
@@ -633,6 +550,10 @@
 
             .login-card {
                 padding: 32px 24px 26px;
+            }
+
+            .login-card .brand-header {
+                display: none;
             }
         }
 
@@ -846,41 +767,11 @@
 
     <div class="login-shell" id="loginShell">
         <aside class="login-aside">
-            <div class="aside-brand">
-                <span class="aside-mark" aria-hidden="true">
-                    <x-icon name="shield" :size="20" />
-                </span>
-                <span class="aside-wordmark">Smart<span>App</span></span>
-            </div>
-
-            <div class="aside-body">
-                <h2>Everything your team needs, in one dashboard.</h2>
-                <p>Create accounts, assign roles and watch changes land in real time — no reloads, no guesswork.</p>
-
-                <ul class="aside-points">
-                    <li>
-                        <span class="point-icon" aria-hidden="true"><x-icon name="user-round" :size="16" /></span>
-                        <div class="point-text">
-                            <strong>Live user management</strong>
-                            <span>Add, edit or remove accounts — the table updates instantly.</span>
-                        </div>
-                    </li>
-                    <li>
-                        <span class="point-icon" aria-hidden="true"><x-icon name="shield" :size="16" /></span>
-                        <div class="point-text">
-                            <strong>Role-based access</strong>
-                            <span>Super admins decide who manages the system.</span>
-                        </div>
-                    </li>
-                    <li>
-                        <span class="point-icon" aria-hidden="true"><x-icon name="lock" :size="16" /></span>
-                        <div class="point-text">
-                            <strong>Secure by default</strong>
-                            <span>Hashed passwords, remembered sessions and Google sign-in.</span>
-                        </div>
-                    </li>
-                </ul>
-            </div>
+            <img
+                class="login-artwork"
+                src="{{ public_asset('login-brand.png') }}?v=1"
+                alt="SmartApp — Strategic Monitoring and Resource Tracking for Activities, Projects, and Programs"
+            >
         </aside>
 
         <div class="login-card">

@@ -70,13 +70,13 @@ Route::get('/app.webmanifest', function () {
         'theme_color' => '#3b82f6',
         'icons' => [
             [
-                'src' => public_asset('pwa-icon-192.png'),
+                'src' => public_asset('pwa-icon-192.png').'?v=5',
                 'sizes' => '192x192',
                 'type' => 'image/png',
                 'purpose' => 'any',
             ],
             [
-                'src' => public_asset('pwa-icon-512.png'),
+                'src' => public_asset('pwa-icon-512.png').'?v=5',
                 'sizes' => '512x512',
                 'type' => 'image/png',
                 'purpose' => 'any maskable',
@@ -101,9 +101,13 @@ Route::get('/downloads/smartapp-android.apk', function () {
     $apkPath = public_path('downloads/smartapp-android.apk');
     abort_unless(is_file($apkPath), 404);
 
-    return response()->download($apkPath, 'SmartApp-Android.apk', [
-        'Cache-Control' => 'public, max-age=3600',
-    ]);
+    $response = response()->download($apkPath, 'SmartApp-Android.apk');
+    $response->setPrivate();
+    $response->headers->set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    $response->headers->set('Pragma', 'no-cache');
+    $response->headers->set('Expires', '0');
+
+    return $response;
 })->name('app.android.download');
 
 Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login')->middleware('guest');

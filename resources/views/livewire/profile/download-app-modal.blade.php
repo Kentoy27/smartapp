@@ -30,7 +30,7 @@
 
                 <div class="download-app-modal__body">
                     <div class="download-app-modal__brand" aria-hidden="true">
-                        <img src="{{ public_asset('smap.svg') }}" alt="">
+                        <img src="{{ public_asset('smartapp-logo.png') }}?v=3" alt="">
                         <div>
                             <strong>SmartApp</strong>
                             <span>School management, ready when you are.</span>
@@ -53,9 +53,9 @@
                             <p>Download the Android installer (APK), then open it on your phone to install SmartApp.</p>
                         </div>
                         @if (is_file(public_path('downloads/smartapp-android.apk')))
-                            <a class="btn-primary download-app-modal__apk" href="{{ route('app.android.download') }}">
+                            <a class="btn-primary download-app-modal__apk" href="{{ route('app.android.download', ['v' => 3]) }}">
                                 <x-icon name="download" :size="17" />
-                                <span>Download Android APK</span>
+                                <span>Download Android APK (v1.0.2)</span>
                             </a>
                             <p class="download-app-modal__apk-note">Android may ask you to allow installs from this browser. Only install APKs you downloaded from SmartApp.</p>
                         @else

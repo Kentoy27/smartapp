@@ -201,14 +201,10 @@
         </div>
 
         @if ($this->canChangeRoles())
-            {{-- Close only when the press STARTS on the backdrop itself
-                 (@mousedown.self). A click-based guard is not enough: the
-                 expression `self` resolves to window.self (always truthy),
-                 and releasing a drag that started inside the panel — text
-                 selection, a scrollbar drag — targets the backdrop and
-                 would close the modal mid-edit. --}}
+            {{-- Backdrop clicks close the dialog; the shared pointer guard
+                 prevents a drag that started inside the panel from dismissing it. --}}
             <div class="modal-backdrop {{ $showRoleModal ? 'is-open' : '' }}"
-                 @if ($showRoleModal) @mousedown.self="$wire.closeRoleModal()" @endif
+                 @if ($showRoleModal) @click.self="$wire.closeRoleModal()" @endif
                  role="presentation">
                 <div class="modal" role="dialog" aria-modal="true" aria-labelledby="roleFormTitle" @click.stop>
                 <div class="modal-head">
@@ -297,7 +293,7 @@
 
         @if ($showDeleteModal)
             <div class="modal-backdrop is-open"
-                 @mousedown.self="$wire.closeDeleteModal()"
+                 @click.self="$wire.closeDeleteModal()"
                  role="presentation">
                 <div class="modal modal--confirmation" role="dialog" aria-modal="true" aria-labelledby="deleteFormTitle" @click.stop>
                     <div class="modal-head">
@@ -325,7 +321,7 @@
 
         @if ($showResetPasswordModal)
             <div class="modal-backdrop is-open"
-                 @mousedown.self="$wire.closeResetPasswordModal()"
+                 @click.self="$wire.closeResetPasswordModal()"
                  role="presentation">
                 <div class="modal modal--confirmation" role="dialog" aria-modal="true" aria-labelledby="resetPasswordFormTitle" @click.stop>
                     <div class="modal-head">
@@ -370,7 +366,7 @@
 
     {{-- ADD / EDIT USER MODAL (one modal, two modes) --}}
     <div class="modal-backdrop {{ $showCreateModal ? 'is-open' : '' }}"
-         @if ($showCreateModal) @mousedown.self="$wire.closeCreateModal()" @endif
+         @if ($showCreateModal) @click.self="$wire.closeCreateModal()" @endif
          role="presentation">
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="userFormTitle" @click.stop>
             <div class="modal-head">

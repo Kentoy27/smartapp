@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#f1f5f9">
-    <link rel="manifest" href="{{ route('pwa.manifest') }}?v=2">
-    <link rel="apple-touch-icon" href="{{ public_asset('pwa-icon-192.png') }}">
-    <link rel="icon" type="image/svg+xml" href="{{ public_asset('smap.svg') }}?v=2">
-    <link rel="shortcut icon" href="{{ public_asset('smap.svg') }}?v=2">
+    <link rel="manifest" href="{{ route('pwa.manifest') }}?v=5">
+    <link rel="apple-touch-icon" href="{{ public_asset('pwa-icon-192.png') }}?v=5">
+    <link rel="icon" type="image/png" sizes="192x192" href="{{ public_asset('pwa-icon-192.png') }}?v=5">
+    <link rel="shortcut icon" type="image/png" href="{{ public_asset('pwa-icon-192.png') }}?v=5">
     {{-- The version is bumped whenever dashboard.css changes: browsers that
          cached an older copy keep painting the stale sheet at the same URL,
          which is why a broken stylesheet can survive a fresh deploy. --}}
@@ -365,17 +365,31 @@
         .sidebar .sidebar-brand-row .brand {
             display: inline-flex;
             align-items: center;
+            gap: 8px;
             font-weight: 700;
             font-size: 1.35rem;
             letter-spacing: -0.03em;
             white-space: nowrap;
         }
 
-        .sidebar .sidebar-brand-row .brand .brand-blue {
+        .sidebar .sidebar-brand-row .brand-mark {
+            display: block;
+            width: 36px;
+            height: 36px;
+            flex: 0 0 36px;
+            object-fit: contain;
+            background: transparent;
+        }
+
+        .sidebar .sidebar-brand-row .brand-wordmark {
+            display: inline-flex;
+        }
+
+        .sidebar .sidebar-brand-row .brand-wordmark .brand-blue {
             color: var(--primary);
         }
 
-        .sidebar .sidebar-brand-row .brand .brand-black {
+        .sidebar .sidebar-brand-row .brand-wordmark .brand-black {
             color: var(--text-strong);
         }
 
@@ -387,22 +401,40 @@
         }
 
         .layout.collapsed .sidebar .sidebar-brand-row .brand {
-            display: none;
+            display: inline-flex;
+            position: absolute;
+            left: 4px;
         }
 
         .layout.collapsed .sidebar .sidebar-brand-row .sidebar-toggle {
             position: absolute;
-            inset: 0;
-            width: 100%;
+            top: 0;
+            left: auto;
+            right: 0;
+            bottom: auto;
+            width: 22px;
             height: 100%;
             color: var(--text-muted);
-            background: var(--bg-panel);
+            padding: 2px;
+            background: transparent;
             z-index: 1;
             pointer-events: auto;
         }
 
+        .layout.collapsed .sidebar .sidebar-brand-row .brand-mark {
+            width: 32px;
+            height: 32px;
+            flex-basis: 32px;
+        }
+
+        .layout.collapsed .sidebar .sidebar-brand-row .brand-wordmark {
+            display: none;
+        }
+
         .layout.collapsed .sidebar .sidebar-brand-row .sidebar-toggle svg {
             pointer-events: none;
+            width: 16px;
+            height: 16px;
         }
 
         .layout.collapsed .sidebar .sidebar-brand-row .sidebar-toggle:hover {
@@ -8025,6 +8057,7 @@
 
             .layout.collapsed .sidebar .sidebar-brand-row .brand {
                 display: inline-flex;
+                position: static;
             }
 
             .layout.collapsed .sidebar .sidebar-brand-row .brand > span:last-child {
@@ -8150,7 +8183,8 @@
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-brand-row">
                 <div class="brand">
-                    <span class="brand-blue">Smart</span><span class="brand-black">App</span>
+                    <img class="brand-mark" src="{{ public_asset('smartapp-logo.png') }}?v=3" alt="">
+                    <span class="brand-wordmark"><span class="brand-blue">Smart</span><span class="brand-black">App</span></span>
                 </div>
                 <button type="button" class="sidebar-toggle" id="sidebarToggle" title="Toggle sidebar" aria-label="Toggle sidebar" aria-expanded="false">
                     <x-icon name="menu" :size="20" class="icon-menu" />
@@ -8885,5 +8919,62 @@
         })();
     </script>
     <script src="{{ public_asset('js/sip-pdf-preview.js') }}?v=1"></script>
+    <script>
+        (() => {
+            const pointerPresses = new Map();
+            const modalSurfaceSelector = '.modal-backdrop, dialog[open]';
+
+            document.addEventListener('pointerdown', event => {
+                if (!(event.target instanceof Element)) return;
+
+                const surface = event.target.closest(modalSurfaceSelector);
+                if (surface) {
+                    pointerPresses.set(event.pointerId, {
+                        surface,
+                        startedOnSurface: event.target === surface,
+                        endedOnSurface: false,
+                    });
+                }
+            }, true);
+
+            document.addEventListener('pointerup', event => {
+                const press = pointerPresses.get(event.pointerId);
+                if (!press) return;
+
+                press.endedOnSurface = event.target === press.surface;
+                window.setTimeout(() => {
+                    if (pointerPresses.get(event.pointerId) === press) {
+                        pointerPresses.delete(event.pointerId);
+                    }
+                }, 1000);
+            }, true);
+
+            document.addEventListener('pointercancel', event => {
+                pointerPresses.delete(event.pointerId);
+            }, true);
+
+            document.addEventListener('click', event => {
+                if (!(event.target instanceof Element)) return;
+
+                const press = pointerPresses.get(event.pointerId);
+                pointerPresses.delete(event.pointerId);
+
+                if (
+                    event.detail === 0
+                    || !event.target.matches(modalSurfaceSelector)
+                    || (
+                        press?.surface === event.target
+                        && press.startedOnSurface
+                        && press.endedOnSurface
+                    )
+                ) {
+                    return;
+                }
+
+                event.preventDefault();
+                event.stopImmediatePropagation();
+            }, true);
+        })();
+    </script>
 </body>
 </html>

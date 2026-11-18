@@ -17,6 +17,7 @@ class LoginPageTest extends TestCase
         $response->assertOk();
         $response->assertSee('Smart', false);
         $response->assertSee('App', false);
+        $response->assertSee('login-brand.png', false);
         $response->assertSee('Remember me');
         $response->assertSee('name="remember"', false);
     }

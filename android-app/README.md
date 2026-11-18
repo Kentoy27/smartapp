@@ -3,7 +3,8 @@
 This native Android app opens the existing SmartApp service at
 `https://smartapp.sdokab.com/smartapp/home`. It uses the same accounts,
 permissions, and backend as the web app. Android file uploads use the system
-file picker, and downloads are saved to the device's Downloads folder.
+file picker, and downloads are saved to the device's Downloads folder. A
+branded startup screen remains visible while the first page loads.
 
 ## Build
 

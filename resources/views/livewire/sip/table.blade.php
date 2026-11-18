@@ -148,7 +148,7 @@
     </div>
 
     @if ($showBulkUploadModal)
-        <div class="modal-backdrop is-open" @mousedown.self="$wire.closeBulkUploadModal()" @keydown.escape.window="$wire.closeBulkUploadModal()" role="presentation">
+        <div class="modal-backdrop is-open" @click.self="$wire.closeBulkUploadModal()" @keydown.escape.window="$wire.closeBulkUploadModal()" role="presentation">
             <section class="modal sip-bulk-upload-modal" role="dialog" aria-modal="true" aria-labelledby="sipBulkUploadTitle" @click.stop>
                 <div class="modal-head">
                     <h2 id="sipBulkUploadTitle">Upload SIP</h2>
@@ -228,7 +228,7 @@
     @endif
 
     @if ($showUploadModal)
-        <div class="modal-backdrop is-open" @mousedown.self="$wire.closeUploadModal()" role="presentation">
+        <div class="modal-backdrop is-open" @click.self="$wire.closeUploadModal()" role="presentation">
             <div class="modal" role="dialog" aria-modal="true" aria-labelledby="sipUploadTitle" @click.stop>
                 <div class="modal-head">
                     <h2 id="sipUploadTitle">Upload SIP</h2>
@@ -270,7 +270,7 @@
         <div
             class="modal-backdrop is-open"
             wire:key="sip-preview-backdrop-{{ $previewSubmission->id }}"
-            @mousedown.self="$wire.closePreviewModal()"
+            @click.self="$wire.closePreviewModal()"
             @keydown.escape.window="$wire.closePreviewModal()"
             role="presentation"
         >
