@@ -100,6 +100,48 @@ class WfpTemplateFillerTest extends TestCase
         $this->assertSame('TOTAL', $this->wfpCellText($sheet, 'A9'));
     }
 
+    public function test_columns_are_widened_so_values_do_not_render_as_hashes(): void
+    {
+        $bytes = $this->wfpTemplateBytes(3);
+        $layout = WfpTemplateFiller::locate(WfpTemplateFiller::readParts($bytes));
+
+        // "123456.00" is 9 characters; column H has no explicit width in the
+        // fixture (so it defaults to 8.43) and must be widened to fit.
+        $filled = WfpTemplateFiller::fill($bytes, [
+            ['program_activity' => 'Procure supplies', 'financial_target' => 123456, 'account_code' => '5020301000'],
+        ], $layout);
+
+        $sheet = $this->wfpSheetXml($filled);
+
+        $this->assertSame('123456.00', $this->wfpCellText($sheet, 'H4'));
+
+        preg_match('/<cols>(.*?)<\/cols>/s', $sheet, $cols);
+        $this->assertNotFalse($cols, 'the sheet keeps a <cols> definition');
+
+        preg_match('/<col min="8" max="8" width="([0-9.]+)"/', $cols[1], $width);
+
+        $this->assertNotFalse($width, 'column H must get an explicit width');
+        $this->assertGreaterThanOrEqual(12.0, (float) $width[1], '9-char value plus padding needs width >= 12');
+    }
+
+    public function test_columns_that_already_fit_are_not_narrowed(): void
+    {
+        $bytes = $this->wfpTemplateBytes(3);
+        $layout = WfpTemplateFiller::locate(WfpTemplateFiller::readParts($bytes));
+
+        // Column B is explicitly 30 wide; a short activity must not shrink it.
+        $filled = WfpTemplateFiller::fill($bytes, [
+            ['program_activity' => 'Hi', 'financial_target' => 1],
+        ], $layout);
+
+        $sheet = $this->wfpSheetXml($filled);
+
+        preg_match('/<cols>(.*?)<\/cols>/s', $sheet, $cols);
+        preg_match('/<col min="2" max="2" width="([0-9.]+)"/', $cols[1], $width);
+
+        $this->assertSame('30', $width[1], 'an already-wide column is never narrowed');
+    }
+
     public function test_it_leaves_the_header_unlocated_when_no_labels_match(): void
     {
         $bytes = $this->wfpTemplateBytes(3, []); // a header row with no recognised labels
@@ -176,17 +218,17 @@ class WfpTemplateFillerTest extends TestCase
         $filled = WfpTemplateFiller::fill($bytes, $rows, $layout);
         $sheet = $this->wfpSheetXml($filled);
 
-        // Targets and the object code land in THEIR month's columns…
+        // Targets land in their own month's columns…
         $this->assertSame('8000.00', $this->wfpCellText($sheet, 'I6'));
         $this->assertSame('1.00', $this->wfpCellText($sheet, 'D6'));
-        $this->assertSame('5020301000', $this->wfpCellText($sheet, 'J6'));
         $this->assertSame('1500.00', $this->wfpCellText($sheet, 'K7'));
         $this->assertSame('2.00', $this->wfpCellText($sheet, 'E7'));
-        $this->assertSame('5020302000', $this->wfpCellText($sheet, 'L7'));
 
-        // …and never in another month's.
+        // …and account codes are hidden from the generated WFP.
         $this->assertSame('', $this->wfpCellText($sheet, 'G6'));
         $this->assertSame('', $this->wfpCellText($sheet, 'H6'));
+        $this->assertSame('', $this->wfpCellText($sheet, 'J6'));
+        $this->assertSame('', $this->wfpCellText($sheet, 'L7'));
 
         // The header block is untouched; the TOTAL row moved up under the two
         // filled lines and its range shrank to match.
@@ -220,12 +262,11 @@ class WfpTemplateFillerTest extends TestCase
         $this->assertSame('2.00', $this->wfpCellText($sheet, 'D6'));
         $this->assertSame('1500.00', $this->wfpCellText($sheet, 'I6'));
 
-        // …the activity is written once, and the monthless object code still
-        // reaches every month's Object Code column.
+        // …the activity is written once, and account codes are hidden.
         $this->assertSame('Monthly Internet', $this->wfpCellText($sheet, 'B6'));
-        $this->assertSame('5020301000', $this->wfpCellText($sheet, 'H6'));
-        $this->assertSame('5020301000', $this->wfpCellText($sheet, 'J6'));
-        $this->assertSame('5020301000', $this->wfpCellText($sheet, 'L6'));
+        $this->assertSame('', $this->wfpCellText($sheet, 'H6'));
+        $this->assertSame('', $this->wfpCellText($sheet, 'J6'));
+        $this->assertSame('', $this->wfpCellText($sheet, 'L6'));
 
         // The unused months stay empty, the template's own formula survives,
         // and the band is trimmed to one line.
@@ -234,20 +275,21 @@ class WfpTemplateFillerTest extends TestCase
         $this->assertStringNotContainsString('<row r="8"', $sheet);
     }
 
-    public function test_a_monthless_row_writes_its_code_into_every_monthly_column(): void
+    public function test_a_monthless_row_leaves_object_code_columns_blank(): void
     {
         $bytes = $this->wfpMonthlyTemplateBytes(3);
         $layout = WfpTemplateFiller::locate(WfpTemplateFiller::readParts($bytes));
 
-        // The account-code generator's rows: one code per row, no month.
+        // The account-code generator's rows: one code per row, no month — but
+        // Object Code columns are hidden, so nothing is stamped.
         $rows = [['account_title' => 'MOOE', 'account_code' => '5020301000']];
 
         $filled = WfpTemplateFiller::fill($bytes, $rows, $layout);
         $sheet = $this->wfpSheetXml($filled);
 
-        $this->assertSame('5020301000', $this->wfpCellText($sheet, 'H6'));
-        $this->assertSame('5020301000', $this->wfpCellText($sheet, 'J6'));
-        $this->assertSame('5020301000', $this->wfpCellText($sheet, 'L6'));
+        $this->assertSame('', $this->wfpCellText($sheet, 'H6'));
+        $this->assertSame('', $this->wfpCellText($sheet, 'J6'));
+        $this->assertSame('', $this->wfpCellText($sheet, 'L6'));
 
         // There is no Account Title column in this shape; the row still fills.
         $this->assertSame('', $this->wfpCellText($sheet, 'C6'));
@@ -339,7 +381,8 @@ class WfpTemplateFillerTest extends TestCase
         $this->assertSame('8000.00', $this->wfpCellText($sheet, 'R14'));
         $this->assertSame('1500.00', $this->wfpCellText($sheet, 'T15'));
         $this->assertSame('Pay rent', $this->wfpCellText($sheet, 'B14'));
-        $this->assertSame('5020101000', $this->wfpCellText($sheet, 'S14'));
+        // Object Code columns are hidden: no account code is stamped.
+        $this->assertSame('', $this->wfpCellText($sheet, 'S14'));
 
         // The Title block and the header block are the form's own and must
         // survive a fill.

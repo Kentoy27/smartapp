@@ -4,7 +4,7 @@
 <div class="district-manager" x-data x-on:open-districts.window="$wire.openModal($event.detail?.district ?? null)">
     {{-- DISTRICTS & SCHOOLS MODAL --}}
     <div class="modal-backdrop {{ $showModal ? 'is-open' : '' }}"
-         @if ($showModal) @click="self && $wire.closeModal()" @endif
+         @if ($showModal) @mousedown.self="$wire.closeModal()" @endif
          role="presentation">
         <div class="modal modal--district" role="dialog" aria-modal="true" aria-labelledby="districtModalTitle" @click.stop>
             <div class="modal-head">

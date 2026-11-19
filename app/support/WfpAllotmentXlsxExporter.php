@@ -251,7 +251,7 @@ final class WfpAllotmentXlsxExporter
 
         $text($labelRow, 'A', self::S_LABEL, 'Prepared by:', false);
         $text($labelRow, 'E', self::S_LABEL, 'Checked as to the Correctness of Account Titles and Codes:', false);
-        $text($labelRow, 'G', self::S_LABEL, 'Certifying Availability of Allotment:', false);
+        $text($labelRow, 'F', self::S_LABEL, 'Certifying Availability of Allotment:', false);
         $text($labelRow, 'H', self::S_LABEL, 'Approved:', false);
 
         $nameRow = $labelRow + 4;
@@ -266,7 +266,7 @@ final class WfpAllotmentXlsxExporter
         );
         $text(
             $nameRow,
-            'G',
+            'F',
             $certification === null ? self::S_PLAIN : self::S_LABEL_BOLD,
             $certification === null ? '_________________' : mb_strtoupper($certification['name']),
             false
@@ -277,7 +277,7 @@ final class WfpAllotmentXlsxExporter
 
         $text($positionRow, 'A', self::S_PLAIN, $preparedBy?->position ?: 'School Principal I', false);
         $text($positionRow, 'E', self::S_PLAIN, $checking['position'] ?? 'Senior Bookkeeper', false);
-        $text($positionRow, 'G', self::S_PLAIN, $certification['position'] ?? 'Budget Officer III', false);
+        $text($positionRow, 'F', self::S_PLAIN, $certification['position'] ?? 'Budget Officer III', false);
         $text($positionRow, 'H', self::S_PLAIN, 'Schools Division Superintendent', false);
 
         // The check and the certification are dated statements; the page
@@ -295,7 +295,7 @@ final class WfpAllotmentXlsxExporter
         if ($certification !== null) {
             $text(
                 $positionRow + 1,
-                'G',
+                'F',
                 self::S_PLAIN,
                 'Certified '.$certification['certified_at']->format('M j, Y'),
                 false
@@ -307,7 +307,7 @@ final class WfpAllotmentXlsxExporter
         $signatureRanges = [
             'prepared' => 'A'.($labelRow + 1).':A'.$nameRow,
             'checked' => 'E'.($labelRow + 1).':E'.$nameRow,
-            'certified' => 'G'.($labelRow + 1).':G'.$nameRow,
+            'certified' => 'F'.($labelRow + 1).':F'.$nameRow,
         ];
 
         /* ----------------------------------------------------------- package */
@@ -371,6 +371,11 @@ final class WfpAllotmentXlsxExporter
                 'bytes' => $signature['bytes'],
                 'extension' => $signature['extension'],
                 'name' => trim((string) ($signer->name ?: $signer->username)),
+                // The same fixed box the WFP plan export uses: 90×60 px, large
+                // enough to read but never so large it crowds the printed name
+                // below or the neighbouring sign-off block.
+                'widthPx' => 90,
+                'heightPx' => 60,
             ];
         }
 

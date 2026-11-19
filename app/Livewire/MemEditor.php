@@ -397,19 +397,25 @@ class MemEditor extends Component
     {
         $matrix = $this->guard();
 
-        $this->editingKey = null;
-        $this->lineMonths = [(int) $matrix->month];
-        $this->lineRepeated = 'no';
-        $this->lineSection = in_array($section, ['operations', 'project'], true) ? $section : 'operations';
-        $this->lineForm = $this->blankRow($this->lineSection);
-        $this->lineResources = [];
-        $this->accountSearch = '';
-        $this->templateSearch = '';
-        $this->appliedTemplateId = null;
-        $this->appliedTemplateName = '';
-        $this->appliedTemplateSnapshot = [];
-        $this->pendingTemplateId = null;
-        $this->resetDuplicateState();
+        // A draft the user closed without saving reopens as-is — the
+        // accidental close did not throw it away. Only a blank form gets a
+        // fresh start.
+        if (! $this->lineModalHasData()) {
+            $this->editingKey = null;
+            $this->lineMonths = [(int) $matrix->month];
+            $this->lineRepeated = 'no';
+            $this->lineSection = in_array($section, ['operations', 'project'], true) ? $section : 'operations';
+            $this->lineForm = $this->blankRow($this->lineSection);
+            $this->lineResources = [];
+            $this->accountSearch = '';
+            $this->templateSearch = '';
+            $this->appliedTemplateId = null;
+            $this->appliedTemplateName = '';
+            $this->appliedTemplateSnapshot = [];
+            $this->pendingTemplateId = null;
+            $this->resetDuplicateState();
+        }
+
         $this->showLineModal = true;
         $this->resetValidation();
 
@@ -499,9 +505,30 @@ class MemEditor extends Component
         }
     }
 
-    public function closeLineModal(): void
+    /**
+     * Close the modal without saving. A draft the user typed is kept: an
+     * accidental close (×, the backdrop, Cancel) must not throw the line
+     * away — reopening the modal shows it again. Only a committed save
+     * clears the form (saveLineFromModal() passes $clear = true), and a
+     * blank form is always wiped.
+     */
+    public function closeLineModal(bool $clear = false): void
     {
         $this->showLineModal = false;
+
+        if ($clear || ! $this->lineModalHasData()) {
+            $this->clearLineModalState();
+        }
+
+        $this->dispatch('mem-line-modal-reset');
+    }
+
+    /**
+     * Wipe every field the add / edit line modal holds — used by the
+     * committed-save path and by closing a blank form.
+     */
+    private function clearLineModalState(): void
+    {
         $this->editingKey = null;
         $this->lineForm = [];
         $this->lineResources = [];
@@ -515,8 +542,43 @@ class MemEditor extends Component
         $this->pendingTemplateId = null;
         $this->resetDuplicateState();
         $this->resetValidation();
+    }
 
-        $this->dispatch('mem-line-modal-reset');
+    /**
+     * Whether the modal holds a line the user started filling but never
+     * saved: an open edit, or any filled field. A blank draft is nothing to
+     * keep.
+     *
+     * @return bool
+     */
+    private function lineModalHasData(): bool
+    {
+        if ($this->editingKey !== null) {
+            return true;
+        }
+
+        $form = $this->lineForm;
+        unset($form['_key'], $form['id'], $form['section']);
+
+        foreach ($form as $value) {
+            if (is_array($value)) {
+                foreach ($value as $nested) {
+                    if ((string) $nested !== '') {
+                        return true;
+                    }
+                }
+            } elseif ((string) $value !== '') {
+                return true;
+            }
+        }
+
+        foreach ($this->lineResources as $resource) {
+            if (! self::resourceIsBlank($resource)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -803,7 +865,18 @@ class MemEditor extends Component
         // explicitly confirmed a separate entry for this exact text, the save
         // is refused once with the match shown; "Add separately anyway" then
         // records the confirmation and the save proceeds.
-        if (! $this->duplicateConfirmed()) {
+        //
+        // Editing a line whose description is unchanged is not a new
+        // duplicate: the line already stands with that description in this
+        // matrix, so another line's match should not block the save. The gate
+        // still applies when adding, and when an edit changes the description
+        // to match another line.
+        $editingUnchanged = $this->editingKey !== null
+            && $existing !== null
+            && MemDuplicateChecker::normalize((string) ($this->lineForm['activity_description'] ?? ''))
+                === MemDuplicateChecker::normalize((string) ($existing->activity_description ?? ''));
+
+        if (! $this->duplicateConfirmed() && ! $editingUnchanged) {
             $match = MemDuplicateChecker::exactMatch(
                 $this->matrix,
                 (string) ($this->lineForm['activity_description'] ?? ''),
@@ -879,7 +952,7 @@ class MemEditor extends Component
 
             $row = array_merge($this->blankRow($this->lineSection), $primaryRow);
 
-            $this->closeLineModal();
+            $this->closeLineModal(true);
 
             $removed = [];
             $copiedTo = [];
@@ -961,7 +1034,7 @@ class MemEditor extends Component
             }
         }
 
-        $this->closeLineModal();
+        $this->closeLineModal(true);
 
         $saved = DB::transaction(function () use ($lineRows, $siblings, $inCurrentMonth): bool {
             if ($inCurrentMonth && ! $this->persist()) {

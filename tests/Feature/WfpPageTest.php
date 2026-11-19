@@ -280,7 +280,8 @@ class WfpPageTest extends TestCase
         $this->assertSame('Smoke School', $this->wfpCellText($sheet, 'A6'));
         $this->assertSame('CY '.now()->year.' Work and Financial Plan', $this->wfpCellText($sheet, 'A9'));
         $this->assertSame('Travelling Expenses-Local', $this->wfpCellText($sheet, 'A14'));
-        $this->assertSame('5020101000', $this->wfpCellText($sheet, 'S14'));
+        // Object Code columns are hidden: no account code is stamped.
+        $this->assertSame('', $this->wfpCellText($sheet, 'S14'));
 
         // The form's own machinery — the Total row — is intact, and the
         // export is trimmed to the single account line it carries, with the
@@ -347,7 +348,8 @@ class WfpPageTest extends TestCase
         $this->assertSame('Payment for Electricity', $this->wfpCellText($sheet, 'B15'));
         $this->assertSame('1.00', $this->wfpCellText($sheet, 'G15'));
         $this->assertSame('6000.00', $this->wfpCellText($sheet, 'V15'));
-        $this->assertSame('5020402000', $this->wfpCellText($sheet, 'W15'));
+        // Object Code columns are hidden: no account code is stamped.
+        $this->assertSame('', $this->wfpCellText($sheet, 'W15'));
 
         // The export is as long as the plan: the TOTAL row sits under the two
         // rows written, its range covers exactly them, and no row carrying
