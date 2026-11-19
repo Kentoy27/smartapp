@@ -60,63 +60,77 @@
                     <tbody>
                         @foreach ($this->schools as $school)
                             @foreach ($this->visibleDivisions($school) as $division)
-                                @php($submission = $school->sipSubmissions->firstWhere('division', $division))
-                                <tr wire:key="sip-{{ $school->id }}-{{ $division }}">
-                                    <td>{{ \App\Support\SchoolDivision::label($division) }}</td>
-                                    <td>
-                                        <span class="cell-strong">{{ $school->name }}</span>
-                                        @if ($school->school_id)
-                                            <span class="cell-sub">School ID: {{ $school->school_id }}</span>
-                                        @endif
-                                    </td>
-                                    <td>{{ $school->district?->name ?? '—' }}</td>
-                                    <td>
-                                        @if ($submission)
-                                            <span class="cell-strong">{{ $submission->original_file_name }}</span>
-                                            <span class="cell-sub">{{ number_format($submission->file_size / 1024, 1) }} KB</span>
-                                        @else
-                                            <span class="badge badge-muted">Not uploaded</span>
-                                        @endif
-                                    </td>
-                                    <td>{{ $submission?->uploader?->name ?: ($submission?->uploader?->username ?? '—') }}</td>
-                                    <td>{{ $submission?->uploaded_at?->format('M j, Y g:i A') ?? '—' }}</td>
-                                    <td class="users-actions-col">
-                                        <div class="sip-row-actions">
-                                            @if ($submission?->hasFile())
-                                                @if (in_array(strtolower(pathinfo($submission->original_file_name, PATHINFO_EXTENSION)), ['pdf', 'doc', 'docx'], true))
+                                @php($divisionSubmissions = $school->sipSubmissions->where('division', $division)->sortByDesc('uploaded_at')->values())
+                                @foreach ($divisionSubmissions->isEmpty() ? [null] : $divisionSubmissions as $submission)
+                                    <tr wire:key="sip-{{ $school->id }}-{{ $division }}-{{ $submission?->id ?? 'empty' }}">
+                                        <td>{{ \App\Support\SchoolDivision::label($division) }}</td>
+                                        <td>
+                                            <span class="cell-strong">{{ $school->name }}</span>
+                                            @if ($school->school_id)
+                                                <span class="cell-sub">School ID: {{ $school->school_id }}</span>
+                                            @endif
+                                        </td>
+                                        <td>{{ $school->district?->name ?? '—' }}</td>
+                                        <td>
+                                            @if ($submission)
+                                                <span class="cell-strong">{{ $submission->original_file_name }}</span>
+                                                <span class="cell-sub">{{ number_format($submission->file_size / 1024, 1) }} KB</span>
+                                            @else
+                                                <span class="badge badge-muted">Not uploaded</span>
+                                            @endif
+                                        </td>
+                                        <td>{{ $submission?->uploader?->name ?: ($submission?->uploader?->username ?? '—') }}</td>
+                                        <td>{{ $submission?->uploaded_at?->format('M j, Y g:i A') ?? '—' }}</td>
+                                        <td class="users-actions-col">
+                                            <div class="sip-row-actions">
+                                                @if ($submission?->hasFile())
+                                                    @if (in_array(strtolower(pathinfo($submission->original_file_name, PATHINFO_EXTENSION)), ['pdf', 'doc', 'docx'], true))
+                                                        <button
+                                                            type="button"
+                                                            class="btn-ghost"
+                                                            wire:click="openPreview({{ $submission->id }})"
+                                                            title="Preview {{ $school->name }} {{ \App\Support\SchoolDivision::label($division) }} SIP"
+                                                        >
+                                                            <span>Preview</span>
+                                                        </button>
+                                                    @endif
+                                                    <a
+                                                        href="{{ route('sip.download', $submission) }}"
+                                                        class="btn-ghost"
+                                                        title="Download {{ $school->name }} {{ \App\Support\SchoolDivision::label($division) }} SIP"
+                                                    >
+                                                        <x-icon name="download" :size="14" />
+                                                        <span>Download</span>
+                                                    </a>
+                                                @endif
+
+                                                @if ($this->canUploadTo($school, $division) && $loop->first)
                                                     <button
                                                         type="button"
-                                                        class="btn-ghost"
-                                                        wire:click="openPreview({{ $submission->id }})"
-                                                        title="Preview {{ $school->name }} {{ \App\Support\SchoolDivision::label($division) }} SIP"
+                                                        class="users-action"
+                                                        wire:click="openUploadModal({{ $school->id }}, '{{ $division }}')"
+                                                        title="Upload another SIP for this division"
                                                     >
-                                                        <span>Preview</span>
+                                                        <x-icon name="upload" :size="14" />
+                                                        <span>{{ $submission ? 'Upload another' : 'Upload SIP' }}</span>
                                                     </button>
                                                 @endif
-                                                <a
-                                                    href="{{ route('sip.download', $submission) }}"
-                                                    class="btn-ghost"
-                                                    title="Download {{ $school->name }} {{ \App\Support\SchoolDivision::label($division) }} SIP"
-                                                >
-                                                    <x-icon name="download" :size="14" />
-                                                    <span>Download</span>
-                                                </a>
-                                            @endif
-
-                                            @if ($this->canUploadTo($school, $division))
-                                                <button
-                                                    type="button"
-                                                    class="users-action"
-                                                    wire:click="openUploadModal({{ $school->id }}, '{{ $division }}')"
-                                                    title="{{ $submission ? 'Replace' : 'Upload' }} this division's SIP"
-                                                >
-                                                    <x-icon name="upload" :size="14" />
-                                                    <span>{{ $submission ? 'Replace' : 'Upload' }}</span>
-                                                </button>
-                                            @endif
-                                        </div>
-                                    </td>
-                                </tr>
+                                                @if ($submission && $this->canUploadTo($school, $division))
+                                                    <button
+                                                        type="button"
+                                                        class="users-action users-action--danger"
+                                                        wire:click="deleteSip({{ $submission->id }})"
+                                                        wire:confirm="Delete {{ $submission->downloadName() }}? This cannot be undone."
+                                                        title="Delete this SIP upload"
+                                                    >
+                                                        <x-icon name="trash" :size="14" />
+                                                        <span>Delete</span>
+                                                    </button>
+                                                @endif
+                                            </div>
+                                        </td>
+                                    </tr>
+                                @endforeach
                             @endforeach
                         @endforeach
                     </tbody>
@@ -158,24 +172,21 @@
                 <form wire:submit="uploadMultipleSip" class="modal-form">
                     <p class="field-hint">
                         @if (count($uploadableDivisions) > 1)
-                            Add one file for each division you want to upload. Each file replaces the current SIP for its selected division.
+                            Add one or more SIP files. Each upload is saved as a new record; existing SIP files are kept.
                         @else
-                            Upload the SIP for your division. This file replaces the current SIP.
+                            Add one or more SIP files for your division. Existing uploads are kept.
                         @endif
                     </p>
 
                     <div class="sip-bulk-upload-rows">
                         @foreach ($bulkUploads as $index => $upload)
-                            @php($otherDivisions = array_column(array_diff_key($bulkUploads, [$index => true]), 'division'))
                             <div class="sip-bulk-upload-row {{ count($uploadableDivisions) === 1 ? 'sip-bulk-upload-row--single-division' : '' }}" wire:key="sip-bulk-upload-{{ $index }}">
                                 @if (count($uploadableDivisions) > 1)
                                     <div class="field">
                                         <label for="bulkSipDivision{{ $index }}">Division</label>
-                                        <select id="bulkSipDivision{{ $index }}" wire:model="bulkUploads.{{ $index }}.division" required>
+                                        <select id="bulkSipDivision{{ $index }}" wire:model="bulkUploads.{{ $index }}.division">
                                             @foreach ($uploadableDivisions as $divisionOption)
-                                                @if ($divisionOption === $upload['division'] || ! in_array($divisionOption, $otherDivisions, true))
-                                                    <option value="{{ $divisionOption }}">{{ \App\Support\SchoolDivision::label($divisionOption) }}</option>
-                                                @endif
+                                                <option value="{{ $divisionOption }}">{{ \App\Support\SchoolDivision::label($divisionOption) }}</option>
                                             @endforeach
                                         </select>
                                         @error("bulkUploads.{$index}.division") <div class="error-text">{{ $message }}</div> @enderror
@@ -188,9 +199,8 @@
                                         type="file"
                                         wire:model="bulkUploads.{{ $index }}.file"
                                         accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
-                                        required
                                     >
-                                    <div class="field-hint">PDF, Word, Excel, or PowerPoint; maximum 12 MB.</div>
+                                    <div class="field-hint">PDF, Word, Excel, or PowerPoint; maximum {{ number_format((int) config('sip.max_upload_kb', 102400) / 1024, 0) }} MB per file.</div>
                                     @error("bulkUploads.{$index}.file") <div class="error-text">{{ $message }}</div> @enderror
                                 </div>
                                 @if (count($bulkUploads) > 1)
@@ -205,14 +215,11 @@
                         @endforeach
                     </div>
 
-                    @if (count($uploadableDivisions) > 1)
-                        <button
-                            type="button"
-                            class="btn-ghost sip-bulk-upload-add"
-                            wire:click="addBulkUploadRow"
-                            @disabled(count($bulkUploads) >= count($uploadableDivisions))
-                        >Add another SIP</button>
-                    @endif
+                    <button
+                        type="button"
+                        class="btn-ghost sip-bulk-upload-add"
+                        wire:click="addBulkUploadRow"
+                    >Add another SIP</button>
                     @error('bulkUploads') <div class="error-text">{{ $message }}</div> @enderror
 
                     <div class="modal-actions">
@@ -238,7 +245,7 @@
                 <form wire:submit="uploadSip" class="modal-form">
                     <p class="field-hint">
                         Upload the {{ \App\Support\SchoolDivision::label($uploadDivision) }} SIP.
-                        A new upload replaces the current file for this division.
+                        This adds another SIP and keeps any existing uploads.
                     </p>
                     <div class="field">
                         <label for="sipFile">SIP document</label>
@@ -249,14 +256,14 @@
                             accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
                             required
                         >
-                        <div class="field-hint">PDF, Word, Excel, or PowerPoint; maximum 12 MB.</div>
+                        <div class="field-hint">PDF, Word, Excel, or PowerPoint; maximum {{ number_format((int) config('sip.max_upload_kb', 102400) / 1024, 0) }} MB.</div>
                         @error('sipFile') <div class="error-text">{{ $message }}</div> @enderror
                     </div>
 
                     <div class="modal-actions">
                         <button type="button" class="btn-ghost" wire:click="closeUploadModal">Cancel</button>
                         <button type="submit" class="btn-primary" wire:loading.attr="disabled" wire:target="uploadSip">
-                            <span wire:loading.remove wire:target="uploadSip">Save SIP</span>
+                            <span wire:loading.remove wire:target="uploadSip">Add SIP</span>
                             <span wire:loading wire:target="uploadSip">Uploading…</span>
                         </button>
                     </div>

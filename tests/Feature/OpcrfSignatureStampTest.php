@@ -348,20 +348,13 @@ class OpcrfSignatureStampTest extends TestCase
 
         $download = $this->actingAs($ratee)
             ->get(route('opcrf.submission.download', $submission))
-            ->assertOk();
+            ->assertOk()
+            ->assertDownload('Jane D. Doe - OPCRF.pdf')
+            ->assertHeader('Content-Type', 'application/pdf');
         $submission->refresh();
         $this->assertNotSame($brokenPath, $submission->signed_file_path);
         $downloadBytes = (string) $download->getContent();
-        $this->assertStringStartsWith("PK\x03\x04", $downloadBytes);
-        $downloadPath = tempnam(sys_get_temp_dir(), 'opcrf-approved-').'.xlsx';
-        file_put_contents($downloadPath, $downloadBytes);
-        try {
-            $downloadedWorkbook = \PhpOffice\PhpSpreadsheet\IOFactory::createReader('Xlsx')->load($downloadPath);
-            $this->assertInstanceOf(\PhpOffice\PhpSpreadsheet\Spreadsheet::class, $downloadedWorkbook);
-            $downloadedWorkbook->disconnectWorksheets();
-        } finally {
-            unlink($downloadPath);
-        }
+        $this->assertStringStartsWith('%PDF-', $downloadBytes);
     }
 
     public function test_a_submission_filed_without_a_signature_shows_none_in_the_review(): void

@@ -8639,7 +8639,7 @@
          helper used by Livewire components. --}}
     <script
         id="smartAppPwaConfig"
-        src="{{ public_asset('js/smartapp-pwa.js') }}"
+        src="{{ public_asset('js/smartapp-pwa.js') }}?v=4"
         data-service-worker="{{ route('pwa.service-worker') }}"
         data-scope="{{ $appScope = (rtrim(dirname(parse_url(route('home'), PHP_URL_PATH) ?: '/home'), '/') ?: '') . '/' }}"
     ></script>

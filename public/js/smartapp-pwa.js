@@ -1,8 +1,13 @@
 (function () {
     var installPrompt = null;
 
+    function isNativeApp() {
+        return /SmartAppAndroid\/[\w.-]+/.test(window.navigator.userAgent || '');
+    }
+
     function isInstalled() {
-        return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+        return isNativeApp()
+            || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
             || window.navigator.standalone === true;
     }
 
@@ -10,7 +15,8 @@
         window.dispatchEvent(new CustomEvent('smartapp-pwa-state', {
             detail: {
                 canInstall: installPrompt !== null,
-                installed: isInstalled()
+                installed: isInstalled(),
+                nativeApp: isNativeApp()
             }
         }));
     }
@@ -19,12 +25,14 @@
         return {
             canInstall: installPrompt !== null,
             installed: isInstalled(),
+            nativeApp: isNativeApp(),
             message: '',
             init: function () {
                 var self = this;
                 window.addEventListener('smartapp-pwa-state', function (event) {
                     self.canInstall = Boolean(event.detail && event.detail.canInstall);
                     self.installed = Boolean(event.detail && event.detail.installed);
+                    self.nativeApp = Boolean(event.detail && event.detail.nativeApp);
                 });
             },
             install: async function () {

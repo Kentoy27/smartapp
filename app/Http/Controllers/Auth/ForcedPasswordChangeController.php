@@ -16,21 +16,21 @@ class ForcedPasswordChangeController extends Controller
         $user = $request->user();
         abort_unless($user instanceof User, 404);
 
-        if (! $user->must_change_password) {
+        if (! $user->requiresPasswordChange()) {
             return redirect()->route('home');
         }
 
         return view('auth.password-change', [
-            'canUseGoogleSignIn' => $request->session()->boolean('password_change_google_authenticated'),
+            'canUseGoogleSignIn' => (bool) $request->session()->get('password_change_google_authenticated', false),
         ]);
     }
 
     public function update(Request $request)
     {
         $user = $request->user();
-        abort_unless($user instanceof User && $user->must_change_password, 404);
+        abort_unless($user instanceof User && $user->requiresPasswordChange(), 404);
 
-        $googleAuthenticated = $request->session()->boolean('password_change_google_authenticated');
+        $googleAuthenticated = (bool) $request->session()->get('password_change_google_authenticated', false);
         $validated = $request->validate([
             'current_password' => $googleAuthenticated
                 ? ['nullable', 'string', 'current_password']

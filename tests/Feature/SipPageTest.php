@@ -30,7 +30,7 @@ class SipPageTest extends TestCase
                 ->get(route('sip.index'))
                 ->assertOk()
                 ->assertSee('School Improvement Plan (SIP)')
-                ->assertSee('Browse each school\'s SIP by division.', false);
+                ->assertSee('Browse SIP uploads by division.', false);
 
             $this->assertMatchesRegularExpression(
                 '/href="'.preg_quote(route('sip.index'), '/').'"\s+class="nav-item active"/',
@@ -142,7 +142,7 @@ class SipPageTest extends TestCase
         }
     }
 
-    public function test_school_head_can_upload_and_replace_own_division_sip(): void
+    public function test_school_head_can_add_another_sip_without_replacing_the_existing_file(): void
     {
         $this->fakeSipStorage();
         [$school, $division] = $this->makeSchool();
@@ -160,7 +160,7 @@ class SipPageTest extends TestCase
             ->call('uploadSip')
             ->assertHasNoErrors()
             ->assertSet('showUploadModal', false)
-            ->assertSet('successMessage', 'Elementary SIP uploaded for Test School.');
+            ->assertSet('successMessage', 'Elementary SIP added for Test School.');
 
         $submission = SipSubmission::query()->where('school_id', $school->id)->firstOrFail();
         $firstPath = $submission->file_path;
@@ -177,19 +177,88 @@ class SipPageTest extends TestCase
 
         Livewire::actingAs($head)->test(SipTable::class)
             ->call('openUploadModal', $school->id, $division)
-            ->set('sipFile', UploadedFile::fake()->create('Revised-SIP.pdf', 120, 'application/pdf'))
+            ->set('sipFile', UploadedFile::fake()->create('Revised-SIP.pdf', 13000, 'application/pdf'))
             ->call('uploadSip')
-            ->assertHasNoErrors();
+            ->assertHasNoErrors()
+            ->assertSet('successMessage', 'Elementary SIP added for Test School.');
 
-        $submission->refresh();
-        $this->assertSame('Revised-SIP.pdf', $submission->original_file_name);
-        $this->assertNotSame($firstPath, $submission->file_path);
-        Storage::disk('local')->assertMissing($firstPath);
-        Storage::disk('local')->assertExists($submission->file_path);
+        $additionalSubmission = SipSubmission::query()
+            ->where('school_id', $school->id)
+            ->where('division', $division)
+            ->where('original_file_name', 'Revised-SIP.pdf')
+            ->firstOrFail();
+        $this->assertNotSame($submission->id, $additionalSubmission->id);
+        $this->assertSame(2, SipSubmission::query()->where('school_id', $school->id)->count());
+        Storage::disk('local')->assertExists($firstPath);
+        Storage::disk('local')->assertExists($additionalSubmission->file_path);
+        Livewire::actingAs($head)->test(SipTable::class)
+            ->assertSee('School-SIP.pdf')
+            ->assertSee('Revised-SIP.pdf');
 
         $this->actingAs($head)
-            ->get(route('sip.download', $submission))
+            ->get(route('sip.download', $additionalSubmission))
             ->assertDownload('Revised-SIP.pdf');
+
+        Livewire::actingAs($head)->test(SipTable::class)
+            ->call('deleteSip', $additionalSubmission->id)
+            ->assertSet('successMessage', 'Elementary SIP deleted.')
+            ->assertDontSee('Revised-SIP.pdf')
+            ->assertSee('School-SIP.pdf');
+
+        $this->assertDatabaseMissing('sip_submissions', ['id' => $additionalSubmission->id]);
+        $this->assertDatabaseHas('sip_submissions', ['id' => $submission->id]);
+        Storage::disk('local')->assertMissing($additionalSubmission->file_path);
+        Storage::disk('local')->assertExists($firstPath);
+    }
+
+    public function test_school_head_can_upload_junior_high_sip_without_selecting_the_division(): void
+    {
+        $this->fakeSipStorage();
+        [$school] = $this->makeSchool(['JUNIOR_HIGH']);
+        $head = $this->makeSchoolHead($school, ['JUNIOR_HIGH']);
+
+        Livewire::actingAs($head)->test(SipTable::class)
+            ->call('openBulkUploadModal')
+            ->set('bulkUploads.0.division', '')
+            ->set('bulkUploads.0.file', UploadedFile::fake()->create('Junior-High-SIP.pdf', 80, 'application/pdf'))
+            ->call('uploadMultipleSip')
+            ->assertHasNoErrors()
+            ->assertSet('showBulkUploadModal', false);
+
+        $submission = SipSubmission::query()
+            ->where('school_id', $school->id)
+            ->where('division', 'JUNIOR_HIGH')
+            ->firstOrFail();
+
+        $this->assertSame('Junior-High-SIP.pdf', $submission->original_file_name);
+        Storage::disk('local')->assertExists($submission->file_path);
+    }
+
+    public function test_school_head_can_add_one_sip_while_leaving_another_bulk_row_empty(): void
+    {
+        $this->fakeSipStorage();
+        [$school] = $this->makeSchool(['ELEMENTARY', 'JUNIOR_HIGH']);
+        $head = $this->makeSchoolHead($school, ['ELEMENTARY', 'JUNIOR_HIGH']);
+
+        Livewire::actingAs($head)->test(SipTable::class)
+            ->call('openBulkUploadModal')
+            ->call('addBulkUploadRow')
+            ->set('bulkUploads.0.division', 'ELEMENTARY')
+            ->set('bulkUploads.0.file', UploadedFile::fake()->create('Elementary-SIP.pdf', 80, 'application/pdf'))
+            ->call('uploadMultipleSip')
+            ->assertHasNoErrors()
+            ->assertSet('showBulkUploadModal', false)
+            ->assertSet('successMessage', '1 SIP file was uploaded for Test School.');
+
+        $this->assertSame(
+            1,
+            SipSubmission::query()->where('school_id', $school->id)->count(),
+        );
+        $this->assertDatabaseHas('sip_submissions', [
+            'school_id' => $school->id,
+            'division' => 'ELEMENTARY',
+            'original_file_name' => 'Elementary-SIP.pdf',
+        ]);
     }
 
     public function test_school_head_can_upload_multiple_sips_for_distinct_divisions_at_once(): void
@@ -202,11 +271,13 @@ class SipPageTest extends TestCase
             ->assertSee('Upload SIP')
             ->call('openBulkUploadModal')
             ->assertSet('showBulkUploadModal', true)
-            ->assertSee('Add one file for each division you want to upload.')
+            ->assertSee('maximum 100 MB per file')
+            ->assertSee('Each upload is saved as a new record; existing SIP files are kept.')
             ->call('addBulkUploadRow')
-            ->set('bulkUploads.0.file', UploadedFile::fake()->create('Elementary-SIP.pdf', 80, 'application/pdf'))
+            ->set('bulkUploads.0.division', 'ELEMENTARY')
+            ->set('bulkUploads.0.file', UploadedFile::fake()->create('Elementary-SIP.pdf', 13000, 'application/pdf'))
             ->set('bulkUploads.1.division', 'JUNIOR_HIGH')
-            ->set('bulkUploads.1.file', UploadedFile::fake()->create('Junior-High-SIP.pdf', 100, 'application/pdf'))
+            ->set('bulkUploads.1.file', UploadedFile::fake()->create('Junior-High-SIP.pdf', 14000, 'application/pdf'))
             ->call('uploadMultipleSip')
             ->assertHasNoErrors()
             ->assertSet('showBulkUploadModal', false)
@@ -215,29 +286,28 @@ class SipPageTest extends TestCase
         $this->assertSame(2, SipSubmission::query()->where('school_id', $school->id)->count());
 
         foreach ([
-            'ELEMENTARY' => 'Elementary-SIP.pdf',
-            'JUNIOR_HIGH' => 'Junior-High-SIP.pdf',
-        ] as $division => $fileName) {
+            'Elementary-SIP.pdf' => 'ELEMENTARY',
+            'Junior-High-SIP.pdf' => 'JUNIOR_HIGH',
+        ] as $fileName => $division) {
             $submission = SipSubmission::query()
                 ->where('school_id', $school->id)
                 ->where('division', $division)
+                ->where('original_file_name', $fileName)
                 ->firstOrFail();
-
-            $this->assertSame($fileName, $submission->original_file_name);
             Storage::disk('local')->assertExists($submission->file_path);
         }
 
-        $duplicateDivision = Livewire::actingAs($head)->test(SipTable::class)
+        Livewire::actingAs($head)->test(SipTable::class)
             ->call('openBulkUploadModal')
             ->call('addBulkUploadRow')
             ->set('bulkUploads.0.division', 'ELEMENTARY')
             ->set('bulkUploads.1.division', 'ELEMENTARY')
-            ->set('bulkUploads.0.file', UploadedFile::fake()->create('Duplicate-One.pdf', 80, 'application/pdf'))
-            ->set('bulkUploads.1.file', UploadedFile::fake()->create('Duplicate-Two.pdf', 80, 'application/pdf'))
-            ->call('uploadMultipleSip');
+            ->set('bulkUploads.0.file', UploadedFile::fake()->create('Additional-One.pdf', 80, 'application/pdf'))
+            ->set('bulkUploads.1.file', UploadedFile::fake()->create('Additional-Two.pdf', 80, 'application/pdf'))
+            ->call('uploadMultipleSip')
+            ->assertHasNoErrors();
 
-        $duplicateDivision->assertHasErrors(['bulkUploads.1.division']);
-        $this->assertSame(2, SipSubmission::query()->where('school_id', $school->id)->count());
+        $this->assertSame(4, SipSubmission::query()->where('school_id', $school->id)->count());
     }
 
     public function test_sip_table_lists_every_configured_division_and_viewers_are_read_only(): void
@@ -290,6 +360,13 @@ class SipPageTest extends TestCase
         Livewire::actingAs($head)->test(SipTable::class)
             ->call('openPreview', $submission->id)
             ->assertNotFound();
+
+        Livewire::actingAs($head)->test(SipTable::class)
+            ->call('deleteSip', $submission->id)
+            ->assertNotFound();
+
+        $this->assertDatabaseHas('sip_submissions', ['id' => $submission->id]);
+        Storage::disk('local')->assertExists($submission->file_path);
     }
 
     public function test_viewers_can_preview_pdf_and_word_sips_in_the_browser(): void

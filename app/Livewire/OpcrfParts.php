@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Models\OpcrfSubmission;
 use App\Support\OpcrfAccess;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Title;
@@ -49,10 +50,22 @@ class OpcrfParts extends Component
 
         $now = now();
         $parts = OpcrfAccess::allParts($user, $year, $now);
+        $hasApprovedPartOne = OpcrfSubmission::latestApprovedPartOneFor($user) !== null;
         $groupStates = array_values(array_filter(
             $parts,
             fn(array $part): bool => in_array($part['part'], [2, 3, 4], true),
         ));
+
+        if (! $hasApprovedPartOne) {
+            foreach ($groupStates as &$groupState) {
+                $groupState['can_access'] = false;
+                $groupState['open'] = false;
+                $groupState['tone'] = 'scheduled';
+                $groupState['badge'] = 'Approval required';
+            }
+            unset($groupState);
+        }
+
         $displayParts = array_values(array_filter(
             $parts,
             fn(array $part): bool => in_array($part['part'], [1, 2], true),
@@ -62,9 +75,13 @@ class OpcrfParts extends Component
             $part['is_grouped_term'] = $part['part'] === 2;
             $part['group_states'] = $part['is_grouped_term'] ? $groupStates : [];
             $part['all_group_parts_complete'] = $part['is_grouped_term']
+                && $hasApprovedPartOne
                 && count($groupStates) === 3
                 && collect($groupStates)->every(fn(array $state): bool => $state['completed']);
-            $part['card_tone'] = $part['all_group_parts_complete'] ? 'completed' : $part['tone'];
+            $part['approval_required'] = $part['is_grouped_term'] && ! $hasApprovedPartOne;
+            $part['card_tone'] = $part['all_group_parts_complete']
+                ? 'completed'
+                : ($part['approval_required'] ? 'scheduled' : $part['tone']);
         }
         unset($part);
 
@@ -72,8 +89,13 @@ class OpcrfParts extends Component
             'year' => $year,
             'parts' => $displayParts,
             'now' => $now,
-            'openCount' => count(array_filter($parts, fn(array $p): bool => $p['open'])),
+            'openCount' => count(array_filter(
+                $parts,
+                fn(array $part): bool => $part['open']
+                    && ($part['part'] === 1 || $hasApprovedPartOne)
+            )),
             'readOnly' => false,
+            'hasApprovedPartOne' => $hasApprovedPartOne,
         ]);
     }
 }

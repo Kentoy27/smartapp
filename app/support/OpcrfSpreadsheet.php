@@ -161,6 +161,32 @@ class OpcrfSpreadsheet
         ];
     }
 
+    /**
+     * The full OPCRF self-rating is the average of the employee-entered
+     * ratings in Parts I and II. Part III is a weighted summary, so including
+     * it would count the same ratings a second time.
+     */
+    public function fullWorkbookSelfRating(): ?float
+    {
+        $ratings = $this->columnRatings();
+
+        foreach ($this->partTwo()['sections'] as $section) {
+            foreach ($section['groups'] as $group) {
+                foreach ($group['indicators'] as $indicator) {
+                    if ($indicator['rating'] !== null) {
+                        $ratings[] = $indicator['rating'];
+                    }
+                }
+            }
+        }
+
+        if ($ratings === []) {
+            return null;
+        }
+
+        return round(array_sum($ratings) / count($ratings), 2);
+    }
+
     /* ------------------------------------------------------------------
      * Sheet layout data — feeds the Excel-style review modal, which
      * mirrors the real template's design (title row, header block,
@@ -457,11 +483,32 @@ class OpcrfSpreadsheet
             $pairs[] = [
                 'ref' => 'N'.$rowNumber,
                 'label' => $label !== '' ? $label : $fallbackLabels[$rowNumber],
-                'value' => $value,
+                'value' => $rowNumber === 7 ? $this->formatReviewDate($value) : $value,
             ];
         }
 
         return $pairs;
+    }
+
+    /**
+     * Excel stores dates as day counts from 1899-12-30. The review modal
+     * needs to render the date a person sees in Excel, not that raw serial.
+     */
+    private function formatReviewDate(string $value): string
+    {
+        if (! is_numeric($value)) {
+            return $value;
+        }
+
+        $serial = (float) $value;
+
+        if ($serial < 1 || $serial > 2958465) {
+            return $value;
+        }
+
+        $date = new \DateTimeImmutable('1899-12-30', new \DateTimeZone('UTC'));
+
+        return $date->modify('+'.(int) floor($serial).' days')->format('m/d/Y');
     }
 
     /* ------------------------------------------------------------------

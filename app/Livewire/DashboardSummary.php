@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Models\OpcrfSchedule;
 use App\Models\OpcrfSubmission;
 use App\Models\OpcrfTemplate;
 use App\Models\User;
@@ -39,6 +40,9 @@ class DashboardSummary extends Component
         $user = Auth::user();
         $isSuperAdmin = (bool) $user?->hasAdminAccess();
         $canAccessOpcrfTemplate = $user?->canAccessOpcrfTemplate() ?? false;
+        $hasApprovedPartOne = $canAccessOpcrfTemplate
+            && $user instanceof User
+            && OpcrfSubmission::latestApprovedPartOneFor($user) !== null;
 
         return view('livewire.dashboard.summary', [
             'isSuperAdmin' => $isSuperAdmin,
@@ -49,6 +53,12 @@ class DashboardSummary extends Component
             // Part availability by school-year term: the full workbook is
             // available during Part 1 or the shared Parts 2–4 term.
             'opcrfPartOne' => $canAccessOpcrfTemplate ? OpcrfPartOne::summary() : null,
+            'opcrfPartOneDownloadAvailable' => $canAccessOpcrfTemplate
+                && $user instanceof User
+                && OpcrfAccess::canAccess($user, OpcrfSchedule::PART_ONE),
+            'opcrfFullDownloadAvailable' => $hasApprovedPartOne
+                && OpcrfPartOne::fullTemplateAvailable(),
+            'opcrfPartOneApproved' => $hasApprovedPartOne,
             // The personalized template this account last generated, and the
             // name it was generated with — the status panel's "✓ Template
             // Generated" state, with a download link back to the same file.

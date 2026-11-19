@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\OpcrfSchedule;
+use App\Models\OpcrfSubmission;
 use App\Support\OpcrfAccess;
 use Closure;
 use Illuminate\Http\Request;
@@ -48,6 +49,20 @@ class EnsureOpcrfPartIsOpen
         // class is the actual boundary.
         abort_unless(in_array($partNumber, OpcrfSchedule::parts(), true), 404);
 
+        if (
+            $partNumber > OpcrfSchedule::PART_ONE
+            && OpcrfSubmission::latestApprovedPartOneFor($user) === null
+        ) {
+            return redirect()
+                ->route('opcrf.index')
+                ->with('opcrfPartNotice', [
+                    'status' => OpcrfSchedule::STATUS_SCHEDULED,
+                    'tone' => OpcrfSchedule::STATUS_SCHEDULED,
+                    'message' => 'Submit your OPCRF Commitment (Part I) and wait for approval before accessing the full OPCRF.',
+                    'detail' => 'Parts I–IV become available after your Part I commitment is approved.',
+                ]);
+        }
+
         if (!OpcrfAccess::canAccess($user, $partNumber)) {
             $state = OpcrfAccess::partState($user, $partNumber);
 
@@ -58,6 +73,7 @@ class EnsureOpcrfPartIsOpen
                 ->route('opcrf.index')
                 ->with('opcrfPartNotice', [
                     'status' => $state['status'],
+                    'tone' => $state['status'],
                     'message' => $state['message'],
                     'detail' => $state['detail'],
                 ]);

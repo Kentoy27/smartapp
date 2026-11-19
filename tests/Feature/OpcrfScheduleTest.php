@@ -168,7 +168,7 @@ class OpcrfScheduleTest extends TestCase
         $this->assertStringContainsString('OPCRF Commitment is now open.', $html);
         $this->assertStringContainsString('Access OPCRF Commitment', $html);
         // And the others say what is true, not nothing.
-        $this->assertStringContainsString('Full OPCRF locked', $html);
+        $this->assertStringContainsString('Approval required', $html);
     }
 
     public function test_a_user_cannot_access_a_part_before_its_start_date(): void
@@ -248,6 +248,7 @@ class OpcrfScheduleTest extends TestCase
 
         // The exact end minute is still open (the boundary is inclusive).
         $this->schedule(OpcrfSchedule::PART_TWO, '2026-06-01 08:00:00', '2026-06-15 10:00:00');
+        $this->submission($staff, ['status' => OpcrfSubmission::STATUS_FOR_COMPLIANCE]);
         $this->assertTrue(OpcrfAccess::canAccess($staff, 2));
 
         // One minute later it is not — no toggle, no cron, no deploy.
@@ -307,6 +308,7 @@ class OpcrfScheduleTest extends TestCase
         $this->schedule(OpcrfSchedule::PART_TWO, '2026-06-01 08:00:00', '2026-06-30 17:00:00');
         $this->schedule(OpcrfSchedule::PART_THREE, '2026-05-01 08:00:00', '2026-05-31 17:00:00');
         $this->schedule(OpcrfSchedule::PART_FOUR, '2026-08-01 08:00:00', '2026-08-31 17:00:00', enabled: false);
+        $this->submission($staff, ['status' => OpcrfSubmission::STATUS_FOR_COMPLIANCE]);
 
         $states = collect(OpcrfAccess::allParts($staff, 2026))->keyBy('part');
 
@@ -351,8 +353,8 @@ class OpcrfScheduleTest extends TestCase
         $html = $this->actingAs($staff)->get(route('opcrf.index'))->assertOk()->getContent();
 
         $this->assertStringContainsString('OPCRF Commitment is now open.', $html);
-        $this->assertStringContainsString('Full OPCRF locked', $html);
-        $this->assertStringContainsString('Full OPCRF is available during the end-of-year term', $html);
+        $this->assertStringContainsString('Approval required', $html);
+        $this->assertStringContainsString('wait for approval before accessing the full OPCRF', $html);
         $this->assertSame(2, substr_count($html, 'class="opcrf-part-card opcrf-part-card--'));
     }
 
@@ -361,6 +363,7 @@ class OpcrfScheduleTest extends TestCase
         $staff = $this->staff();
         $this->schedule(OpcrfSchedule::PART_TWO, '2026-05-01 08:00:00', '2026-05-31 17:00:00');
         Carbon::setTestNow('2026-05-15 10:00:00');
+        $this->submission($staff, ['status' => OpcrfSubmission::STATUS_FOR_COMPLIANCE]);
 
         $html = $this->actingAs($staff)->get(route('opcrf.index'))->assertOk()->getContent();
 
@@ -377,6 +380,7 @@ class OpcrfScheduleTest extends TestCase
         $staff = $this->staff();
         $this->schedule(OpcrfSchedule::PART_TWO, '2026-05-01 08:00:00', '2026-06-15 17:00:00');
         $submission = $this->submission($staff, ['opcrf_part' => OpcrfSubmission::PART_THREE]);
+        $this->submission($staff, ['status' => OpcrfSubmission::STATUS_FOR_COMPLIANCE]);
 
         Carbon::setTestNow('2026-06-15 18:00:00');
 
@@ -386,6 +390,24 @@ class OpcrfScheduleTest extends TestCase
 
         $this->assertTrue(OpcrfAccess::partState($staff, 3)['completed']);
         $this->assertSame(OpcrfSubmission::STATUS_PENDING, $submission->fresh()->status);
+    }
+
+    public function test_full_parts_are_blocked_until_part_one_is_approved(): void
+    {
+        $staff = $this->staff();
+        $this->schedule(OpcrfSchedule::PART_TWO);
+
+        $this->actingAs($staff)
+            ->get(route('opcrf.part', ['part' => 2]))
+            ->assertRedirect(route('opcrf.index'))
+            ->assertSessionHas('opcrfPartNotice.message', 'Submit your OPCRF Commitment (Part I) and wait for approval before accessing the full OPCRF.');
+
+        $this->submission($staff, ['status' => OpcrfSubmission::STATUS_FOR_COMPLIANCE]);
+
+        $this->actingAs($staff)
+            ->get(route('opcrf.part', ['part' => 2]))
+            ->assertOk()
+            ->assertSee('Download complete OPCRF template (Parts 1–4)');
     }
 
     /* ==================================================================
@@ -406,7 +428,7 @@ class OpcrfScheduleTest extends TestCase
         $this->assertFalse(OpcrfAccess::canAccess($staff, 1, 2027));
 
         $html = $this->actingAs($staff)->get(route('opcrf.index'))->assertOk()->getContent();
-        $this->assertStringContainsString('OPCRF 2027', $html);
+        $this->assertStringContainsString('Office Performance Commitment and Review Form (OPCRF) 2027', $html);
     }
 
     public function test_with_no_schedule_part_one_stays_reachable(): void
@@ -751,6 +773,7 @@ class OpcrfScheduleTest extends TestCase
             'objectives' => 'Saved Part 1 objective',
             'accomplishments' => 'Saved Part 1 accomplishment',
             'self_rating' => 4.5,
+            'status' => OpcrfSubmission::STATUS_FOR_COMPLIANCE,
         ]);
 
         $response = $this->actingAs($staff)
@@ -791,7 +814,7 @@ class OpcrfScheduleTest extends TestCase
         $this->assertSame(1, OpcrfSubmission::where('user_id', $staff->id)->where('opcrf_part', OpcrfSubmission::PART_ONE)->count());
 
         $dashboard = $this->get(route('home'))->assertOk();
-        $dashboard->assertSee('Your approved Part I, when available, is included');
+        $dashboard->assertSee('Your approved Part I is included in the full OPCRF download.');
     }
 
     public function test_parts_two_to_four_download_uses_the_approved_part_one_copy(): void
@@ -804,7 +827,7 @@ class OpcrfScheduleTest extends TestCase
         $signedPath = 'opcrf-submissions/'.$staff->id.'/part-one-approved.xlsx';
         $baseWorkbook = OpcrfWorkbookProgress::mergeSubmissionData(
             OpcrfPartOne::templateBytes(false),
-            ['objectives' => 'Original submitted objective'],
+            ['objectives' => 'Approved Part I objective'],
             true
         );
         $approvedWorkbook = OpcrfWorkbookProgress::mergeSubmissionData(

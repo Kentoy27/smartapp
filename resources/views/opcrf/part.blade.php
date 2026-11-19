@@ -35,7 +35,7 @@
             &ndash; {{ \App\Support\OpcrfAccess::when($schedule?->end_datetime) }}).
         </p>
 
-        @if ($part > 1 && \App\Support\OpcrfPartOne::fullTemplateAvailable())
+        @if ($part > 1 && $fullDownloadAvailable)
             <a href="{{ route('opcrf.template') }}" class="card-link opcrf-card-link" download>
                 <x-icon name="download" :size="14" />
                 <span>Download complete OPCRF template (Parts 1–4)</span>

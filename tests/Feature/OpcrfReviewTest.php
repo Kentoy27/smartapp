@@ -24,6 +24,46 @@ class OpcrfReviewTest extends TestCase
     use BuildsOpcrfWorkbooks;
     use RefreshDatabase;
 
+    private function officialWorkbookBytes(array $cells = []): string
+    {
+        $path = base_path('storage/forms/OPCRF-TEMPLATE.xlsx');
+        $this->assertFileExists($path);
+
+        if ($cells !== []) {
+            $workbookPath = tempnam(sys_get_temp_dir(), 'opcrf-filled-test-');
+            $this->assertNotFalse($workbookPath);
+            $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::createReader('Xlsx')->load($path);
+
+            try {
+                foreach ($cells as $coordinate => $value) {
+                    $spreadsheet->getSheet(0)->setCellValue($coordinate, $value);
+                }
+
+                \PhpOffice\PhpSpreadsheet\IOFactory::createWriter($spreadsheet, 'Xlsx')->save($workbookPath);
+                $bytes = file_get_contents($workbookPath);
+            } finally {
+                $spreadsheet->disconnectWorksheets();
+                if (is_file($workbookPath)) {
+                    unlink($workbookPath);
+                }
+            }
+
+            if (! is_string($bytes)) {
+                $this->fail('The populated OPCRF workbook could not be read.');
+            }
+
+            return $bytes;
+        }
+
+        $bytes = file_get_contents($path);
+
+        if (! is_string($bytes)) {
+            $this->fail('The official OPCRF template could not be read.');
+        }
+
+        return $bytes;
+    }
+
     private function staffUser(string $name = 'Staff Member'): User
     {
         return User::create([
@@ -1010,7 +1050,10 @@ class OpcrfReviewTest extends TestCase
 
         $submission = $this->createSubmission($staff);
 
-        Storage::disk('local')->put('opcrf-submissions/'.$staff->id.'/original.xlsx', 'original-bytes');
+        Storage::disk('local')->put(
+            'opcrf-submissions/'.$staff->id.'/original.xlsx',
+            $this->officialWorkbookBytes()
+        );
         $submission->update([
             'file_path' => 'opcrf-submissions/'.$staff->id.'/original.xlsx',
             'file_original_name' => 'OPCRF-TEMPLATE.xlsx',
@@ -1325,7 +1368,15 @@ class OpcrfReviewTest extends TestCase
         $staff = $this->staffUser();
         $submission = $this->createSubmission($staff);
 
-        Storage::disk('local')->put('opcrf-submissions/'.$staff->id.'/approved.xlsx', 'approved-bytes');
+        $workbookBytes = $this->officialWorkbookBytes([
+            'F4' => 'Staff Member',
+            'F5' => 'School Head',
+            'F6' => 'School Year 2026',
+            'F7' => 'Sample Division',
+            'S16' => 'Achieved measurable learner progress',
+            'T16' => 4,
+        ]);
+        Storage::disk('local')->put('opcrf-submissions/'.$staff->id.'/approved.xlsx', $workbookBytes);
         $submission->update([
             'file_path' => 'opcrf-submissions/'.$staff->id.'/approved.xlsx',
             'file_original_name' => 'OPCR-APPROVED.xlsx',
@@ -1333,21 +1384,49 @@ class OpcrfReviewTest extends TestCase
 
         // The workbook is the staff member's own submission — they can
         // fetch it at any time, review pending or not.
-        $this->actingAs($staff)
+        $pendingResponse = $this->actingAs($staff)
             ->get(route('opcrf.submission.download', $submission))
             ->assertOk()
-            ->assertDownload('Staff Member - OPCRF.xlsx');
+            ->assertDownload('Staff Member - OPCRF.pdf')
+            ->assertHeader('Content-Type', 'application/pdf');
+        $this->assertStringStartsWith('%PDF-', (string) $pendingResponse->getContent());
+        preg_match_all('/\/Type\s*\/Page\b/', (string) $pendingResponse->getContent(), $pdfPages);
+        $this->assertGreaterThan(0, count($pdfPages[0]));
+        $this->assertLessThanOrEqual(15, count($pdfPages[0]), 'The Part I content should not be fragmented into dozens of PDF pages.');
 
         // …and after the compliance mark it stays available, still the
         // same bytes — reviews never replace the file.
         $submission->markCompliant($admin);
 
-        $this->actingAs($staff)
+        $response = $this->actingAs($staff)
             ->get(route('opcrf.submission.download', $submission))
             ->assertOk()
-            ->assertDownload('Staff Member - OPCRF.xlsx');
+            ->assertDownload('Staff Member - OPCRF.pdf')
+            ->assertHeader('Content-Type', 'application/pdf');
 
-        $this->assertSame('approved-bytes', Storage::disk('local')->get($submission->file_path));
+        $this->assertStringStartsWith('%PDF-', (string) $response->getContent());
+        $this->assertSame($workbookBytes, Storage::disk('local')->get($submission->file_path));
+    }
+
+    public function test_a_part_two_owner_download_remains_an_excel_workbook(): void
+    {
+        Storage::fake('local');
+
+        $staff = $this->staffUser();
+        $submission = $this->createSubmission($staff, [
+            'opcrf_part' => OpcrfSubmission::PART_TWO,
+            'file_path' => 'opcrf-submissions/'.$staff->id.'/part-two.xlsx',
+            'file_original_name' => 'OPCRF-TEMPLATE.xlsx',
+        ]);
+        Storage::disk('local')->put($submission->file_path, $this->officialWorkbookBytes());
+
+        $response = $this->actingAs($staff)
+            ->get(route('opcrf.submission.download', $submission))
+            ->assertOk()
+            ->assertDownload('Staff Member - OPCRF.xlsx')
+            ->assertHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+
+        $this->assertStringStartsWith("PK\x03\x04", (string) $response->getContent());
     }
 
     public function test_the_approval_state_shows_in_both_tables(): void
@@ -1472,7 +1551,7 @@ class OpcrfReviewTest extends TestCase
             ['reviewer_id' => $owner->id]
         );
 
-        Storage::disk('local')->put('opcrf-submissions/routed.xlsx', 'routed-bytes');
+        Storage::disk('local')->put('opcrf-submissions/routed.xlsx', $this->officialWorkbookBytes());
         $submission->update([
             'file_path' => 'opcrf-submissions/routed.xlsx',
             'file_original_name' => 'OPCRF-TEMPLATE.xlsx',
@@ -1485,7 +1564,8 @@ class OpcrfReviewTest extends TestCase
         $this->actingAs($owner)
             ->get(route('opcrf.submission.download', $submission))
             ->assertOk()
-            ->assertDownload('Staff Member - OPCRF.xlsx');
+            ->assertDownload('Staff Member - OPCRF.xlsx')
+            ->assertHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     }
 
     public function test_mov_evidence_follows_the_same_routing(): void
@@ -1962,6 +2042,7 @@ class OpcrfReviewTest extends TestCase
         // is gone, and nothing generic sneaks in.
         $this->assertSame('Staff Member', $submission->realNameLabel());
         $this->assertSame('Staff Member - OPCRF.xlsx', $submission->fileDownloadName());
+        $this->assertSame('Staff Member - OPCRF.pdf', $submission->fileDownloadPdfName());
         $this->assertStringNotContainsString('TEMPLATE', $submission->fileDownloadName());
 
         $this->actingAs($admin)

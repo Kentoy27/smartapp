@@ -1,17 +1,21 @@
 package com.sdokab.smartapp;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.DownloadManager;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.provider.MediaStore;
 import android.webkit.CookieManager;
 import android.webkit.DownloadListener;
+import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -26,13 +30,27 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.Toast;
 
+import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
+
+import java.io.File;
+import java.io.IOException;
+
 public final class MainActivity extends Activity {
     private static final String APP_HOST = "smartapp.sdokab.com";
     private static final String START_URL = "https://smartapp.sdokab.com/smartapp/home";
     private static final long MINIMUM_SPLASH_DURATION_MS = 850;
+    private static final int FILE_CHOOSER_REQUEST = 4107;
+    private static final int CAMERA_PERMISSION_REQUEST = 4108;
+    private static final int DOWNLOAD_PERMISSION_REQUEST = 4109;
 
     private WebView webView;
     private ValueCallback<Uri[]> fileChooserCallback;
+    private PermissionRequest pendingWebPermissionRequest;
+    private Uri cameraPhotoUri;
+    private File cameraPhotoFile;
+    private boolean pendingCameraCapture;
+    private PendingDownload pendingDownload;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private long activityStartedAt;
     private View startupArtwork;
@@ -83,6 +101,7 @@ public final class MainActivity extends Activity {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         settings.setSupportMultipleWindows(false);
         settings.setMediaPlaybackRequiresUserGesture(true);
+        settings.setUserAgentString(settings.getUserAgentString() + " SmartAppAndroid/1.0.3");
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             settings.setSafeBrowsingEnabled(true);
         }
@@ -131,20 +150,61 @@ public final class MainActivity extends Activity {
                     FileChooserParams fileChooserParams
             ) {
                 if (fileChooserCallback != null) {
-                    fileChooserCallback.onReceiveValue(null);
+                    finishFileChooser(null);
+                    discardCameraPhoto();
                 }
 
                 fileChooserCallback = filePathCallback;
-                Intent intent;
-
-                try {
-                    intent = fileChooserParams.createIntent();
-                    startActivityForResult(intent, FILE_CHOOSER_REQUEST);
+                if (fileChooserParams.isCaptureEnabled() && acceptsImage(fileChooserParams.getAcceptTypes())) {
+                    if (hasCameraPermission()) {
+                        launchCameraCapture();
+                    } else {
+                        pendingCameraCapture = true;
+                        requestPermissions(
+                                new String[]{Manifest.permission.CAMERA},
+                                CAMERA_PERMISSION_REQUEST
+                        );
+                    }
                     return true;
-                } catch (ActivityNotFoundException exception) {
-                    fileChooserCallback = null;
-                    Toast.makeText(MainActivity.this, "No file picker is available on this device.", Toast.LENGTH_LONG).show();
-                    return false;
+                }
+
+                launchFilePicker(fileChooserParams);
+                return true;
+            }
+
+            @Override
+            public void onPermissionRequest(PermissionRequest request) {
+                if (!isTrustedAppOrigin(request.getOrigin())) {
+                    request.deny();
+                    return;
+                }
+
+                if (pendingWebPermissionRequest != null) {
+                    pendingWebPermissionRequest.deny();
+                }
+
+                for (String resource : request.getResources()) {
+                    if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource)) {
+                        pendingWebPermissionRequest = request;
+                        if (hasCameraPermission()) {
+                            grantWebCameraPermission();
+                        } else {
+                            requestPermissions(
+                                    new String[]{Manifest.permission.CAMERA},
+                                    CAMERA_PERMISSION_REQUEST
+                            );
+                        }
+                        return;
+                    }
+                }
+
+                request.deny();
+            }
+
+            @Override
+            public void onPermissionRequestCanceled(PermissionRequest request) {
+                if (pendingWebPermissionRequest == request) {
+                    pendingWebPermissionRequest = null;
                 }
             }
         });
@@ -189,8 +249,6 @@ public final class MainActivity extends Activity {
         mainHandler.postDelayed(hideArtworkRunnable, delay);
     }
 
-    private static final int FILE_CHOOSER_REQUEST = 4107;
-
     private boolean openOrKeepUrl(Uri uri) {
         String scheme = uri.getScheme();
         String host = uri.getHost();
@@ -219,34 +277,197 @@ public final class MainActivity extends Activity {
                 || host.toLowerCase().endsWith(".google.com"));
     }
 
+    private boolean isTrustedAppOrigin(Uri origin) {
+        return origin != null
+                && "https".equalsIgnoreCase(origin.getScheme())
+                && APP_HOST.equalsIgnoreCase(origin.getHost());
+    }
+
+    private boolean hasCameraPermission() {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private static boolean acceptsImage(String[] acceptTypes) {
+        if (acceptTypes == null) {
+            return false;
+        }
+
+        for (String acceptType : acceptTypes) {
+            if (acceptType != null && acceptType.toLowerCase().startsWith("image/")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void launchFilePicker(WebChromeClient.FileChooserParams params) {
+        try {
+            Intent intent = params.createIntent();
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivityForResult(intent, FILE_CHOOSER_REQUEST);
+        } catch (ActivityNotFoundException exception) {
+            finishFileChooser(null);
+            Toast.makeText(this, "No document picker is available on this device.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void launchCameraCapture() {
+        File picturesDirectory = new File(getCacheDir(), "camera");
+        if (!picturesDirectory.isDirectory() && !picturesDirectory.mkdirs()) {
+            finishFileChooser(null);
+            Toast.makeText(this, "Camera storage is unavailable on this device.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        try {
+            cameraPhotoFile = File.createTempFile("smartapp-camera-", ".jpg", picturesDirectory);
+            cameraPhotoUri = FileProvider.getUriForFile(
+                    this,
+                    getPackageName() + ".fileprovider",
+                    cameraPhotoFile
+            );
+
+            Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            intent.putExtra(MediaStore.EXTRA_OUTPUT, cameraPhotoUri);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            if (intent.resolveActivity(getPackageManager()) == null) {
+                discardCameraPhoto();
+                finishFileChooser(null);
+                Toast.makeText(this, "No camera app is available on this device.", Toast.LENGTH_LONG).show();
+                return;
+            }
+
+            startActivityForResult(intent, FILE_CHOOSER_REQUEST);
+        } catch (IOException | IllegalArgumentException exception) {
+            discardCameraPhoto();
+            finishFileChooser(null);
+            Toast.makeText(this, "The camera could not prepare a photo. Please try again.", Toast.LENGTH_LONG).show();
+        } catch (ActivityNotFoundException exception) {
+            discardCameraPhoto();
+            finishFileChooser(null);
+            Toast.makeText(this, "No camera app is available on this device.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void grantWebCameraPermission() {
+        PermissionRequest request = pendingWebPermissionRequest;
+        pendingWebPermissionRequest = null;
+        if (request != null) {
+            request.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+        }
+    }
+
     private DownloadListener createDownloadListener() {
         return (url, userAgent, contentDisposition, mimeType, contentLength) -> {
-            try {
-                DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
-                request.setTitle(URLUtil.guessFileName(url, contentDisposition, mimeType));
-                request.setDescription("Downloading from SmartApp");
-                request.setMimeType(mimeType);
-                request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-                request.setDestinationInExternalPublicDir(
-                        Environment.DIRECTORY_DOWNLOADS,
-                        URLUtil.guessFileName(url, contentDisposition, mimeType)
-                );
-
-                String cookies = CookieManager.getInstance().getCookie(url);
-                if (cookies != null && !cookies.isEmpty()) {
-                    request.addRequestHeader("Cookie", cookies);
-                }
-                if (userAgent != null && !userAgent.isEmpty()) {
-                    request.addRequestHeader("User-Agent", userAgent);
-                }
-
-                DownloadManager manager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-                manager.enqueue(request);
-                Toast.makeText(this, "Download started. Check your notifications.", Toast.LENGTH_LONG).show();
-            } catch (IllegalArgumentException exception) {
-                Toast.makeText(this, "This download link is not valid.", Toast.LENGTH_LONG).show();
+            Uri downloadUri = Uri.parse(url);
+            if (APP_HOST.equalsIgnoreCase(downloadUri.getHost())
+                    && downloadUri.getPath() != null
+                    && downloadUri.getPath().endsWith("/downloads/smartapp-android.apk")) {
+                Toast.makeText(this, "SmartApp is already installed on this device.", Toast.LENGTH_LONG).show();
+                return;
             }
+
+            if (!"https".equalsIgnoreCase(downloadUri.getScheme())
+                    || !APP_HOST.equalsIgnoreCase(downloadUri.getHost())) {
+                Toast.makeText(this, "Only secure SmartApp downloads are supported.", Toast.LENGTH_LONG).show();
+                return;
+            }
+
+            PendingDownload download = new PendingDownload(url, userAgent, contentDisposition, mimeType);
+            if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q
+                    && ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                    != PackageManager.PERMISSION_GRANTED) {
+                pendingDownload = download;
+                requestPermissions(
+                        new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},
+                        DOWNLOAD_PERMISSION_REQUEST
+                );
+                return;
+            }
+
+            enqueueDownload(download);
         };
+    }
+
+    private void enqueueDownload(PendingDownload download) {
+        DownloadManager manager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+        if (manager == null) {
+            Toast.makeText(this, "The system download service is unavailable.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        try {
+            Uri uri = Uri.parse(download.url);
+            String filename = URLUtil.guessFileName(
+                    download.url,
+                    download.contentDisposition,
+                    download.mimeType
+            );
+            DownloadManager.Request request = new DownloadManager.Request(uri);
+            request.setTitle(filename);
+            request.setDescription("Downloading from SmartApp");
+            request.setMimeType(download.mimeType);
+            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename);
+
+            String cookies = CookieManager.getInstance().getCookie(download.url);
+            if (cookies != null && !cookies.isEmpty()) {
+                request.addRequestHeader("Cookie", cookies);
+            }
+            if (download.userAgent != null && !download.userAgent.isEmpty()) {
+                request.addRequestHeader("User-Agent", download.userAgent);
+            }
+
+            manager.enqueue(request);
+            Toast.makeText(this, "Download started. Check your notifications.", Toast.LENGTH_LONG).show();
+        } catch (IllegalArgumentException | SecurityException exception) {
+            Toast.makeText(this, "SmartApp could not save this download. Check storage access and try again.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+
+        if (requestCode == CAMERA_PERMISSION_REQUEST) {
+            boolean granted = grantResults.length > 0
+                    && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+
+            if (pendingWebPermissionRequest != null) {
+                if (granted) {
+                    grantWebCameraPermission();
+                } else {
+                    pendingWebPermissionRequest.deny();
+                    pendingWebPermissionRequest = null;
+                }
+            }
+
+            if (pendingCameraCapture) {
+                pendingCameraCapture = false;
+                if (granted) {
+                    launchCameraCapture();
+                } else {
+                    finishFileChooser(null);
+                    Toast.makeText(this, "Allow camera access to take an evidence photo.", Toast.LENGTH_LONG).show();
+                }
+            }
+            return;
+        }
+
+        if (requestCode == DOWNLOAD_PERMISSION_REQUEST) {
+            PendingDownload download = pendingDownload;
+            pendingDownload = null;
+            if (download == null) {
+                return;
+            }
+
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                enqueueDownload(download);
+            } else {
+                Toast.makeText(this, "Allow storage access to save downloads on this Android version.", Toast.LENGTH_LONG).show();
+            }
+        }
     }
 
     @Override
@@ -257,16 +478,60 @@ public final class MainActivity extends Activity {
             return;
         }
 
+        if (cameraPhotoUri != null) {
+            Uri capturedPhoto = cameraPhotoUri;
+            File capturedFile = cameraPhotoFile;
+            boolean photoSaved = resultCode == RESULT_OK
+                    && capturedFile != null
+                    && capturedFile.isFile()
+                    && capturedFile.length() > 0;
+            cameraPhotoUri = null;
+            cameraPhotoFile = null;
+            finishFileChooser(photoSaved ? new Uri[]{capturedPhoto} : null);
+            if (!photoSaved) {
+                if (capturedFile != null && capturedFile.exists()) {
+                    capturedFile.delete();
+                }
+            }
+            return;
+        }
+
         Uri[] results = resultCode == RESULT_OK && data != null
                 ? WebChromeClient.FileChooserParams.parseResult(resultCode, data)
                 : null;
-        fileChooserCallback.onReceiveValue(results);
+        finishFileChooser(results);
+    }
+
+    private void finishFileChooser(Uri[] results) {
+        ValueCallback<Uri[]> callback = fileChooserCallback;
         fileChooserCallback = null;
+        if (callback != null) {
+            callback.onReceiveValue(results);
+        }
+    }
+
+    private void discardCameraPhoto() {
+        if (cameraPhotoUri != null) {
+            deleteCameraPhoto(cameraPhotoUri);
+        }
+        cameraPhotoUri = null;
+        cameraPhotoFile = null;
+    }
+
+    private void deleteCameraPhoto(Uri uri) {
+        File photoFile = cameraPhotoFile;
+        if (photoFile != null && photoFile.exists()) {
+            photoFile.delete();
+        } else if (uri != null) {
+            getContentResolver().delete(uri, null, null);
+        }
     }
 
     @Override
     protected void onSaveInstanceState(Bundle outState) {
-        webView.saveState(outState);
+        if (webView != null) {
+            webView.saveState(outState);
+        }
         super.onSaveInstanceState(outState);
     }
 
@@ -286,8 +551,12 @@ public final class MainActivity extends Activity {
             hideArtworkRunnable = null;
         }
         if (fileChooserCallback != null) {
-            fileChooserCallback.onReceiveValue(null);
-            fileChooserCallback = null;
+            finishFileChooser(null);
+        }
+        discardCameraPhoto();
+        if (pendingWebPermissionRequest != null) {
+            pendingWebPermissionRequest.deny();
+            pendingWebPermissionRequest = null;
         }
         if (webView != null) {
             webView.stopLoading();
@@ -295,5 +564,24 @@ public final class MainActivity extends Activity {
             webView = null;
         }
         super.onDestroy();
+    }
+
+    private static final class PendingDownload {
+        private final String url;
+        private final String userAgent;
+        private final String contentDisposition;
+        private final String mimeType;
+
+        private PendingDownload(
+                String url,
+                String userAgent,
+                String contentDisposition,
+                String mimeType
+        ) {
+            this.url = url;
+            this.userAgent = userAgent;
+            this.contentDisposition = contentDisposition;
+            this.mimeType = mimeType;
+        }
     }
 }

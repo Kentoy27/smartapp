@@ -214,6 +214,17 @@ class OpcrfSpreadsheetTest extends TestCase
         $this->assertSame(4.5, $data['self_rating']);
     }
 
+    public function test_full_workbook_rating_averages_individual_part_one_and_two_ratings(): void
+    {
+        $path = $this->buildFullOpcrfWorkbook();
+
+        $rating = (new OpcrfSpreadsheet($path))->fullWorkbookSelfRating();
+
+        // Part I has five ratings (5, 4, 5, 4, 5); Part II has two (4, 5).
+        // Part III's summary scores must not be counted again.
+        $this->assertSame(4.57, $rating);
+    }
+
     public function test_the_evaluator_block_is_read_with_labels_and_fallbacks(): void
     {
         // Real-template shape: the evaluator's name sits in O4 (merged
@@ -249,6 +260,18 @@ class OpcrfSpreadsheetTest extends TestCase
         $this->assertCount(1, $evaluators);
         $this->assertSame('Evaluator:', $evaluators[0]['label']);
         $this->assertSame('EVA M. DOLLOSA RN', $evaluators[0]['value']);
+    }
+
+    public function test_the_date_of_review_excel_serial_is_shown_as_a_calendar_date(): void
+    {
+        $path = $this->buildOpcrfWorkbook([
+            'N7' => 'Date of Review:',
+            'O7' => 46345,
+        ]);
+
+        $evaluators = (new OpcrfSpreadsheet($path))->evaluatorCells();
+
+        $this->assertSame('11/19/2026', $evaluators[0]['value']);
     }
 
     public function test_an_empty_workbook_has_no_evaluator_block(): void

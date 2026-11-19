@@ -8,9 +8,9 @@ use App\Models\OpcrfSubmission;
 use App\Models\OpcrfTemplate;
 use App\Models\School;
 use App\Models\User;
+use App\Support\PurePhpZipReader;
 use App\Support\OpcrfSpreadsheet;
 use App\Support\OpcrfTemplatePersonalizer;
-use App\Support\PurePhpZipReader;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
@@ -48,7 +48,7 @@ class OpcrfTemplateTest extends TestCase
             // rather than naming a generic file.
             ->assertSee('Download OPCRF Template')
             ->assertSee('your name, position, school and division')
-            ->assertSee('Part I only, available now')
+            ->assertSee('Part I is available now')
             ->assertSee(route('opcrf.template'), false);
     }
 
@@ -65,9 +65,9 @@ class OpcrfTemplateTest extends TestCase
         $this->actingAs($staff)
             ->get(route('home'))
             ->assertOk()
-            ->assertSee('The complete form — all four parts — is available now.')
-            ->assertSee('Download Complete OPCRF (Parts I–IV)')
-            ->assertSee('Your approved Part I, when available, is included')
+            ->assertSee('Download Commitment (Part I)')
+            ->assertSee('wait for approval before downloading the full Parts I–IV OPCRF')
+            ->assertDontSee('Download Complete OPCRF (Parts I–IV)')
             ->assertSee(route('opcrf.template'), false);
     }
 
@@ -81,6 +81,33 @@ class OpcrfTemplateTest extends TestCase
             ->get(route('home'))
             ->assertOk()
             ->assertSee('Parts II–IV become available on March 16, the end of the school year term');
+    }
+
+    public function test_dashboard_does_not_offer_part_one_when_its_schedule_is_closed(): void
+    {
+        $staff = $this->loginUser('staff');
+        OpcrfSchedule::create([
+            'opcrf_year' => 2026,
+            'part_number' => OpcrfSchedule::PART_ONE,
+            'start_datetime' => '2026-05-01 08:00:00',
+            'end_datetime' => '2026-05-31 17:00:00',
+            'is_enabled' => true,
+        ]);
+        OpcrfSchedule::create([
+            'opcrf_year' => 2026,
+            'part_number' => OpcrfSchedule::PART_TWO,
+            'start_datetime' => '2026-06-01 08:00:00',
+            'end_datetime' => '2026-06-30 17:00:00',
+            'is_enabled' => true,
+        ]);
+        $this->travelTo('2026-06-15 10:00:00');
+
+        $this->actingAs($staff)
+            ->get(route('home'))
+            ->assertOk()
+            ->assertSee('The Part I commitment window is closed.')
+            ->assertDontSee('Download Commitment (Part I)')
+            ->assertDontSee(route('opcrf.template'), false);
     }
 
     public function test_a_locked_submission_can_still_download_the_full_template_when_parts_two_to_four_are_open(): void
@@ -145,7 +172,7 @@ class OpcrfTemplateTest extends TestCase
         $this->get(route('opcrf.template'))->assertNotFound();
     }
 
-    public function test_inside_the_final_term_users_download_the_whole_template(): void
+    public function test_full_template_requires_an_approved_part_one_submission(): void
     {
         config(['opcrf.part_one.part_one_only' => false]);
 
@@ -158,40 +185,47 @@ class OpcrfTemplateTest extends TestCase
         $response->assertOk();
         // The file is named for the account, not the template.
         $response->assertDownload('OPCRF_Staff.xlsx');
+        $this->assertSame(
+            ['PART I (CY 2025 & SY2025-2026)'],
+            $this->sheetNamesOfWorkbook((string) $response->baseResponse->getContent())
+        );
+    }
 
-        // The URL must never live under /forms/… — a physical forms/
-        // directory once shadowed it on PHP's built-in server, breaking
-        // the download (browsers saved a broken .htm instead).
+    public function test_approved_full_template_preserves_the_original_workbook_package(): void
+    {
+        config(['opcrf.part_one.part_one_only' => false]);
+
+        $staff = $this->loginUser('staff');
+        OpcrfSubmission::create([
+            'user_id' => $staff->id,
+            'opcrf_part' => OpcrfSubmission::PART_ONE,
+            'employee_name' => $staff->name,
+            'position' => 'Teacher I',
+            'review_period' => 'January to December 2026',
+            'division_office' => 'Schools Division Office',
+            'objectives' => 'Approved commitment',
+            'accomplishments' => 'Approved accomplishment',
+            'self_rating' => 4.5,
+            'status' => OpcrfSubmission::STATUS_FOR_COMPLIANCE,
+            'submitted_at' => now()->subDay(),
+        ]);
+        $this->travelTo('2026-04-01 10:00:00');
+
+        $response = $this->actingAs($staff)->get(route('opcrf.template'));
+
+        $response->assertOk()->assertDownload('OPCRF_Staff.xlsx');
         $this->assertSame(url('/download/opcrf-template'), route('opcrf.template'));
 
         $bytes = (string) $response->baseResponse->getContent();
-
         $this->assertSame("PK\x03\x04", substr($bytes, 0, 4), 'The download must be a real zip, never an empty body.');
 
-        // Personalization must not redesign the form: every package part
-        // except the two that carry the identity and the stamp (the first
-        // worksheet and the workbook manifest) is the original's, byte for
-        // byte — styles, drawings, comments and all.
         $original = (new PurePhpZipReader(storage_path('forms/OPCRF-TEMPLATE.xlsx')))->readAll();
         $personalized = (new PurePhpZipReader($this->stageWorkbook($bytes)))->readAll();
-
-        // Every part of the template must survive. Personalization is allowed
-        // to ADD parts — it now adds docProps/custom.xml, where the account
-        // stamp lives — but it must never drop or rename one, because that is
-        // how a workbook stops opening in Excel.
         $missing = array_diff(array_keys($original), array_keys($personalized));
 
-        $this->assertSame(
-            [],
-            array_values($missing),
-            'Personalization dropped package parts the template had.'
-        );
+        $this->assertSame([], array_values($missing), 'Personalization dropped package parts the template had.');
 
         foreach (array_keys($original) as $part) {
-            // sheet1 carries the header values, workbook.xml loses the old
-            // defined-name stamp, and the two manifests declare the
-            // docProps/custom.xml part the stamp now lives in. Everything
-            // else must be byte-for-byte the template's.
             if (in_array($part, [
                 'xl/worksheets/sheet1.xml',
                 'xl/workbook.xml',
@@ -208,16 +242,68 @@ class OpcrfTemplateTest extends TestCase
             );
         }
 
-        // The worksheet keeps its merges and formulas: the form the staff
-        // member fills in is the real one.
         $sheet = $personalized['xl/worksheets/sheet1.xml'];
-
         $this->assertStringContainsString('<mergeCells', $sheet);
         $this->assertSame(
             substr_count($original['xl/worksheets/sheet1.xml'], '<f'),
             substr_count($sheet, '<f'),
             'Personalization must not disturb the template\'s formulas.'
         );
+    }
+
+    public function test_approved_part_one_allows_the_full_template_during_the_full_term(): void
+    {
+        config(['opcrf.part_one.part_one_only' => false]);
+
+        $staff = $this->loginUser('staff');
+        OpcrfSubmission::create([
+            'user_id' => $staff->id,
+            'opcrf_part' => OpcrfSubmission::PART_ONE,
+            'employee_name' => $staff->name,
+            'position' => 'Teacher I',
+            'review_period' => 'January to December 2026',
+            'division_office' => 'Schools Division Office',
+            'objectives' => 'Approved commitment',
+            'accomplishments' => 'Approved accomplishment',
+            'self_rating' => 4.5,
+            'status' => OpcrfSubmission::STATUS_FOR_COMPLIANCE,
+            'submitted_at' => now()->subDay(),
+        ]);
+
+        $this->travelTo('2026-04-01 10:00:00');
+        $response = $this->actingAs($staff)->get(route('opcrf.template'))
+            ->assertOk()
+            ->assertDownload('OPCRF_Staff.xlsx');
+
+        $this->assertSame(
+            ['PART I (CY 2025 & SY2025-2026)', 'PART II', 'PART III', 'PART IV'],
+            $this->sheetNamesOfWorkbook((string) $response->baseResponse->getContent())
+        );
+    }
+
+    public function test_full_term_does_not_allow_full_download_when_part_one_window_is_closed_without_approval(): void
+    {
+        $staff = $this->loginUser('staff');
+        OpcrfSchedule::create([
+            'opcrf_year' => 2026,
+            'part_number' => OpcrfSchedule::PART_ONE,
+            'start_datetime' => '2026-05-01 08:00:00',
+            'end_datetime' => '2026-05-31 17:00:00',
+            'is_enabled' => true,
+        ]);
+        OpcrfSchedule::create([
+            'opcrf_year' => 2026,
+            'part_number' => OpcrfSchedule::PART_TWO,
+            'start_datetime' => '2026-06-01 08:00:00',
+            'end_datetime' => '2026-06-30 17:00:00',
+            'is_enabled' => true,
+        ]);
+        $this->travelTo('2026-06-15 10:00:00');
+
+        $this->actingAs($staff)
+            ->get(route('opcrf.template'))
+            ->assertRedirect(route('opcrf.index'))
+            ->assertSessionHas('opcrfPartNotice.message', 'Submit your OPCRF Commitment (Part I) and wait for approval before accessing the full OPCRF.');
     }
 
     public function test_the_full_template_download_includes_the_latest_saved_part_one_cells(): void
@@ -246,6 +332,8 @@ class OpcrfTemplateTest extends TestCase
             'objectives' => 'Saved objective from Part I',
             'accomplishments' => 'Saved accomplishment from Part I',
             'self_rating' => 4,
+            'status' => OpcrfSubmission::STATUS_FOR_COMPLIANCE,
+            'approved_at' => now(),
             'file_path' => $storedPath,
             'signed_file_path' => 'opcrf-submissions/'.$staff->id.'/unreadable-signed-copy.xlsx',
             'file_original_name' => 'saved-part-one.xlsx',

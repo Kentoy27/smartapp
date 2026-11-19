@@ -108,6 +108,21 @@ class OpcrfUploadTest extends TestCase
         $this->assertDatabaseCount('opcrf_submissions', 0);
     }
 
+    public function test_review_modal_formats_the_excel_date_of_review_serial(): void
+    {
+        $user = $this->staffUser();
+        $path = $this->buildFilledOpcrf(['O7' => 46345]);
+
+        Livewire::actingAs($user)
+            ->test(OpcrfUpload::class)
+            ->call('openUpload')
+            ->set('file', $this->uploadedWorkbook($path))
+            ->assertSet('showReview', true)
+            ->assertSee('Date of Review:')
+            ->assertSee('11/19/2026')
+            ->assertDontSee('46345');
+    }
+
     public function test_full_workbook_upload_keeps_part_one_separate_and_syncs_approved_part_one(): void
     {
         Carbon::setTestNow('2026-06-15 10:00:00');
@@ -153,6 +168,8 @@ class OpcrfUploadTest extends TestCase
                 ->assertSet('showUpload', true)
                 ->set('file', $this->uploadedWorkbook($fullWorkbookPath))
                 ->assertSet('showReview', true)
+                ->assertSet('self_rating', '4.57')
+                ->assertSee('Rating (Q, E, T)')
                 ->assertSee('Approved Part I objective')
                 ->call('confirmSubmit')
                 ->assertHasNoErrors()
@@ -165,6 +182,7 @@ class OpcrfUploadTest extends TestCase
                 ->firstOrFail();
 
             $this->assertSame(OpcrfSubmission::STATUS_PENDING, $fullSubmission->status);
+            $this->assertSame(4.57, $fullSubmission->self_rating);
             $this->assertSame($validator->id, $fullSubmission->reviewer_id);
             $this->assertSame($validator->id, $fullSubmission->assigned_to);
             $this->assertSame('Approved Part I objective', $fullSubmission->objectives);
@@ -243,6 +261,8 @@ class OpcrfUploadTest extends TestCase
         Livewire::actingAs($user)
             ->test(OpcrfUpload::class)
             ->set('file', $this->uploadedWorkbook($path))
+            ->assertDontSee('Rating (Q, E, T)')
+            ->assertSee('January to December 2026')
             ->call('confirmSubmit')
             ->assertSet('showReview', false)
             ->assertSet('showUpload', false)
@@ -258,7 +278,8 @@ class OpcrfUploadTest extends TestCase
         $this->assertSame('Jane D. Doe', $submission->employee_name);
         $this->assertSame('Teacher I', $submission->position);
         $this->assertSame('January to December 2026', $submission->review_period);
-        $this->assertSame(4.5, $submission->self_rating);
+        // Part I is a commitment upload, so the self-rating is not scored.
+        $this->assertSame(0.0, $submission->self_rating);
         $this->assertNotNull($submission->submitted_at);
     }
 

@@ -59,7 +59,7 @@ class GoogleAuthController extends Controller
         session()->put('auth_password_fingerprint', hash('sha256', $user->getAuthPassword()));
         session()->forget('password_change_google_authenticated');
 
-        if ($user->must_change_password) {
+        if ($user->requiresPasswordChange()) {
             session()->put('password_change_google_authenticated', true);
         }
 

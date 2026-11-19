@@ -362,12 +362,11 @@ class OpcrfUpload extends Component
 
     private function latestApprovedPartOne(): ?OpcrfSubmission
     {
-        return OpcrfSubmission::query()
-            ->where('user_id', Auth::id())
-            ->where('opcrf_part', OpcrfSubmission::PART_ONE)
-            ->approved()
-            ->latest('id')
-            ->first();
+        $user = Auth::user();
+
+        return $user instanceof User
+            ? OpcrfSubmission::latestApprovedPartOneFor($user)
+            : null;
     }
 
     /**
@@ -527,7 +526,8 @@ class OpcrfUpload extends Component
      */
     private function analyzeAndFill(string $path): void
     {
-        $data = (new OpcrfSpreadsheet($path))->analyze();
+        $spreadsheet = new OpcrfSpreadsheet($path);
+        $data = $spreadsheet->analyze();
 
         $this->employee_name = mb_substr(trim($data['employee_name']), 0, 255);
         $this->position = mb_substr(trim($data['position']), 0, 255);
@@ -535,20 +535,31 @@ class OpcrfUpload extends Component
         $this->division_office = mb_substr(trim($data['division_office']), 0, 255);
         $this->objectives = trim($data['objectives']);
         $this->accomplishments = trim($data['accomplishments']);
-        $this->self_rating = $data['self_rating'] !== null
-            ? (string) $data['self_rating']
+        $fullWorkbookRating = $this->isFullWorkbookUpload()
+            ? $spreadsheet->fullWorkbookSelfRating()
+            : null;
+        $this->self_rating = $fullWorkbookRating !== null
+            ? (string) $fullWorkbookRating
             : '';
 
         // Excel-style sheet data (title + header block + evaluator block
         // + the three parts + signer block) straight from the workbook,
         // for the template-like review modal.
-        $spreadsheet = new OpcrfSpreadsheet($path);
-
         // Every tab of the file: PART II / III / IV parsed into their
         // layouts, plus any non-standard tabs as raw cell grids.
         $this->workbook = $spreadsheet->workbook();
 
         $this->sheet = $spreadsheet->sheetLayout();
+        if (! $this->isFullWorkbookUpload()) {
+            foreach ($this->sheet['parts'] as &$part) {
+                $part['fields'] = array_values(array_diff(
+                    $part['fields'],
+                    ['rating', 'average', 'weighted_average']
+                ));
+                $part['has_total_row'] = false;
+            }
+            unset($part);
+        }
     }
 
     /**
@@ -670,7 +681,7 @@ class OpcrfUpload extends Component
                     'division_office' => (string) $validated['division_office'],
                     'objectives' => (string) $validated['objectives'],
                     'accomplishments' => (string) $validated['accomplishments'],
-                    'self_rating' => (float) ($validated['self_rating'] ?? 0),
+                    'self_rating' => 0,
                 ]
             );
             $existingSubmission->stampSignature();
@@ -736,7 +747,7 @@ class OpcrfUpload extends Component
             'division_office' => (string) $validated['division_office'],
             'objectives' => (string) $validated['objectives'],
             'accomplishments' => (string) $validated['accomplishments'],
-            'self_rating' => (float) ($validated['self_rating'] ?? 0),
+            'self_rating' => 0,
             'remarks' => null,
             'file_path' => $archivedPath,
             'file_original_name' => $this->file?->getClientOriginalName(),
@@ -773,6 +784,9 @@ class OpcrfUpload extends Component
 
         try {
             $workbookBytes = $this->synchronizedFullWorkbookBytes($this->file->getRealPath());
+            $fullWorkbookRating = (new OpcrfSpreadsheet(
+                $this->file->getRealPath()
+            ))->fullWorkbookSelfRating() ?? 0;
         } catch (RuntimeException $e) {
             $this->addError('file', $e->getMessage());
 
@@ -809,7 +823,7 @@ class OpcrfUpload extends Component
             'division_office' => (string) $approvedPartOne->division_office,
             'objectives' => (string) $approvedPartOne->objectives,
             'accomplishments' => (string) $approvedPartOne->accomplishments,
-            'self_rating' => (float) ($approvedPartOne->self_rating ?? 0),
+            'self_rating' => $fullWorkbookRating,
         ];
 
         if ($existingSubmission !== null) {

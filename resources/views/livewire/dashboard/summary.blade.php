@@ -33,12 +33,14 @@
                             </span>
                         @endif
                         <span class="opcr-file-sub">Your Part I submission is locked against updates.</span>
-                        @if ($opcrfPartOne['full_open'])
-                            <span class="opcr-file-sub">The full form is available; your approved Part I, when available, is included in its download. Otherwise, the latest saved Part I progress is used.</span>
+                        @if ($opcrfPartOne['full_open'] && $opcrfPartOneApproved)
+                            <span class="opcr-file-sub">Your approved Part I is included in the full OPCRF download.</span>
                             <a href="{{ route('opcrf.template') }}" class="opcr-download-btn" download>
                                 <x-icon name="download" :size="16" />
                                 <span>Download Complete OPCRF (Parts I–IV)</span>
                             </a>
+                        @elseif ($opcrfPartOne['full_open'])
+                            <span class="opcr-file-sub">The full OPCRF stays locked until your Part I commitment is approved.</span>
                         @endif
                         <span class="opcr-file-sub">Track its status on the <a href="{{ route('opcrf.index') }}">Opcrf page</a>.</span>
                     </div>
@@ -72,23 +74,35 @@
                         @else
                             <span class="opcr-file-name">Your personalized OPCRF</span>
                             <span class="opcr-file-sub">Download the template and it arrives already filled in with your name, position, school and division.</span>
-                            @if ($opcrfPartOne['full_open'])
+                            @if ($opcrfFullDownloadAvailable)
                                 <span class="opcr-file-sub">The complete form — all four parts — is available now.</span>
+                            @elseif ($opcrfPartOneDownloadAvailable && $opcrfPartOne['full_open'])
+                                <span class="opcr-file-sub">Download and submit your Part I commitment first. Parts I–IV unlock after it is approved.</span>
+                            @elseif ($opcrfPartOneDownloadAvailable)
+                                <span class="opcr-file-sub">Part I is available now. Parts II–IV become available {{ $opcrfPartOne['full_open_date'] ? 'on '.$opcrfPartOne['full_open_date'].', ' : 'at ' }}{{ $opcrfPartOne['label'] }}. Submit your commitment and wait for approval before accessing them.</span>
+                            @elseif ($opcrfPartOne['full_open'])
+                                <span class="opcr-file-sub">The Part I commitment window is closed. The full OPCRF stays locked until your commitment is approved.</span>
+                            @elseif ($opcrfPartOne['full_open_date'])
+                                <span class="opcr-file-sub">The Part I template is currently unavailable. Parts II–IV become available on {{ $opcrfPartOne['full_open_date'] }}, {{ $opcrfPartOne['label'] }}.</span>
                             @else
-                                <span class="opcr-file-sub">Part I only, available now. Parts II–IV become available {{ $opcrfPartOne['full_open_date'] ? 'on '.$opcrfPartOne['full_open_date'].', ' : 'at ' }}{{ $opcrfPartOne['label'] }}</span>
+                                <span class="opcr-file-sub">The Part I template is currently unavailable. Check the OPCRF access schedule.</span>
                             @endif
                         @endif
                     </div>
-                    <a href="{{ route('opcrf.template') }}" class="opcr-download-btn" download>
-                        <x-icon name="download" :size="16" />
-                        <span>
-                            @if ($opcrfPartOne['full_open'])
-                                {{ $opcrfTemplate ? 'Download Complete OPCRF Again' : 'Download Complete OPCRF (Parts I–IV)' }}
-                            @else
-                                {{ $opcrfTemplate ? 'Download Again' : 'Download OPCRF Template' }}
-                            @endif
-                        </span>
-                    </a>
+                    @if ($opcrfFullDownloadAvailable || $opcrfPartOneDownloadAvailable)
+                        <a href="{{ route('opcrf.template') }}" class="opcr-download-btn" download>
+                            <x-icon name="download" :size="16" />
+                            <span>
+                                @if ($opcrfFullDownloadAvailable)
+                                    {{ $opcrfTemplate ? 'Download Complete OPCRF Again' : 'Download Complete OPCRF (Parts I–IV)' }}
+                                @elseif ($opcrfPartOne['full_open'])
+                                    Download Commitment (Part I)
+                                @else
+                                    {{ $opcrfTemplate ? 'Download Again' : 'Download OPCRF Template' }}
+                                @endif
+                            </span>
+                        </a>
+                    @endif
 
                     {{-- UPLOAD: the OpcrfUpload component lives on the page
                          beside this one, NOT inside it. It is a component with
@@ -98,9 +112,13 @@
                          the review modal away seconds after it appeared and
                          sent the user back to the upload window. --}}
                 </div>
-                @if ($opcrfPartOne['full_open'])
+                @if ($opcrfFullDownloadAvailable)
                     <p class="opcr-file-sub">
-                        The complete form — Parts I–IV — is available now. Your approved Part I, when available, is included; otherwise the latest saved Part I progress is used. The full workbook is submitted separately.
+                        Your approved Part I commitment is included in the full Parts I–IV workbook. Submit the full workbook separately.
+                    </p>
+                @elseif ($opcrfPartOne['full_open'])
+                    <p class="opcr-file-sub">
+                        Submit your Part I commitment and wait for approval before downloading the full Parts I–IV OPCRF.
                     </p>
                 @endif
 

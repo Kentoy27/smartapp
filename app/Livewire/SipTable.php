@@ -192,6 +192,7 @@ class SipTable extends Component
     {
         $user = Auth::user();
         abort_unless($user instanceof User && $user->canManageWfp(), 403);
+        $maxUploadKb = (int) config('sip.max_upload_kb', 102400);
 
         $school = School::query()
             ->with('divisionSettings')
@@ -199,10 +200,10 @@ class SipTable extends Component
         abort_unless($this->canUploadTo($school, $this->uploadDivision), 403);
 
         $validated = $this->validate([
-            'sipFile' => ['required', 'file', 'max:12288', 'mimes:pdf,doc,docx,xls,xlsx,ppt,pptx', 'extensions:pdf,doc,docx,xls,xlsx,ppt,pptx'],
+            'sipFile' => ['required', 'file', 'max:'.$maxUploadKb, 'mimes:pdf,doc,docx,xls,xlsx,ppt,pptx', 'extensions:pdf,doc,docx,xls,xlsx,ppt,pptx'],
         ], [
             'sipFile.required' => 'Choose the School Improvement Plan file first.',
-            'sipFile.max' => 'The SIP file must be 12 MB or smaller.',
+            'sipFile.max' => 'The SIP file must be '.number_format($maxUploadKb / 1024, 0).' MB or smaller.',
             'sipFile.mimes' => 'Upload a PDF, Word, Excel, or PowerPoint document.',
             'sipFile.extensions' => 'Upload a PDF, Word, Excel, or PowerPoint document.',
         ]);
@@ -218,38 +219,51 @@ class SipTable extends Component
             throw new RuntimeException('The SIP file could not be saved. Please try again.');
         }
 
-        $previousPath = DB::transaction(function () use ($school, $user, $path, $validated): ?string {
-            $submission = SipSubmission::query()
-                ->where('school_id', $school->id)
-                ->where('division', $this->uploadDivision)
-                ->lockForUpdate()
-                ->first();
-
-            $previous = $submission?->file_path;
-
-            SipSubmission::updateOrCreate(
-                ['school_id' => $school->id, 'division' => $this->uploadDivision],
-                [
-                    'uploaded_by' => $user->id,
-                    'original_file_name' => basename($validated['sipFile']->getClientOriginalName()),
-                    'file_path' => $path,
-                    'file_size' => $validated['sipFile']->getSize(),
-                    'mime_type' => $validated['sipFile']->getMimeType(),
-                    'uploaded_at' => now(),
-                ],
-            );
-
-            return $previous;
+        DB::transaction(function () use ($school, $user, $path, $validated): void {
+            SipSubmission::create([
+                'school_id' => $school->id,
+                'division' => $this->uploadDivision,
+                'uploaded_by' => $user->id,
+                'original_file_name' => basename($validated['sipFile']->getClientOriginalName()),
+                'file_path' => $path,
+                'file_size' => $validated['sipFile']->getSize(),
+                'mime_type' => $validated['sipFile']->getMimeType(),
+                'uploaded_at' => now(),
+            ]);
         });
-
-        if ($previousPath !== null && $previousPath !== $path) {
-            Storage::disk('local')->delete($previousPath);
-        }
 
         $schoolName = $school->name;
         $divisionName = SchoolDivision::label($this->uploadDivision);
         $this->closeUploadModal();
-        $this->successMessage = "{$divisionName} SIP uploaded for {$schoolName}.";
+        $this->successMessage = "{$divisionName} SIP added for {$schoolName}.";
+        unset($this->schools);
+    }
+
+    public function deleteSip(int $submissionId): void
+    {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canManageWfp(), 403);
+
+        $submission = SipSubmission::query()->findOrFail($submissionId);
+        abort_unless(
+            (int) $submission->school_id === (int) $user->school_id
+                && $user->canAccessDivision($submission->division),
+            404,
+        );
+
+        $filePath = $submission->file_path;
+        $divisionName = SchoolDivision::label($submission->division);
+        $submission->delete();
+
+        if ($filePath !== '' && ! Storage::disk('local')->delete($filePath)) {
+            throw new RuntimeException('The SIP record was deleted, but its stored file could not be removed.');
+        }
+
+        if ($this->previewSubmissionId === $submissionId) {
+            $this->closePreviewModal();
+        }
+
+        $this->successMessage = "{$divisionName} SIP deleted.";
         unset($this->schools);
     }
 
@@ -262,7 +276,10 @@ class SipTable extends Component
         abort_if($divisions === [], 403);
 
         $this->resetValidation();
-        $this->bulkUploads = [['division' => $divisions[0], 'file' => null]];
+        $defaultDivision = in_array($user->defaultDivision(), $divisions, true)
+            ? $user->defaultDivision()
+            : $divisions[0];
+        $this->bulkUploads = [['division' => $defaultDivision, 'file' => null]];
         $this->showBulkUploadModal = true;
     }
 
@@ -271,12 +288,11 @@ class SipTable extends Component
         $divisions = $this->uploadableDivisions();
         abort_if($divisions === [], 403);
 
-        $selectedDivisions = array_column($this->bulkUploads, 'division');
-        $remainingDivisions = array_values(array_diff($divisions, $selectedDivisions));
-
-        if ($remainingDivisions !== []) {
-            $this->bulkUploads[] = ['division' => $remainingDivisions[0], 'file' => null];
-        }
+        $user = Auth::user();
+        $defaultDivision = $user instanceof User && in_array($user->defaultDivision(), $divisions, true)
+            ? $user->defaultDivision()
+            : $divisions[0];
+        $this->bulkUploads[] = ['division' => $defaultDivision, 'file' => null];
     }
 
     public function removeBulkUploadRow(int $index): void
@@ -305,27 +321,44 @@ class SipTable extends Component
         $school = School::query()
             ->with('divisionSettings')
             ->findOrFail($user->school_id);
+        $maxUploadKb = (int) config('sip.max_upload_kb', 102400);
         $allowedDivisions = array_values(array_filter(
             $school->availableDivisions(),
             fn (string $division): bool => $this->canUploadTo($school, $division),
         ));
         abort_if($allowedDivisions === [], 403);
 
+        $this->bulkUploads = array_values(array_filter(
+            $this->bulkUploads,
+            static fn (array $upload): bool => ! empty($upload['file']),
+        ));
+
+        if ($this->bulkUploads === []) {
+            $this->addError('bulkUploads', 'Select at least one SIP document to upload.');
+
+            return;
+        }
+
+        foreach ($this->bulkUploads as &$upload) {
+            if (trim((string) ($upload['division'] ?? '')) === '') {
+                $upload['division'] = in_array($user->defaultDivision(), $allowedDivisions, true)
+                    ? $user->defaultDivision()
+                    : $allowedDivisions[0];
+            }
+        }
+        unset($upload);
+
         $validated = $this->validate([
-            'bulkUploads' => ['required', 'array', 'min:1', 'max:'.count($allowedDivisions)],
-            'bulkUploads.*.division' => ['required', 'string', 'distinct:strict', Rule::in($allowedDivisions)],
-            'bulkUploads.*.file' => ['required', 'file', 'max:12288', 'mimes:pdf,doc,docx,xls,xlsx,ppt,pptx', 'extensions:pdf,doc,docx,xls,xlsx,ppt,pptx'],
+            'bulkUploads' => ['required', 'array', 'min:1'],
+            'bulkUploads.*.division' => ['required', 'string', Rule::in($allowedDivisions)],
+            'bulkUploads.*.file' => ['required', 'file', 'max:'.$maxUploadKb, 'mimes:pdf,doc,docx,xls,xlsx,ppt,pptx', 'extensions:pdf,doc,docx,xls,xlsx,ppt,pptx'],
         ], [
-            'bulkUploads.*.division.distinct' => 'Choose a different division for each SIP.',
-            'bulkUploads.*.file.required' => 'Choose a SIP document for each division.',
-            'bulkUploads.*.file.max' => 'Each SIP file must be 12 MB or smaller.',
+            'bulkUploads.*.file.max' => 'Each SIP file must be '.number_format($maxUploadKb / 1024, 0).' MB or smaller.',
             'bulkUploads.*.file.mimes' => 'Upload PDF, Word, Excel, or PowerPoint documents.',
             'bulkUploads.*.file.extensions' => 'Upload PDF, Word, Excel, or PowerPoint documents.',
         ]);
 
         $storedPaths = [];
-        $previousPaths = [];
-
         try {
             foreach ($validated['bulkUploads'] as $upload) {
                 $extension = strtolower($upload['file']->getClientOriginalExtension());
@@ -342,29 +375,18 @@ class SipTable extends Component
                 $storedPaths[] = $path;
             }
 
-            DB::transaction(function () use ($validated, $storedPaths, $school, $user, &$previousPaths): void {
+            DB::transaction(function () use ($validated, $storedPaths, $school, $user): void {
                 foreach ($validated['bulkUploads'] as $index => $upload) {
-                    $submission = SipSubmission::query()
-                        ->where('school_id', $school->id)
-                        ->where('division', $upload['division'])
-                        ->lockForUpdate()
-                        ->first();
-
-                    if ($submission?->file_path) {
-                        $previousPaths[] = $submission->file_path;
-                    }
-
-                    SipSubmission::updateOrCreate(
-                        ['school_id' => $school->id, 'division' => $upload['division']],
-                        [
-                            'uploaded_by' => $user->id,
-                            'original_file_name' => basename($upload['file']->getClientOriginalName()),
-                            'file_path' => $storedPaths[$index],
-                            'file_size' => $upload['file']->getSize(),
-                            'mime_type' => $upload['file']->getMimeType(),
-                            'uploaded_at' => now(),
-                        ],
-                    );
+                    SipSubmission::create([
+                        'school_id' => $school->id,
+                        'division' => $upload['division'],
+                        'uploaded_by' => $user->id,
+                        'original_file_name' => basename($upload['file']->getClientOriginalName()),
+                        'file_path' => $storedPaths[$index],
+                        'file_size' => $upload['file']->getSize(),
+                        'mime_type' => $upload['file']->getMimeType(),
+                        'uploaded_at' => now(),
+                    ]);
                 }
             });
         } catch (Throwable $exception) {
@@ -372,8 +394,6 @@ class SipTable extends Component
 
             throw $exception;
         }
-
-        Storage::disk('local')->delete(array_values(array_diff($previousPaths, $storedPaths)));
 
         $uploadedCount = count($storedPaths);
         $this->closeBulkUploadModal();

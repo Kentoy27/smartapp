@@ -9,6 +9,7 @@
         "laravel/socialite": "^5.31",
         "laravel/tinker": "^2.9",
         "livewire/livewire": "^4.4",
+        "mpdf/mpdf": "^8.2",
         "phpoffice/phpspreadsheet": "^5.10",
         "phpoffice/phpword": "^1.4",
         "sweetalert2/laravel": "^1.4"

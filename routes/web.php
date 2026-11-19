@@ -28,6 +28,7 @@ use App\Support\MemYearXlsxExporter;
 use App\Support\MovEvidencePreview;
 use App\Support\OpcrfAccess;
 use App\Support\OpcrfPartOne;
+use App\Support\OpcrfPdfExporter;
 use App\Support\OpcrfTemplatePersonalizer;
 use App\Support\OpcrfWorkbookProgress;
 use App\Support\OpcrfWorkbookTrim;
@@ -103,6 +104,7 @@ Route::get('/downloads/smartapp-android.apk', function () {
 
     $response = response()->download($apkPath, 'SmartApp-Android.apk');
     $response->setPrivate();
+    $response->headers->set('Content-Type', 'application/vnd.android.package-archive');
     $response->headers->set('Cache-Control', 'no-store, no-cache, must-revalidate');
     $response->headers->set('Pragma', 'no-cache');
     $response->headers->set('Expires', '0');
@@ -539,6 +541,9 @@ Route::middleware(['auth', 'password.change.required'])->group(function () {
     // can download their personalized template; Parts 2-4 open on their own
     // schedules.
     Route::get('/opcrf/part/{part}', function (int $part) {
+        $user = Auth::user();
+        abort_unless($user instanceof User, 404);
+
         if ($part === OpcrfSchedule::PART_ONE) {
             return redirect()->route('home');
         }
@@ -557,6 +562,8 @@ Route::middleware(['auth', 'password.change.required'])->group(function () {
                 OpcrfAccess::currentYear(),
                 $part
             ),
+            'fullDownloadAvailable' => OpcrfPartOne::fullTemplateAvailable()
+                && OpcrfSubmission::latestApprovedPartOneFor($user) !== null,
             'notice' => session('opcrfPartNotice'),
         ]);
     })->name('opcrf.part')->where('part', '[1-4]')->middleware('opcrf.part');
@@ -613,10 +620,22 @@ Route::middleware(['auth', 'password.change.required'])->group(function () {
         // The full workbook is also needed during the shared Parts 2–4 term.
         // Re-check both entry points here; the dashboard and Part pages are
         // only conveniences, not authorization boundaries.
+        $approvedPartOne = OpcrfSubmission::latestApprovedPartOneFor($user);
         $partOneAccessible = OpcrfAccess::canAccess($user, OpcrfSchedule::PART_ONE);
-        $includeAllParts = OpcrfPartOne::fullTemplateAvailable();
+        $includeAllParts = OpcrfPartOne::fullTemplateAvailable()
+            && $approvedPartOne !== null;
 
         if (!$partOneAccessible && !$includeAllParts) {
+            if ($approvedPartOne === null && OpcrfPartOne::fullTemplateAvailable()) {
+                return redirect()
+                    ->route('opcrf.index')
+                    ->with('opcrfPartNotice', [
+                        'status' => OpcrfSchedule::STATUS_SCHEDULED,
+                        'message' => 'Submit your OPCRF Commitment (Part I) and wait for approval before accessing the full OPCRF.',
+                        'detail' => 'Parts I–IV become available after your Part I commitment is approved.',
+                    ]);
+            }
+
             $state = OpcrfAccess::partState($user, OpcrfSchedule::PART_ONE);
 
             return redirect()
@@ -747,10 +766,33 @@ Route::middleware(['auth', 'password.change.required'])->group(function () {
         }
 
         $storedPath = Storage::disk('local')->path((string) $submission->downloadPath());
+        $isOwnerPartOne = ! $user->hasAdminAccess()
+            && $submission->user_id === $user->id
+            && $submission->opcrf_part === OpcrfSubmission::PART_ONE;
 
-        // The owner's official copy follows the same part rule as their
-        // template: Part I only until the school year's final term. Reviewer
-        // downloads always receive the archived file as stored.
+        if ($isOwnerPartOne) {
+            try {
+                $partOneBytes = OpcrfWorkbookTrim::keepPart(
+                    $storedPath,
+                    (string) config('opcrf.part_one.sheet', 'PART I')
+                );
+            } catch (RuntimeException) {
+                abort(500, 'The OPCRF Part I workbook could not be prepared for PDF conversion.');
+            }
+
+            $pdfBytes = OpcrfPdfExporter::fromWorkbook(
+                $partOneBytes,
+                (string) config('opcrf.part_one.sheet', 'PART I')
+            );
+
+            return response($pdfBytes)
+                ->header('Content-Type', 'application/pdf')
+                ->header('Content-Length', (string) strlen($pdfBytes))
+                ->header('Content-Disposition', 'attachment; filename="' . $submission->fileDownloadPdfName() . '"');
+        }
+
+        // Other owner downloads retain the existing window-based workbook
+        // behavior. Reviewer downloads always receive the archived file as stored.
         $bytes = null;
 
         if (!$user->hasAdminAccess() && !OpcrfPartOne::windowOpen()) {

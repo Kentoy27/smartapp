@@ -65,7 +65,7 @@ class LoginController extends Controller
         }
 
         return redirect()
-            ->route($user instanceof User && $user->must_change_password ? 'password.change' : 'home')
+            ->route($user instanceof User && $user->requiresPasswordChange() ? 'password.change' : 'home')
             ->with('success', 'Login successful. Welcome back!')
             ->with('success_title', 'Login successful');
     }

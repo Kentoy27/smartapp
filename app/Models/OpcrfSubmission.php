@@ -676,6 +676,11 @@ class OpcrfSubmission extends Model
             : $realName.' - OPCRF.xlsx';
     }
 
+    public function fileDownloadPdfName(): string
+    {
+        return preg_replace('/\.xlsx$/i', '.pdf', $this->fileDownloadName()) ?? $this->fileDownloadName();
+    }
+
     /**
      * The owner's real name (their account name, not whatever was typed into
      * the workbook), made safe for a file name: path separators and the
@@ -886,6 +891,16 @@ class OpcrfSubmission extends Model
     {
         return $this->approved_at !== null
             || in_array($this->status, [self::STATUS_APPROVED, self::STATUS_FOR_COMPLIANCE], true);
+    }
+
+    public static function latestApprovedPartOneFor(User $user): ?self
+    {
+        return self::query()
+            ->where('user_id', $user->id)
+            ->where('opcrf_part', self::PART_ONE)
+            ->approved()
+            ->latest('id')
+            ->first();
     }
 
     /**

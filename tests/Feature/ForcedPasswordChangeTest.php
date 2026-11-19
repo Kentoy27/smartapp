@@ -16,6 +16,7 @@ class ForcedPasswordChangeTest extends TestCase
             'username' => 'temporary-user',
             'password' => 'TemporaryPassword123!',
             'must_change_password' => true,
+            'role' => 'user',
         ]);
 
         $this->post(route('login'), [
@@ -40,6 +41,7 @@ class ForcedPasswordChangeTest extends TestCase
             'username' => 'temporary-user',
             'password' => 'TemporaryPassword123!',
             'must_change_password' => true,
+            'role' => 'user',
         ]);
 
         $this->post(route('login'), [
@@ -66,6 +68,7 @@ class ForcedPasswordChangeTest extends TestCase
             'username' => 'temporary-user',
             'password' => 'TemporaryPassword123!',
             'must_change_password' => true,
+            'role' => 'user',
         ]);
 
         $this->post(route('login'), [
@@ -84,5 +87,26 @@ class ForcedPasswordChangeTest extends TestCase
 
         $this->assertTrue($user->fresh()->must_change_password);
         $this->get(route('password.change'))->assertOk();
+    }
+
+    public function test_sds_viewer_with_a_temporary_password_goes_directly_to_the_dashboard(): void
+    {
+        $viewer = User::factory()->create([
+            'username' => 'sds-viewer',
+            'password' => 'TemporaryPassword123!',
+            'must_change_password' => true,
+            'role' => 'viewer',
+            'is_superadmin' => false,
+        ]);
+
+        $this->post(route('login'), [
+            'login' => $viewer->username,
+            'password' => 'TemporaryPassword123!',
+        ])->assertRedirect(route('home'));
+
+        $this->get(route('home'))->assertOk();
+        $this->get(route('password.change'))->assertRedirect(route('home'));
+
+        $this->assertTrue($viewer->fresh()->must_change_password);
     }
 }

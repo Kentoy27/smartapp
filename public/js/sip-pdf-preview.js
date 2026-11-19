@@ -29,6 +29,20 @@ window.sipPdfPreview = function () {
                     standardFontDataUrl: element.dataset.standardFontUrl
                 }).promise;
 
+                const pages = element.querySelector('.sip-pdf-preview__pages');
+
+                for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
+                    const pageElement = document.createElement('section');
+                    pageElement.className = 'sip-pdf-preview__page';
+                    pageElement.dataset.pageNumber = String(pageNumber);
+                    pageElement.setAttribute('aria-label', `Page ${pageNumber}`);
+                    pageElement.innerHTML = '<div class="sip-pdf-preview__page-loading">Loading page…</div>';
+                    pages.append(pageElement);
+                }
+
+                this.loading = false;
+                await this.$nextTick();
+
                 this.observer = new IntersectionObserver((entries) => {
                     entries.forEach((entry) => {
                         if (entry.isIntersecting) {
@@ -41,19 +55,9 @@ window.sipPdfPreview = function () {
                     rootMargin: '400px 0px'
                 });
 
-                const pages = element.querySelector('.sip-pdf-preview__pages');
-
-                for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
-                    const pageElement = document.createElement('section');
-                    pageElement.className = 'sip-pdf-preview__page';
-                    pageElement.dataset.pageNumber = String(pageNumber);
-                    pageElement.setAttribute('aria-label', `Page ${pageNumber}`);
-                    pageElement.innerHTML = '<div class="sip-pdf-preview__page-loading">Loading page…</div>';
-                    pages.append(pageElement);
-                    this.observer.observe(pageElement);
-                }
-
-                this.loading = false;
+                pages.querySelectorAll('.sip-pdf-preview__page').forEach((page) => {
+                    this.observer.observe(page);
+                });
             } catch (error) {
                 console.error('SIP PDF preview failed.', error);
                 this.error = 'This PDF could not be displayed. Use Download to open the original file.';

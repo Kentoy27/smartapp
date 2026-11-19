@@ -47,6 +47,8 @@
                 <p class="opcrf-part-message">
                     @if ($part['all_group_parts_complete'])
                         Full OPCRF is complete — submitted for this cycle.
+                    @elseif ($part['approval_required'])
+                        Submit your OPCRF Commitment (Part I) and wait for approval before accessing the full OPCRF.
                     @elseif ($part['is_grouped_term'] && collect($part['group_states'])->contains(fn (array $state): bool => $state['completed']))
                         Your progress in Full OPCRF is saved. Continue any unfinished section during the end-of-year term.
                     @elseif ($part['completed'])
@@ -79,7 +81,12 @@
                         x-data="{ open: false }"
                         @keydown.escape.window="open = false"
                     >
-                        @if (collect($part['group_states'])->contains(fn (array $state): bool => $state['can_access']))
+                        @if ($part['approval_required'])
+                            <span class="opcrf-part-action opcrf-part-action--locked" aria-disabled="true">
+                                <x-icon name="lock" :size="15" />
+                                <span>Approval required</span>
+                            </span>
+                        @elseif (collect($part['group_states'])->contains(fn (array $state): bool => $state['can_access']))
                             <button
                                 type="button"
                                 class="opcrf-part-action opcrf-parts-menu-trigger"

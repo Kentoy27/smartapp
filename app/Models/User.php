@@ -112,6 +112,11 @@ class User extends Authenticatable
         return $this->is_superadmin || $this->role === 'administrator';
     }
 
+    public function requiresPasswordChange(): bool
+    {
+        return $this->must_change_password && $this->role !== 'viewer';
+    }
+
     public function isBudgetRole(): bool
     {
         return ! $this->is_superadmin && $this->role === 'budget';

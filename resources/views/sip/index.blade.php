@@ -9,7 +9,7 @@
             @if (auth()->user()?->hasAdminAccess())
                 Browse SIP records uploaded by schools across all divisions.
             @else
-                Browse each school's SIP by division. School Heads can upload or replace their school's file.
+                Browse SIP uploads by division. School Heads can add multiple SIP files for their school.
             @endif
         </p>
     </div>
