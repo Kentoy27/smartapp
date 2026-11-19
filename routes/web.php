@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AipUploadController;
+use App\Http\Controllers\AndroidAppController;
 use App\Http\Controllers\Auth\GoogleAuthController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\ForcedPasswordChangeController;
@@ -98,18 +99,13 @@ Route::get('/service-worker.js', function () {
     ]);
 })->name('pwa.service-worker');
 
+Route::get('/android-app/update', [AndroidAppController::class, 'update'])
+    ->name('app.android.update');
+Route::get('/android-app/download/{token}', [AndroidAppController::class, 'download'])
+    ->where('token', '[a-f0-9]{64}')
+    ->name('app.android.token-download');
 Route::get('/downloads/smartapp-android.apk', function () {
-    $apkPath = public_path('downloads/smartapp-android.apk');
-    abort_unless(is_file($apkPath), 404);
-
-    $response = response()->download($apkPath, 'SmartApp-Android.apk');
-    $response->setPrivate();
-    $response->headers->set('Content-Type', 'application/vnd.android.package-archive');
-    $response->headers->set('Cache-Control', 'no-store, no-cache, must-revalidate');
-    $response->headers->set('Pragma', 'no-cache');
-    $response->headers->set('Expires', '0');
-
-    return $response;
+    return redirect()->route('app.android.update');
 })->name('app.android.download');
 
 Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login')->middleware('guest');

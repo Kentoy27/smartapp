@@ -188,6 +188,13 @@ class SipTable extends Component
         $this->resetValidation();
     }
 
+    public function updatedSipFile(): void
+    {
+        if ($this->sipFile !== null) {
+            $this->uploadSip();
+        }
+    }
+
     public function uploadSip(): void
     {
         $user = Auth::user();
@@ -295,6 +302,13 @@ class SipTable extends Component
         $this->bulkUploads[] = ['division' => $defaultDivision, 'file' => null];
     }
 
+    public function updatedBulkUploads(mixed $value, string $key): void
+    {
+        if (str_ends_with($key, '.file') && $value !== null) {
+            $this->uploadMultipleSip(keepOpen: true);
+        }
+    }
+
     public function removeBulkUploadRow(int $index): void
     {
         if (count($this->bulkUploads) <= 1 || ! array_key_exists($index, $this->bulkUploads)) {
@@ -313,7 +327,7 @@ class SipTable extends Component
         $this->resetValidation();
     }
 
-    public function uploadMultipleSip(): void
+    public function uploadMultipleSip(bool $keepOpen = false): void
     {
         $user = Auth::user();
         abort_unless($user instanceof User && $user->canManageWfp() && $user->school_id !== null, 403);
@@ -334,8 +348,6 @@ class SipTable extends Component
         ));
 
         if ($this->bulkUploads === []) {
-            $this->addError('bulkUploads', 'Select at least one SIP document to upload.');
-
             return;
         }
 
@@ -396,7 +408,15 @@ class SipTable extends Component
         }
 
         $uploadedCount = count($storedPaths);
-        $this->closeBulkUploadModal();
+        if ($keepOpen) {
+            $defaultDivision = in_array($user->defaultDivision(), $allowedDivisions, true)
+                ? $user->defaultDivision()
+                : $allowedDivisions[0];
+            $this->bulkUploads = [['division' => $defaultDivision, 'file' => null]];
+            $this->resetValidation();
+        } else {
+            $this->closeBulkUploadModal();
+        }
         $this->successMessage = "{$uploadedCount} SIP ".($uploadedCount === 1 ? 'file was' : 'files were')." uploaded for {$school->name}.";
         unset($this->schools);
     }

@@ -169,13 +169,9 @@
                     <button type="button" class="modal-close" wire:click="closeBulkUploadModal" aria-label="Close" title="Close">×</button>
                 </div>
 
-                <form wire:submit="uploadMultipleSip" class="modal-form">
+                <div class="modal-form">
                     <p class="field-hint">
-                        @if (count($uploadableDivisions) > 1)
-                            Add one or more SIP files. Each upload is saved as a new record; existing SIP files are kept.
-                        @else
-                            Add one or more SIP files for your division. Existing uploads are kept.
-                        @endif
+                        Choose a file to upload it immediately. Add another row to upload more SIP files; existing uploads are kept.
                     </p>
 
                     <div class="sip-bulk-upload-rows">
@@ -201,6 +197,8 @@
                                         accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
                                     >
                                     <div class="field-hint">PDF, Word, Excel, or PowerPoint; maximum {{ number_format((int) config('sip.max_upload_kb', 102400) / 1024, 0) }} MB per file.</div>
+                                    <div class="field-hint" wire:loading wire:target="bulkUploads.{{ $index }}.file">Uploading and saving SIP…</div>
+                                    <div class="field-hint" wire:loading wire:target="uploadMultipleSip">Saving SIP…</div>
                                     @error("bulkUploads.{$index}.file") <div class="error-text">{{ $message }}</div> @enderror
                                 </div>
                                 @if (count($bulkUploads) > 1)
@@ -220,16 +218,10 @@
                         class="btn-ghost sip-bulk-upload-add"
                         wire:click="addBulkUploadRow"
                     >Add another SIP</button>
-                    @error('bulkUploads') <div class="error-text">{{ $message }}</div> @enderror
-
                     <div class="modal-actions">
-                        <button type="button" class="btn-ghost" wire:click="closeBulkUploadModal">Cancel</button>
-                        <button type="submit" class="btn-primary" wire:loading.attr="disabled" wire:target="uploadMultipleSip">
-                            <span wire:loading.remove wire:target="uploadMultipleSip">Upload SIP</span>
-                            <span wire:loading wire:target="uploadMultipleSip">Uploading…</span>
-                        </button>
+                        <button type="button" class="btn-ghost" wire:click="closeBulkUploadModal">Done</button>
                     </div>
-                </form>
+                </div>
             </section>
         </div>
     @endif
@@ -242,10 +234,10 @@
                     <button type="button" class="modal-close" wire:click="closeUploadModal" aria-label="Close" title="Close">×</button>
                 </div>
 
-                <form wire:submit="uploadSip" class="modal-form">
+                <div class="modal-form">
                     <p class="field-hint">
                         Upload the {{ \App\Support\SchoolDivision::label($uploadDivision) }} SIP.
-                        This adds another SIP and keeps any existing uploads.
+                        Choose a file to upload it immediately. Existing SIP uploads are kept.
                     </p>
                     <div class="field">
                         <label for="sipFile">SIP document</label>
@@ -254,20 +246,16 @@
                             type="file"
                             wire:model="sipFile"
                             accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
-                            required
                         >
                         <div class="field-hint">PDF, Word, Excel, or PowerPoint; maximum {{ number_format((int) config('sip.max_upload_kb', 102400) / 1024, 0) }} MB.</div>
+                        <div class="field-hint" wire:loading wire:target="sipFile">Uploading and saving SIP…</div>
                         @error('sipFile') <div class="error-text">{{ $message }}</div> @enderror
                     </div>
 
                     <div class="modal-actions">
-                        <button type="button" class="btn-ghost" wire:click="closeUploadModal">Cancel</button>
-                        <button type="submit" class="btn-primary" wire:loading.attr="disabled" wire:target="uploadSip">
-                            <span wire:loading.remove wire:target="uploadSip">Add SIP</span>
-                            <span wire:loading wire:target="uploadSip">Uploading…</span>
-                        </button>
+                        <button type="button" class="btn-ghost" wire:click="closeUploadModal">Done</button>
                     </div>
-                </form>
+                </div>
             </div>
         </div>
     @endif

@@ -157,7 +157,6 @@ class SipPageTest extends TestCase
             ->assertSee('Upload')
             ->call('openUploadModal', $school->id, $division)
             ->set('sipFile', UploadedFile::fake()->create('School-SIP.pdf', 80, 'application/pdf'))
-            ->call('uploadSip')
             ->assertHasNoErrors()
             ->assertSet('showUploadModal', false)
             ->assertSet('successMessage', 'Elementary SIP added for Test School.');
@@ -178,7 +177,6 @@ class SipPageTest extends TestCase
         Livewire::actingAs($head)->test(SipTable::class)
             ->call('openUploadModal', $school->id, $division)
             ->set('sipFile', UploadedFile::fake()->create('Revised-SIP.pdf', 13000, 'application/pdf'))
-            ->call('uploadSip')
             ->assertHasNoErrors()
             ->assertSet('successMessage', 'Elementary SIP added for Test School.');
 
@@ -221,9 +219,10 @@ class SipPageTest extends TestCase
             ->call('openBulkUploadModal')
             ->set('bulkUploads.0.division', '')
             ->set('bulkUploads.0.file', UploadedFile::fake()->create('Junior-High-SIP.pdf', 80, 'application/pdf'))
-            ->call('uploadMultipleSip')
             ->assertHasNoErrors()
-            ->assertSet('showBulkUploadModal', false);
+            ->assertSet('showBulkUploadModal', true)
+            ->assertSee('Junior-High-SIP.pdf')
+            ->assertDontSee('Select at least one SIP document to upload.');
 
         $submission = SipSubmission::query()
             ->where('school_id', $school->id)
@@ -245,9 +244,8 @@ class SipPageTest extends TestCase
             ->call('addBulkUploadRow')
             ->set('bulkUploads.0.division', 'ELEMENTARY')
             ->set('bulkUploads.0.file', UploadedFile::fake()->create('Elementary-SIP.pdf', 80, 'application/pdf'))
-            ->call('uploadMultipleSip')
             ->assertHasNoErrors()
-            ->assertSet('showBulkUploadModal', false)
+            ->assertSet('showBulkUploadModal', true)
             ->assertSet('successMessage', '1 SIP file was uploaded for Test School.');
 
         $this->assertSame(
@@ -272,16 +270,17 @@ class SipPageTest extends TestCase
             ->call('openBulkUploadModal')
             ->assertSet('showBulkUploadModal', true)
             ->assertSee('maximum 100 MB per file')
-            ->assertSee('Each upload is saved as a new record; existing SIP files are kept.')
-            ->call('addBulkUploadRow')
+            ->assertSee('Choose a file to upload it immediately.')
             ->set('bulkUploads.0.division', 'ELEMENTARY')
             ->set('bulkUploads.0.file', UploadedFile::fake()->create('Elementary-SIP.pdf', 13000, 'application/pdf'))
+            ->assertHasNoErrors()
+            ->assertSet('showBulkUploadModal', true)
+            ->call('addBulkUploadRow')
             ->set('bulkUploads.1.division', 'JUNIOR_HIGH')
             ->set('bulkUploads.1.file', UploadedFile::fake()->create('Junior-High-SIP.pdf', 14000, 'application/pdf'))
-            ->call('uploadMultipleSip')
             ->assertHasNoErrors()
-            ->assertSet('showBulkUploadModal', false)
-            ->assertSet('successMessage', '2 SIP files were uploaded for Test School.');
+            ->assertSet('showBulkUploadModal', true)
+            ->assertSee('Junior-High-SIP.pdf');
 
         $this->assertSame(2, SipSubmission::query()->where('school_id', $school->id)->count());
 
@@ -299,12 +298,11 @@ class SipPageTest extends TestCase
 
         Livewire::actingAs($head)->test(SipTable::class)
             ->call('openBulkUploadModal')
-            ->call('addBulkUploadRow')
             ->set('bulkUploads.0.division', 'ELEMENTARY')
-            ->set('bulkUploads.1.division', 'ELEMENTARY')
             ->set('bulkUploads.0.file', UploadedFile::fake()->create('Additional-One.pdf', 80, 'application/pdf'))
+            ->call('addBulkUploadRow')
+            ->set('bulkUploads.1.division', 'ELEMENTARY')
             ->set('bulkUploads.1.file', UploadedFile::fake()->create('Additional-Two.pdf', 80, 'application/pdf'))
-            ->call('uploadMultipleSip')
             ->assertHasNoErrors();
 
         $this->assertSame(4, SipSubmission::query()->where('school_id', $school->id)->count());

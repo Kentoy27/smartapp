@@ -1,7 +1,12 @@
 <?php
 
 use App\Http\Controllers\Api\AccountClassificationController;
+use App\Http\Controllers\AndroidAppController;
 use Illuminate\Support\Facades\Route;
+
+Route::get('/android-app/version', [AndroidAppController::class, 'version'])
+    ->middleware('throttle:60,1')
+    ->name('android-app.version');
 
 Route::get('/user', function (Illuminate\Http\Request $request) {
     return $request->user();

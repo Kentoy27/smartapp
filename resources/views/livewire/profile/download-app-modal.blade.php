@@ -53,9 +53,9 @@
                             <p>Download the Android installer (APK), then open it on your phone to install SmartApp.</p>
                         </div>
                         @if (is_file(public_path('downloads/smartapp-android.apk')))
-                            <a class="btn-primary download-app-modal__apk" href="{{ route('app.android.download', ['v' => 4]) }}" x-show="!nativeApp" x-cloak>
+                            <a class="btn-primary download-app-modal__apk" href="{{ route('app.android.update') }}" x-show="!nativeApp" x-cloak>
                                 <x-icon name="download" :size="17" />
-                                <span>Download Android APK (v1.0.3)</span>
+                                <span>Download Android APK (v{{ config('android_app.version_name') }})</span>
                             </a>
                             <p class="download-app-modal__apk-note" x-show="!nativeApp" x-cloak>Android may ask you to allow installs from this browser. Only install APKs you downloaded from SmartApp.</p>
                             <p class="download-app-modal__apk-note" x-show="nativeApp" x-cloak role="status">SmartApp is already installed on this device. You do not need to install another copy.</p>

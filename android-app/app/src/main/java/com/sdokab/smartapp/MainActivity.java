@@ -2,9 +2,11 @@ package com.sdokab.smartapp;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.DownloadManager;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
@@ -13,6 +15,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.provider.MediaStore;
+import android.util.Log;
 import android.webkit.CookieManager;
 import android.webkit.DownloadListener;
 import android.webkit.PermissionRequest;
@@ -34,11 +37,19 @@ import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 
 import java.io.File;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 public final class MainActivity extends Activity {
     private static final String APP_HOST = "smartapp.sdokab.com";
     private static final String START_URL = "https://smartapp.sdokab.com/smartapp/home";
+    private static final String VERSION_CHECK_URL = "https://smartapp.sdokab.com/smartapp/api/android-app/version";
     private static final long MINIMUM_SPLASH_DURATION_MS = 850;
     private static final int FILE_CHOOSER_REQUEST = 4107;
     private static final int CAMERA_PERMISSION_REQUEST = 4108;
@@ -55,6 +66,11 @@ public final class MainActivity extends Activity {
     private long activityStartedAt;
     private View startupArtwork;
     private Runnable hideArtworkRunnable;
+    private Bundle savedWebViewState;
+    private boolean appLoaded;
+    private boolean updateRequired;
+    private String updatePageUrl;
+    private AlertDialog updateDialog;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -101,7 +117,7 @@ public final class MainActivity extends Activity {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         settings.setSupportMultipleWindows(false);
         settings.setMediaPlaybackRequiresUserGesture(true);
-        settings.setUserAgentString(settings.getUserAgentString() + " SmartAppAndroid/1.0.3");
+        settings.setUserAgentString(settings.getUserAgentString() + " SmartAppAndroid/" + getInstalledVersionName());
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             settings.setSafeBrowsingEnabled(true);
         }
@@ -211,10 +227,122 @@ public final class MainActivity extends Activity {
 
         webView.setDownloadListener(createDownloadListener());
 
-        if (savedInstanceState == null) {
+        savedWebViewState = savedInstanceState;
+        checkForRequiredUpdate();
+    }
+
+    private String getInstalledVersionName() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (PackageManager.NameNotFoundException exception) {
+            return "unknown";
+        }
+    }
+
+    private void checkForRequiredUpdate() {
+        Thread versionCheck = new Thread(() -> {
+            HttpURLConnection connection = null;
+            try {
+                connection = (HttpURLConnection) new URL(VERSION_CHECK_URL).openConnection();
+                connection.setRequestMethod("GET");
+                connection.setConnectTimeout(5000);
+                connection.setReadTimeout(5000);
+                connection.setRequestProperty("Accept", "application/json");
+                if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) {
+                    throw new IOException("Version check returned HTTP " + connection.getResponseCode());
+                }
+
+                StringBuilder responseBody = new StringBuilder();
+                try (BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8)
+                )) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        responseBody.append(line);
+                    }
+                }
+
+                JSONObject version = new JSONObject(responseBody.toString());
+                PackageInfo installed = getPackageManager().getPackageInfo(getPackageName(), 0);
+                long installedCode = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P
+                        ? installed.getLongVersionCode()
+                        : installed.versionCode;
+                Uri updateUri = Uri.parse(version.optString("update_url", ""));
+                boolean mustUpdate = version.optBoolean("force_update", true)
+                        && version.optLong("required_version_code", 0) > installedCode
+                        && "https".equalsIgnoreCase(updateUri.getScheme())
+                        && APP_HOST.equalsIgnoreCase(updateUri.getHost());
+
+                mainHandler.post(() -> {
+                    if (isFinishing()) {
+                        return;
+                    }
+                    if (mustUpdate) {
+                        updateRequired = true;
+                        updatePageUrl = updateUri.toString();
+                        showForcedUpdateDialog();
+                    } else {
+                        loadApp();
+                    }
+                });
+            } catch (IOException | JSONException | PackageManager.NameNotFoundException exception) {
+                Log.w("SmartApp", "Could not check for an Android app update; continuing with the installed version.", exception);
+                mainHandler.post(() -> {
+                    if (!isFinishing()) {
+                        loadApp();
+                    }
+                });
+            } finally {
+                if (connection != null) {
+                    connection.disconnect();
+                }
+            }
+        }, "smartapp-version-check");
+        versionCheck.start();
+    }
+
+    private void loadApp() {
+        if (appLoaded || webView == null) {
+            return;
+        }
+        appLoaded = true;
+        if (savedWebViewState == null) {
             webView.loadUrl(START_URL);
         } else {
-            webView.restoreState(savedInstanceState);
+            webView.restoreState(savedWebViewState);
+            savedWebViewState = null;
+        }
+    }
+
+    private void showForcedUpdateDialog() {
+        if (!updateRequired || isFinishing() || (updateDialog != null && updateDialog.isShowing())) {
+            return;
+        }
+
+        updateDialog = new AlertDialog.Builder(this)
+                .setTitle("Update required")
+                .setMessage("A newer version of SmartApp is required. Update the app to continue.")
+                .setCancelable(false)
+                .setPositiveButton("Download update", (dialog, which) -> openUpdatePage())
+                .create();
+        updateDialog.setCanceledOnTouchOutside(false);
+        updateDialog.show();
+    }
+
+    private void openUpdatePage() {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(updatePageUrl)));
+        } catch (ActivityNotFoundException exception) {
+            Toast.makeText(this, "No browser is available to download the update.", Toast.LENGTH_LONG).show();
+            mainHandler.postDelayed(this::showForcedUpdateDialog, 300);
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (updateRequired) {
+            showForcedUpdateDialog();
         }
     }
 
@@ -537,6 +665,9 @@ public final class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        if (updateRequired) {
+            return;
+        }
         if (webView != null && webView.canGoBack()) {
             webView.goBack();
             return;
@@ -557,6 +688,10 @@ public final class MainActivity extends Activity {
         if (pendingWebPermissionRequest != null) {
             pendingWebPermissionRequest.deny();
             pendingWebPermissionRequest = null;
+        }
+        if (updateDialog != null) {
+            updateDialog.dismiss();
+            updateDialog = null;
         }
         if (webView != null) {
             webView.stopLoading();
