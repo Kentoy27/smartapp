@@ -238,6 +238,8 @@
             animation: login-shake 0.5s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
         }
 
+
+
         @media (prefers-reduced-motion: reduce) {
             .login-shell.shake {
                 animation: none;
@@ -757,6 +759,268 @@
                 padding: 10px; /* larger touch target */
             }
         }
+
+        .login-shell {
+            grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+            max-width: 1080px;
+            border-radius: 24px;
+            box-shadow: 0 28px 80px rgba(15, 23, 42, 0.16), 0 0 0 8px var(--card-highlight);
+        }
+
+        .login-shell::before {
+            height: 4px;
+            background: linear-gradient(90deg, #38bdf8, #3b82f6 48%, #22c55e);
+        }
+
+        .login-shell .login-aside {
+            align-items: flex-start;
+            justify-content: space-between;
+            flex-direction: column;
+            gap: 36px;
+            min-height: 610px;
+            padding: 46px;
+            color: #fff;
+            background:
+                radial-gradient(circle at 12% 90%, rgba(34, 197, 94, 0.2), transparent 34%),
+                radial-gradient(circle at 100% 0%, rgba(56, 189, 248, 0.25), transparent 38%),
+                linear-gradient(145deg, #0b1c42, #12376f 62%, #14532d);
+        }
+
+        .login-shell .login-aside::after {
+            content: "";
+            position: absolute;
+            width: 280px;
+            height: 280px;
+            right: -120px;
+            bottom: -135px;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 50%;
+            box-shadow: 0 0 0 28px rgba(255, 255, 255, 0.035), 0 0 0 58px rgba(255, 255, 255, 0.025);
+            pointer-events: none;
+        }
+
+        .login-brand-lockup {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            align-items: center;
+            gap: 13px;
+        }
+
+        .login-brand-logo {
+            width: 54px;
+            height: 54px;
+            padding: 5px;
+            border: 1px solid rgba(255, 255, 255, 0.55);
+            border-radius: 16px;
+            background: #fff;
+            object-fit: contain;
+            box-shadow: 0 8px 22px rgba(2, 8, 23, 0.22);
+        }
+
+        .login-brand-title {
+            display: block;
+            color: #fff;
+            font-size: 1.45rem;
+            font-weight: 750;
+            letter-spacing: -0.04em;
+        }
+
+        .login-brand-caption {
+            display: block;
+            margin-top: 3px;
+            color: #bfdbfe;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+        }
+
+        .login-aside-copy {
+            position: relative;
+            z-index: 1;
+            max-width: 430px;
+        }
+
+        .login-aside-eyebrow,
+        .login-form-eyebrow {
+            margin-bottom: 14px;
+            color: #7dd3fc;
+            font-size: 0.7rem;
+            font-weight: 750;
+            letter-spacing: 0.14em;
+            line-height: 1.4;
+        }
+
+        .login-aside-copy h2 {
+            max-width: 420px;
+            color: #fff;
+            font-size: clamp(2rem, 3.2vw, 2.8rem);
+            font-weight: 750;
+            letter-spacing: -0.055em;
+            line-height: 1.08;
+        }
+
+        .login-aside-description {
+            max-width: 390px;
+            margin: 18px 0 0;
+            color: #dbeafe;
+            font-size: 0.98rem;
+            line-height: 1.7;
+        }
+
+        .login-pillar-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 9px;
+            margin-top: 28px;
+            padding: 0;
+            list-style: none;
+        }
+
+        .login-pillar-list li {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            padding: 8px 11px;
+            border: 1px solid rgba(191, 219, 254, 0.24);
+            border-radius: 999px;
+            background: rgba(15, 23, 42, 0.18);
+            color: #eff6ff;
+            font-size: 0.76rem;
+            font-weight: 600;
+        }
+
+        .login-pillar-list li::before {
+            content: "";
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #4ade80;
+            box-shadow: 0 0 10px rgba(74, 222, 128, 0.7);
+        }
+
+        .login-aside-footer {
+            position: relative;
+            z-index: 1;
+            color: #bfdbfe;
+            font-size: 0.75rem;
+            letter-spacing: 0.02em;
+        }
+
+        .login-shell .login-card {
+            padding: 54px 58px 34px;
+        }
+
+        .login-shell .login-card .login-form-eyebrow {
+            margin-bottom: 10px;
+            color: var(--primary);
+        }
+
+        .login-shell .login-card h1 {
+            font-size: 1.9rem;
+            letter-spacing: -0.04em;
+        }
+
+        .login-shell .login-card > p {
+            margin-bottom: 32px;
+            font-size: 0.94rem;
+        }
+
+        .login-shell .field {
+            margin-bottom: 21px;
+        }
+
+        .login-shell .field label {
+            margin-bottom: 8px;
+            font-size: 0.84rem;
+        }
+
+        .login-shell .field input {
+            min-height: 52px;
+            border-radius: 11px;
+        }
+
+        .login-shell .form-extra {
+            margin-top: 4px;
+            margin-bottom: 22px;
+        }
+
+        .login-shell button.btn {
+            min-height: 52px;
+            border-radius: 11px;
+            box-shadow: 0 10px 22px rgba(37, 99, 235, 0.22);
+        }
+
+        .login-shell .footer-text {
+            margin-top: 26px;
+            font-size: 0.75rem;
+        }
+
+        @media (max-width: 899px) {
+            .login-shell {
+                grid-template-columns: 1fr;
+                max-width: 500px;
+                border-radius: 22px;
+            }
+
+            .login-shell .login-aside {
+                min-height: 0;
+                align-items: flex-start;
+                padding: 22px 26px;
+                border-radius: 22px 22px 0 0;
+            }
+
+            .login-brand-logo {
+                width: 46px;
+                height: 46px;
+                border-radius: 13px;
+            }
+
+            .login-brand-title {
+                font-size: 1.25rem;
+            }
+
+            .login-aside-copy,
+            .login-aside-footer {
+                display: none;
+            }
+
+            .login-shell .login-card {
+                padding: 34px 38px 28px;
+            }
+
+            .login-shell .login-card .brand-header {
+                display: none;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .login-shell {
+                border-radius: 18px;
+            }
+
+            .login-shell .login-aside {
+                padding: 18px 20px;
+                border-radius: 18px 18px 0 0;
+            }
+
+            .login-brand-logo {
+                width: 42px;
+                height: 42px;
+            }
+
+            .login-shell .login-card {
+                padding: 28px 22px 24px;
+            }
+
+            .login-shell .login-card h1 {
+                font-size: 1.55rem;
+            }
+
+            .login-shell .login-card > p {
+                margin-bottom: 26px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -766,12 +1030,26 @@
     </button>
 
     <div class="login-shell" id="loginShell">
-        <aside class="login-aside">
-            <img
-                class="login-artwork"
-                src="{{ public_asset('login-brand.png') }}?v=1"
-                alt="SmartApp — Strategic Monitoring and Resource Tracking for Activities, Projects, and Programs"
-            >
+        <aside class="login-aside" aria-label="About SmartApp">
+            <div class="login-brand-lockup">
+                <img class="login-brand-logo" src="{{ public_asset('smartapp-logo.png') }}?v=3" alt="SmartApp logo">
+                <span>
+                    <span class="login-brand-title">SmartApp</span>
+                    <span class="login-brand-caption">SCHOOL PERFORMANCE WORKSPACE</span>
+                </span>
+            </div>
+            <div class="login-aside-copy">
+                <p class="login-aside-eyebrow">STRATEGY TO SCHOOL-WIDE IMPACT</p>
+                <h2>Make every plan count.</h2>
+                <p class="login-aside-description">Bring planning, monitoring, and accountability together in one trusted workspace for better school performance.</p>
+                <ul class="login-pillar-list" aria-label="SmartApp capabilities">
+                    <li>Plan</li>
+                    <li>Monitor</li>
+                    <li>Track</li>
+                    <li>Achieve</li>
+                </ul>
+            </div>
+            <p class="login-aside-footer">Verified data. Clear progress. Stronger outcomes.</p>
         </aside>
 
         <div class="login-card">
@@ -782,6 +1060,7 @@
             <div class="brand-name"><span class="brand-blue">Smart</span><span class="brand-black">App</span></div>
         </div>
 
+        <div class="login-form-eyebrow">SECURE ACCOUNT ACCESS</div>
         <h1>Welcome back</h1>
         <p>Sign in to your SmartApp account</p>
 
@@ -890,7 +1169,7 @@
         </a> -->
 
         <div class="footer-text">
-            SmartApp &copy; {{ date('Y') }}
+            &copy; {{ date('Y') }} SmartApp. All rights reserved.
         </div>
     </div><!-- /.login-card -->
     </div><!-- /.login-shell -->
