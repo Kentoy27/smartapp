@@ -189,7 +189,7 @@
     {{-- DELETE / DEACTIVATE CONFIRMATION --}}
     @if ($showConfirm)
         <div class="modal-backdrop is-open"
-             @click="self && $wire.closeConfirmDelete()"
+             @mousedown.self="$wire.closeConfirmDelete()"
              role="presentation">
             <div class="modal modal--confirmation" role="dialog" aria-modal="true" aria-labelledby="acDeleteTitle" @click.stop>
                 <div class="modal-head">
@@ -218,7 +218,7 @@
 
     {{-- ADD / EDIT CLASSIFICATION MODAL (one modal, two modes) --}}
     <div class="modal-backdrop {{ $showForm ? 'is-open' : '' }}"
-         @if ($showForm) @click="self && $wire.closeForm()" @endif
+         @if ($showForm) @mousedown.self="$wire.closeForm()" @endif
          role="presentation">
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="acFormTitle" @click.stop>
             <div class="modal-head">
@@ -322,7 +322,7 @@
          commit. The file is re-analyzed server-side on confirm, so the rows
          are never trusted from the browser. --}}
     <div class="modal-backdrop {{ $showImport ? 'is-open' : '' }}"
-         @if ($showImport) @click="self && $wire.closeImport()" @endif
+         @if ($showImport) @mousedown.self="$wire.closeImport()" @endif
          role="presentation">
         <div class="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="acImportTitle" @click.stop>
             <div class="modal-head">

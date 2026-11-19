@@ -370,7 +370,7 @@
          remove. --}}
     @if ($showRemoveModal)
     <div class="modal-backdrop is-open"
-         @click="self && $wire.closeRemoveModal()"
+         @mousedown.self="$wire.closeRemoveModal()"
          role="presentation">
         <div class="modal modal--confirmation" role="dialog" aria-modal="true" aria-labelledby="signatureRemoveTitle" @click.stop>
             <div class="modal-head">

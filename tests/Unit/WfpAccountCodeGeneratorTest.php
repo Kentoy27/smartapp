@@ -73,11 +73,12 @@ class WfpAccountCodeGeneratorTest extends TestCase
 
         $sheet = $this->wfpSheetXml($bytes);
 
-        // Header row 3 → data rows 4 and 5. Account Title = column I, Object Code = column J.
+        // Header row 3 → data rows 4 and 5. Account Title = column I; Object
+        // Code column J is hidden so no code is stamped.
         $this->assertSame('Travelling Expenses - Local', $this->wfpCellText($sheet, 'I4'));
-        $this->assertSame('5020101000', $this->wfpCellText($sheet, 'J4'));
+        $this->assertSame('', $this->wfpCellText($sheet, 'J4'));
         $this->assertSame('Office Supplies Expenses', $this->wfpCellText($sheet, 'I5'));
-        $this->assertSame('5020301000', $this->wfpCellText($sheet, 'J5'));
+        $this->assertSame('', $this->wfpCellText($sheet, 'J5'));
 
         // Every other planning column stays blank.
         foreach (['B', 'C', 'D', 'E', 'F', 'G', 'H', 'K', 'L', 'M'] as $col) {
@@ -119,11 +120,11 @@ class WfpAccountCodeGeneratorTest extends TestCase
         $sheet = $this->wfpSheetXml($bytes);
 
         // The FY-2026 form has no Account Title column, so the account is
-        // named in the first column — the form's own convention — and its code
-        // lands in the January Object Code column.
+        // named in the first column — the form's own convention. Object Code
+        // columns are hidden, so no account code is stamped.
         $this->assertSame('Travelling Expenses-Local', $this->wfpCellText($sheet, 'A14'));
-        $this->assertSame('5020101000', $this->wfpCellText($sheet, 'S14'));
-        $this->assertSame('5020101000', $this->wfpCellText($sheet, 'AO14'));
+        $this->assertSame('', $this->wfpCellText($sheet, 'S14'));
+        $this->assertSame('', $this->wfpCellText($sheet, 'AO14'));
     }
 
     public function test_bytes_leave_the_title_block_blank_without_a_school(): void

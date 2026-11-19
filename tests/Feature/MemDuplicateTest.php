@@ -501,6 +501,29 @@ class MemDuplicateTest extends TestCase
         $this->assertSame(12.0, (float) $line->fresh()->quantity);
     }
 
+    public function test_editing_a_line_with_unchanged_description_saves_when_another_line_shares_it(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        $existing = $this->lineFor($matrix, 'Payment for Electricity');
+        $editing = $this->lineFor($matrix, 'Payment for Electricity', ['quantity' => 10]);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openEditModal', 'item-'.$editing->id)
+            ->set('lineForm.quantity', '12')
+            ->call('saveLineFromModal')
+            // Description unchanged: not a new duplicate, so the save goes through.
+            ->assertSet('showLineModal', false)
+            ->assertSet('duplicateWarning', null)
+            ->assertHasNoErrors();
+
+        $this->assertSame(2, MonthlyExpenditureItem::count());
+        $this->assertSame(12.0, (float) $editing->fresh()->quantity);
+        // The existing line is untouched.
+        $this->assertSame('Payment for Electricity', $existing->fresh()->activity_description);
+    }
+
     public function test_closing_and_reopening_the_modal_forgets_the_warning(): void
     {
         $sh = $this->schoolHead();

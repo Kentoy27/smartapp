@@ -235,8 +235,11 @@ final class OpcrfSignatureStamper
      * Identical image bytes share one media part, so a signature repeated on
      * twelve monthly sheets is stored once and referenced twelve times.
      *
-     * @param  array<int, array{sheet: string, range: string, bytes: string, extension?: string, name?: string|null}>  $stamps
+     * @param  array<int, array{sheet: string, range: string, bytes: string, extension?: string, name?: string|null, widthPx?: int|null, heightPx?: int|null}>  $stamps
      *         `sheet` is the worksheet part, e.g. "xl/worksheets/sheet1.xml".
+     *         `widthPx`/`heightPx` stamp the image in a fixed pixel box instead of
+     *         stretching it to the range's own cells — every WFP export uses the
+     *         same box so signatures land the same size on every form.
      * @return string the stamped workbook
      *
      * @throws RuntimeException when a range is invalid or the workbook is unreadable
@@ -252,6 +255,8 @@ final class OpcrfSignatureStamper
             $sheetPart = $stamp['sheet'] ?? null;
             $signatureBytes = (string) ($stamp['bytes'] ?? '');
             $range = (string) ($stamp['range'] ?? '');
+            $widthPx = $stamp['widthPx'] ?? null;
+            $heightPx = $stamp['heightPx'] ?? null;
 
             if (! is_string($sheetPart)
                 || $sheetPart === ''
@@ -273,7 +278,7 @@ final class OpcrfSignatureStamper
                 $mediaByImage[$imageKey] = $mediaPart;
             }
 
-            $anchor = self::rangeAnchor($range, $parts[$sheetPart]);
+            $anchor = self::rangeAnchor($range, $parts[$sheetPart], $widthPx, $heightPx);
 
             $parts = self::stampSheet(
                 $parts,

@@ -114,7 +114,9 @@ class WfpItem extends Model
     public function isStale(): bool
     {
         if ($this->source_matrix_id === null) {
-            return false;
+            // Orphaned: its matrix was deleted but the row still references a MEM
+            // line. Stale so regeneration removes it and imports current data.
+            return $this->source_expenditure_item_id !== null;
         }
 
         $matrix = $this->relationLoaded('sourceMatrix') ? $this->sourceMatrix : $this->sourceMatrix()->first();

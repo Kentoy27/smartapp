@@ -139,6 +139,13 @@ final class WfpPlanExporter
                 continue;
             }
 
+            // The Schools Division Superintendent signs on approved plans only.
+            // A draft, pending or returned plan carries no SDS signature, so
+            // don't list it as missing — it is not expected yet.
+            if ($signer === null && $stage === 'superadmin') {
+                continue;
+            }
+
             $title = trim((string) ($definition['title'] ?? ucfirst($stage)));
             $label = trim((string) ($definition['label'] ?? ''));
             $missing[] = $title.($label !== '' ? ' — '.$label : '');

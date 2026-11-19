@@ -6,7 +6,6 @@ use App\Models\User;
 use App\Models\WfpApproval;
 use App\Models\WfpItem;
 use App\Models\WfpPlan;
-use App\Support\WfpAllotment;
 use App\Support\WfpGenerator;
 use App\Support\WfpPlanExporter;
 use App\Support\WfpValidator;
@@ -256,17 +255,6 @@ class WfpPlanEditor extends Component
                 ->first(fn (User $candidate): bool => $candidate->canAccessDivision($plan->schoolDivision()));
 
         return WfpPlanExporter::missingSignatureLabels($plan, $preparedBy instanceof User ? $preparedBy : null);
-    }
-
-    #[Computed]
-    public function signatoryStatuses(): array
-    {
-        return WfpAllotment::signatoryStatuses(
-            $this->plan->school_id !== null ? (int) $this->plan->school_id : null,
-            (int) $this->plan->year,
-            $this->plan->schoolDivision(),
-            $this->plan,
-        );
     }
 
     #[Computed]
