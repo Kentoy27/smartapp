@@ -253,7 +253,7 @@
                         </button>
                     @endif
 
-                    <a
+                    {{-- <a
                         href="{{ route('wfp.matrices.template') }}"
                         class="ac-import-btn"
                         download
@@ -266,7 +266,7 @@
                     <button type="button" class="ac-import-btn" wire:click="openImport">
                         <x-icon name="upload" :size="16" />
                         <span>Import CSV</span>
-                    </button>
+                    </button> --}}
                 @endif
             </div>
         </div>
@@ -310,16 +310,16 @@
                             <span>Add the first line</span>
                         </button>
 
-                        <button type="button" class="ac-import-btn" wire:click="openImport">
+                        {{-- <button type="button" class="ac-import-btn" wire:click="openImport">
                             <x-icon name="upload" :size="16" />
                             <span>Import CSV</span>
-                        </button>
+                        </button> --}}
                     </div>
 
-                    <p class="mem-empty__hint">
+                    {{-- <p class="mem-empty__hint">
                         Not sure of the CSV format?
                         <a href="{{ route('wfp.matrices.template') }}" class="ac-import-template-link" download>Download the CSV template</a>.
-                    </p>
+                    </p> --}}
                 @endif
             </div>
         @else
@@ -619,7 +619,7 @@
          button, or pre-filled from a row's pencil. The section is chosen here
          and can still be switched before saving. --}}
     <div class="modal-backdrop {{ $showLineModal ? 'is-open' : '' }}"
-         @if ($showLineModal) @click="self && $wire.closeLineModal()" @endif
+         @if ($showLineModal) @mousedown.self="$wire.closeLineModal()" @endif
          role="presentation">
         <div class="modal modal--wide modal--sticky-actions" role="dialog" aria-modal="true" aria-labelledby="memLineTitle" @click.stop>
             <div class="modal-head">
@@ -1435,7 +1435,7 @@
 
     {{-- CSV IMPORT --}}
     <div class="modal-backdrop {{ $showImport ? 'is-open' : '' }}"
-         @if ($showImport) @click="self && $wire.closeImport()" @endif
+         @if ($showImport) @mousedown.self="$wire.closeImport()" @endif
          role="presentation">
         <div class="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="memImportTitle" @click.stop>
             <div class="modal-head">

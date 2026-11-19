@@ -110,7 +110,7 @@
         @if ($showCheckModal && $this->canCheck() && $this->school)
             <div
                 class="modal-backdrop is-open"
-                @click="self && $wire.closeCheckModal()"
+                @mousedown.self="$wire.closeCheckModal()"
                 role="presentation"
             >
                 <div

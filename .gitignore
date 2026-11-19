@@ -20,3 +20,4 @@ android-app/**/*.keystore
 claude.md
 .claude
 .opencode
+.playwright-mcp

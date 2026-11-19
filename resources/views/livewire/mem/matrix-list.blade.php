@@ -305,7 +305,7 @@
     {{-- DELETE CONFIRMATION --}}
     @if ($showConfirm)
         <div class="modal-backdrop is-open"
-             @click="self && $wire.closeConfirmDelete()"
+             @mousedown.self="$wire.closeConfirmDelete()"
              role="presentation">
             <div class="modal modal--confirmation" role="dialog" aria-modal="true" aria-labelledby="memDeleteTitle" @click.stop>
                 <div class="modal-head">
@@ -334,7 +334,7 @@
 
     {{-- WORKBOOK IMPORT — a single .xlsx whose sheets are JAN..DEC. --}}
     <div class="modal-backdrop {{ $showWorkbookImport ? 'is-open' : '' }}"
-         @if ($showWorkbookImport) @click="self && $wire.closeWorkbookImport()" @endif
+         @if ($showWorkbookImport) @mousedown.self="$wire.closeWorkbookImport()" @endif
          role="presentation">
         <div class="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="memWorkbookTitle" @click.stop>
             <div class="modal-head">

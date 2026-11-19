@@ -265,4 +265,80 @@ class WfpGeneratorTest extends TestCase
         $this->assertSame([1 => 10.0, 2 => 5.0], $monthlyRows[1]['physical_targets_by_month']);
         $this->assertSame([1 => 1000.0, 2 => 500.0], $monthlyRows[1]['financial_targets_by_month']);
     }
+
+    public function test_duplicate_mem_entries_same_activity_same_month_are_summed(): void
+    {
+        $this->school();
+        $january = $this->matrix(month: 1);
+
+        // Two MEM lines with the SAME activity, account, objective — only
+        // differing in resource detail. They must collapse to one WFP row
+        // with the quantities summed (1 + 1 = 2) in that month.
+        $this->line($january, [
+            'activity_description' => 'Reimbursement of Communication Expense for School Head',
+            'account_title' => 'Communication Expense (Mobile)',
+            'account_code' => '5020301000',
+            'quantity' => 1,
+            'unit_cost' => 1000,
+            'position' => 1,
+        ]);
+        $this->line($january, [
+            'activity_description' => 'Reimbursement of Communication Expense for School Head',
+            'account_title' => 'Communication Expense (Mobile)',
+            'account_code' => '5020301000',
+            'quantity' => 1,
+            'unit_cost' => 1000,
+            'resource_kind' => 'Load card',
+            'position' => 2,
+        ]);
+        $plan = $this->plan();
+
+        WfpGenerator::generate($plan);
+
+        $monthlyRows = WfpGenerator::buildExportRows($plan, monthly: true);
+
+        $this->assertCount(2, $monthlyRows);
+        $this->assertSame(true, $monthlyRows[0]['__account_title__'] ?? false);
+        // Two entries of quantity 1 in month 1 → physical target of 2.
+        $this->assertSame([1 => 2.0], $monthlyRows[1]['physical_targets_by_month']);
+        $this->assertSame([1 => 2000.0], $monthlyRows[1]['financial_targets_by_month']);
+    }
+
+    public function test_extra_resources_under_one_activity_export_as_one_wfp_row(): void
+    {
+        $this->school();
+        $matrix = $this->matrix();
+        $this->line($matrix, [
+            'resource_kind' => 'Electricity',
+            'quantity' => 1,
+            'unit' => 'bill',
+            'unit_cost' => 1000,
+        ]);
+        $this->line($matrix, [
+            'position' => 2,
+            'resource_kind' => 'Electricity 2',
+            'quantity' => 2,
+            'unit' => 'bill',
+            'unit_cost' => 1500,
+        ]);
+        $plan = $this->plan();
+
+        WfpGenerator::generate($plan, $matrix);
+
+        // The two MEM lines are two resources of ONE activity. The WFP form
+        // has no resource/unit/cost columns, so they must read as one row with
+        // the resources' targets combined — not two rows that look identical.
+        $rows = WfpGenerator::buildExportRows($plan, monthly: false);
+
+        $this->assertCount(2, $rows);
+        $this->assertSame(true, $rows[0]['__account_title__'] ?? false);
+        $this->assertEquals(4000.0, (float) $rows[1]['financial_target']);
+        $this->assertEquals(3.0, (float) $rows[1]['physical_target']);
+
+        $monthlyRows = WfpGenerator::buildExportRows($plan, monthly: true);
+
+        $this->assertCount(2, $monthlyRows);
+        $this->assertSame([1 => 3.0], $monthlyRows[1]['physical_targets_by_month']);
+        $this->assertSame([1 => 4000.0], $monthlyRows[1]['financial_targets_by_month']);
+    }
 }

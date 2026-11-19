@@ -205,6 +205,9 @@ final class MemXlsxExporter
             self::cell($headerRow, 'A', self::S_TH, 'Objectives')
             .self::cell($headerRow, 'B', self::S_TH, 'Project/Activity/Expenditure')
             .self::cell($headerRow, 'C', self::S_TH, 'Resources needed')
+            .self::blankCell($headerRow, 'D', self::S_TH)
+            .self::blankCell($headerRow, 'E', self::S_TH)
+            .self::blankCell($headerRow, 'F', self::S_TH)
             .self::cell($headerRow, 'G', self::S_TH, 'Total Estimated Cost')
             .self::cell($headerRow, 'H', self::S_TH, 'Account Title')
             .self::cell($headerRow, 'I', self::S_TH, 'Account Code')
@@ -218,10 +221,15 @@ final class MemXlsxExporter
         $merges[] = 'I'.$headerRow.':I'.$subRow;
 
         $addRow(
-            self::cell($subRow, 'C', self::S_TH, 'Kind')
+            self::blankCell($subRow, 'A', self::S_TH)
+            .self::blankCell($subRow, 'B', self::S_TH)
+            .self::cell($subRow, 'C', self::S_TH, 'Kind')
             .self::cell($subRow, 'D', self::S_TH, 'Quantity')
             .self::cell($subRow, 'E', self::S_TH, 'Unit')
             .self::cell($subRow, 'F', self::S_TH, 'Unit Cost')
+            .self::blankCell($subRow, 'G', self::S_TH)
+            .self::blankCell($subRow, 'H', self::S_TH)
+            .self::blankCell($subRow, 'I', self::S_TH)
         );
 
         /* ------------------------------------------------------- sections */
@@ -237,7 +245,17 @@ final class MemXlsxExporter
         ] as $section => $banner) {
             $sectionTotal = 0.0;
 
-            $addRow(self::cell($row + 1, 'A', self::S_BANNER, $banner));
+            $addRow(
+                self::cell($row + 1, 'A', self::S_BANNER, $banner)
+                .self::blankCell($row + 1, 'B', self::S_BANNER)
+                .self::blankCell($row + 1, 'C', self::S_BANNER)
+                .self::blankCell($row + 1, 'D', self::S_BANNER)
+                .self::blankCell($row + 1, 'E', self::S_BANNER)
+                .self::blankCell($row + 1, 'F', self::S_BANNER)
+                .self::blankCell($row + 1, 'G', self::S_BANNER)
+                .self::blankCell($row + 1, 'H', self::S_BANNER)
+                .self::blankCell($row + 1, 'I', self::S_BANNER)
+            );
             $merges[] = 'A'.$row.':I'.$row;
 
             /** @var Collection<int, MonthlyExpenditureItem> $sectionItems */
@@ -293,6 +311,11 @@ final class MemXlsxExporter
 
             $addRow(
                 self::cell($r, 'A', self::S_SUB_LABEL, 'Subtotal')
+                .self::blankCell($r, 'B', self::S_SUB_LABEL)
+                .self::blankCell($r, 'C', self::S_SUB_LABEL)
+                .self::blankCell($r, 'D', self::S_SUB_LABEL)
+                .self::blankCell($r, 'E', self::S_SUB_LABEL)
+                .self::blankCell($r, 'F', self::S_SUB_LABEL)
                 .self::numericCell($r, 'G', $sectionTotal, self::S_SUB_VALUE)
                 .self::blankCell($r, 'H', self::S_SUB_VALUE)
                 .self::blankCell($r, 'I', self::S_SUB_VALUE)
@@ -313,6 +336,11 @@ final class MemXlsxExporter
 
         $addRow(
             self::cell($r, 'A', self::S_TOT_LABEL, 'TOTAL:')
+            .self::blankCell($r, 'B', self::S_TOT_LABEL)
+            .self::blankCell($r, 'C', self::S_TOT_LABEL)
+            .self::blankCell($r, 'D', self::S_TOT_LABEL)
+            .self::blankCell($r, 'E', self::S_TOT_LABEL)
+            .self::blankCell($r, 'F', self::S_TOT_LABEL)
             .self::numericCell($r, 'G', $grandTotal, self::S_TOT_VALUE)
             .self::blankCell($r, 'H', self::S_TOT_VALUE)
             .self::blankCell($r, 'I', self::S_TOT_VALUE)

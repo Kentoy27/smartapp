@@ -18,9 +18,10 @@ return new class extends Migration
      * version) — it is never stored as a flag.
      *
      * `group_key` is a stable hash of the grouping fields (section + objective +
-     * activity + account title + account code + unit + unit cost); it lets the
-     * preview and the annual-shaped export group rows without re-deriving the
-     * same grouping on every render.
+     * activity + account title + account code); it lets the preview and the
+     * annual-shaped export group rows without re-deriving the same grouping on
+     * every render. The resource columns (unit, unit cost) are not grouping
+     * fields: the resources of one activity become one WFP row.
      *
      * `major_output`/`performance_indicator` are WFP-only (never carried from
      * the MEM); `needs_review`/`review_fields` record which of the flaggable

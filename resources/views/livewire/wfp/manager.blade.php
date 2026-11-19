@@ -19,7 +19,7 @@
                 </div>
 
                 {{-- Uploading a completed workbook remains the School Head's action. --}}
-                <livewire:wfp-upload :key="'wfp-upload-page'" />
+                {{-- <livewire:wfp-upload :key="'wfp-upload-page'" /> --}}
             </div>
 
             {{-- The generate controls' own sign-off panel is off here: the card
@@ -42,7 +42,7 @@
 
         {{-- MY UPLOADS: the School Head's own list of the workbooks they have
              handed back, each with a download. Refreshes on `wfp-uploaded`. --}}
-        <livewire:wfp-my-uploads-list :key="'wfp-my-uploads-page'" />
+        {{-- <livewire:wfp-my-uploads-list :key="'wfp-my-uploads-page'" /> --}}
     @else
         <div class="card">
             <div class="card-head">

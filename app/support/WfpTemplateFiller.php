@@ -733,6 +733,10 @@ class WfpTemplateFiller
 
         $fitRows = [];
         $titleRows = [];
+        // How wide each written column must be for its longest value, so a
+        // 4-digit target no longer renders as "###". Widen-only: never narrow
+        // a column the template already sized for its header/title bands.
+        $needed = [];
 
         foreach ($rows as $index => $row) {
             $targetRow = $dataRows[$index] ?? null;
@@ -746,6 +750,11 @@ class WfpTemplateFiller
             $styleMap = $rowStyle === null ? $cleanStyles : null;
 
             $writes = self::writesForRow((array) $row, $layout);
+
+            foreach (self::measureWrites($writes) as $col => $width) {
+                $needed[$col] = max($needed[$col] ?? 0.0, $width);
+            }
+
             $sheetXml = self::rebuildRow($sheetXml, $targetRow, $writes, $styles, $rowStyle, true, $styleMap);
 
             if ($styleMap !== null) {
@@ -773,6 +782,15 @@ class WfpTemplateFiller
         // weight are the template's), so they are one line even when they land
         // on a template row that shipped at 102 or 122 points.
         $sheetXml = self::fitRowHeights($sheetXml, $titleRows, $stylesXml, false);
+
+        // Widen the columns that received data so their values fit, and hide
+        // the template's Object Code columns, before the sheet's dimension is
+        // rewritten.
+        $sheetXml = self::fitColumnWidths(
+            $sheetXml,
+            $needed,
+            (array) ($layout['code_columns'] ?? [])
+        );
 
         return [self::updateDimension($sheetXml), $stylesXml];
     }
@@ -846,22 +864,11 @@ class WfpTemplateFiller
             }
 
             /*
-             * Object codes: a monthly template carries one Object Code column
-             * per month. A month-grained line writes into its own month's
-             * column; a month-less row (the account-code generator's pre-filled
-             * form) writes the code into every monthly column at once.
+             * Object codes: hidden from the generated WFP. Account codes are no
+             * longer stamped into per-month Object Code columns (or the single
+             * account-code column), so those columns stay blank.
              */
-            if ($field === 'account_code' && ($codeByMonth !== [] || $codeColumns !== [])) {
-                if ($hasMonth && isset($codeByMonth[$month])) {
-                    $writes[$codeByMonth[$month]] = ['value' => self::stringify($value), 'numeric' => false];
-                } elseif (! $hasMonth) {
-                    foreach ($codeColumns as $col) {
-                        $writes[$col] = ['value' => self::stringify($value), 'numeric' => false];
-                    }
-                } elseif (isset($columns[$field])) {
-                    $writes[$columns[$field]] = ['value' => self::stringify($value), 'numeric' => false];
-                }
-
+            if ($field === 'account_code') {
                 continue;
             }
 
@@ -2140,6 +2147,162 @@ class WfpTemplateFiller
     private static function formatHeight(float $height): string
     {
         return rtrim(rtrim(number_format($height, 2, '.', ''), '0'), '.');
+    }
+
+    /* ------------------------------------------------------------------
+     * Column width auto-fit
+     * ----------------------------------------------------------------- */
+
+    /**
+     * How wide each written column must be, in Excel width units (chars of the
+     * default font), measured from its longest wrapped line plus cell padding.
+     *
+     * @param  array<string, array{value: ?string, numeric: bool}>  $writes  column letter => write
+     * @return array<string, float> column letter => needed width
+     */
+    private static function measureWrites(array $writes): array
+    {
+        $needed = [];
+
+        foreach ($writes as $col => $spec) {
+            $text = self::writeText($spec);
+
+            if ($text === null) {
+                continue;
+            }
+
+            $longest = 0;
+
+            foreach (preg_split('/\r\n|\r|\n/', $text) ?: [] as $line) {
+                $longest = max($longest, mb_strlen($line));
+            }
+
+            // Two characters of cell padding (Excel's default) plus one so a
+            // value that exactly fills the width still shows instead of "###".
+            $needed[$col] = max($needed[$col] ?? 0.0, (float) $longest + 3.0);
+        }
+
+        return $needed;
+    }
+
+    /**
+     * The text a write actually stores in its cell, mirroring cellElement():
+     * numeric values are formatted with two decimals, everything else is the
+     * raw string. This is what the column must be wide enough to display.
+     */
+    private static function writeText(array $spec): ?string
+    {
+        $value = $spec['value'];
+
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        $text = (string) $value;
+
+        return $spec['numeric'] ? self::formatNumber($text) : $text;
+    }
+
+    /**
+     * Rewrite the sheet's `<col>` definitions so every column that received
+     * data is wide enough for its longest value. Existing widths are preserved
+     * and only ever increased — the template's header and title bands keep
+     * their designed sizes. Catch-all ranges (e.g. min=52 max=16384) are
+     * re-emitted unchanged at the end. Columns listed in `$hideCols` are
+     * collapsed to width 0 and marked hidden so they do not show at all.
+     *
+     * @param  array<string, float>  $needed   column letter => width needed
+     * @param  array<string>         $hideCols column letters to hide
+     */
+    private static function fitColumnWidths(string $sheetXml, array $needed, array $hideCols = []): string
+    {
+        if (($needed === [] && $hideCols === []) || preg_match('/<cols\b[^>]*>(.*?)<\/cols>/s', $sheetXml, $block) !== 1) {
+            return $sheetXml;
+        }
+
+        $widths = [];    // 1-based column index => width
+        $explicitMax = 0;
+        $tails = [];     // catch-all <col .../> entries re-emitted unchanged
+        $hide = [];      // 1-based column index => true
+
+        foreach ($hideCols as $col) {
+            $hide[self::columnIndex($col)] = true;
+        }
+
+        if (preg_match_all('/<col\b([^>]*?)\/?>/', $block[1], $cols, PREG_SET_ORDER) === false) {
+            return $sheetXml;
+        }
+
+        foreach ($cols as $col) {
+            $attrs = $col[1];
+            $min = preg_match('/\bmin="(\d+)"/', $attrs, $m) === 1 ? (int) $m[1] : 1;
+            $max = preg_match('/\bmax="(\d+)"/', $attrs, $m) === 1 ? (int) $m[1] : $min;
+            $width = preg_match('/\bwidth="([0-9.]+)"/', $attrs, $m) === 1 ? (float) $m[1] : 8.43;
+
+            // A catch-all tail (min=52 max=16384) is re-emitted as-is, not
+            // expanded into thousands of single-column entries.
+            if ($max > 200) {
+                $tails[] = $col[0];
+
+                continue;
+            }
+
+            for ($i = $min; $i <= $max; $i++) {
+                $widths[$i] = $width;
+                $explicitMax = max($explicitMax, $i);
+            }
+        }
+
+        $changed = false;
+
+        foreach ($needed as $col => $width) {
+            $index = self::columnIndex($col);
+
+            if (! isset($widths[$index]) || $widths[$index] < $width) {
+                $widths[$index] = $width;
+                $changed = true;
+            }
+
+            $explicitMax = max($explicitMax, $index);
+        }
+
+        foreach ($hide as $index => $_) {
+            $widths[$index] = 0.0;
+            $changed = true;
+            $explicitMax = max($explicitMax, $index);
+        }
+
+        if (! $changed) {
+            return $sheetXml;
+        }
+
+        $rebuilt = '<cols>';
+
+        for ($i = 1; $i <= $explicitMax; $i++) {
+            if (isset($hide[$i])) {
+                $rebuilt .= '<col min="'.$i.'" max="'.$i.'" width="0" hidden="1" customWidth="1"/>';
+            } else {
+                $rebuilt .= '<col min="'.$i.'" max="'.$i.'" width="'.self::formatWidth($widths[$i] ?? 8.43).'" customWidth="1"/>';
+            }
+        }
+
+        foreach ($tails as $tail) {
+            $rebuilt .= $tail;
+        }
+
+        $rebuilt .= '</cols>';
+
+        return (string) preg_replace(
+            '/<cols\b[^>]*>.*?<\/cols>/s',
+            $rebuilt,
+            $sheetXml,
+            1
+        );
+    }
+
+    private static function formatWidth(float $width): string
+    {
+        return rtrim(rtrim(number_format((float) $width, 4, '.', ''), '0'), '.');
     }
 
     /* ------------------------------------------------------------------

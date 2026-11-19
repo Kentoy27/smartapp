@@ -226,7 +226,7 @@
     {{-- DELETE / DEACTIVATE CONFIRMATION --}}
     @if ($showConfirm)
         <div class="modal-backdrop is-open"
-             @click="self && $wire.closeConfirmDelete()"
+             @mousedown.self="$wire.closeConfirmDelete()"
              role="presentation">
             <div class="modal modal--confirmation" role="dialog" aria-modal="true" aria-labelledby="wfpTemplateDeleteTitle" @click.stop>
                 <div class="modal-head">
@@ -254,7 +254,7 @@
 
     {{-- ADD / EDIT TEMPLATE MODAL (one modal, two modes) --}}
     <div class="modal-backdrop {{ $showForm ? 'is-open' : '' }}"
-         @if ($showForm) @click="self && $wire.closeForm()" @endif
+         @if ($showForm) @mousedown.self="$wire.closeForm()" @endif
          role="presentation">
         <div class="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="wfpTemplateFormTitle" @click.stop>
             <div class="modal-head">
@@ -537,7 +537,7 @@
 
     {{-- BULK IMPORT MODAL --}}
     <div class="modal-backdrop {{ $showImport ? 'is-open' : '' }}"
-         @if ($showImport) @click="self && $wire.closeImport()" @endif
+         @if ($showImport) @mousedown.self="$wire.closeImport()" @endif
          role="presentation">
         <div class="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="wfpTemplateImportTitle" @click.stop>
             <div class="modal-head">

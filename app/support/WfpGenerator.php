@@ -303,7 +303,13 @@ class WfpGenerator
     /**
      * A stable grouping key for a mapped line, from the fields that define a
      * WFP row's grouping: section + objective + activity + account title +
-     * account code + unit + unit cost, each normalised.
+     * account code, each normalised.
+     *
+     * The resource columns (`resource_kind`, `quantity`, `unit`, `unit_cost`)
+     * are deliberately NOT part of the key. Several MEM lines may be the
+     * resources of one activity (the modal's "Resource Needed" block), and the
+     * WFP is one row per activity — the form has no resource, unit or unit-cost
+     * column, so keying on them would print the same activity twice.
      *
      * @param  array<string, mixed>  $fields
      */
@@ -315,8 +321,6 @@ class WfpGenerator
             (string) ($fields['activity_description'] ?? $fields['program_activity'] ?? ''),
             (string) ($fields['account_title'] ?? ''),
             (string) ($fields['account_code'] ?? ''),
-            (string) ($fields['unit'] ?? $fields['physical_unit'] ?? ''),
-            self::normalizeCost($fields['unit_cost'] ?? $fields['financial_unit_cost'] ?? ''),
         ];
 
         return sha1(implode('|', array_map([self::class, 'normalize'], $parts)));
@@ -520,14 +524,5 @@ class WfpGenerator
     private static function normalize(string $value): string
     {
         return strtolower(preg_replace('/[^a-z0-9]+/i', '', $value) ?? '');
-    }
-
-    private static function normalizeCost(mixed $value): string
-    {
-        if ($value === null || $value === '') {
-            return '';
-        }
-
-        return number_format((float) $value, 2, '.', '');
     }
 }

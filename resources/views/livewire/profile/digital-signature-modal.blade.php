@@ -11,7 +11,7 @@
 <div class="profile-modal-host">
     @if ($showModal)
         <div class="modal-backdrop is-open"
-             @click="self && $wire.closeModal()"
+             @mousedown.self="$wire.closeModal()"
              x-on:keydown.escape.window="$wire.closeModal()"
              role="presentation">
             <div class="modal modal--signature" role="dialog" aria-modal="true" aria-label="Electronic Signature" @click.stop>

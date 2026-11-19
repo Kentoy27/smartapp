@@ -473,20 +473,75 @@ class MemMatrixTest extends TestCase
             ->assertSet('showLineModal', true);
     }
 
-    public function test_the_add_line_modal_starts_clean_for_each_section(): void
+    public function test_a_closed_line_modal_keeps_its_draft_until_it_is_saved(): void
     {
         $sh = $this->schoolHead();
         $matrix = $this->matrixFor($sh);
 
-        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+        $component = Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
             ->call('openLineModal', 'project')
             ->set('lineForm.activity_description', 'Draft line')
+            ->call('addLineResource')
+            ->set('lineResources.0.resource_kind', 'Bond Paper A4 70 gsm')
+            ->set('lineResources.0.quantity', '10')
             ->call('closeLineModal')
             ->assertSet('showLineModal', false)
-            // Reopening forgets the closed draft rather than resurrecting it.
+            // An accidental close keeps the draft: reopening the modal shows
+            // it again, even when the button that reopened it names another
+            // section.
+            ->call('openLineModal', 'operations')
+            ->assertSet('lineSection', 'project')
+            ->assertSet('lineForm.activity_description', 'Draft line')
+            ->assertCount('lineResources', 1)
+            ->assertSet('lineResources.0.resource_kind', 'Bond Paper A4 70 gsm');
+
+        // Saving commits the draft and only then does the form start clean.
+        $component->call('saveLineFromModal')
+            ->assertHasNoErrors()
+            ->assertSet('showLineModal', false)
+            ->assertSet('lineForm', [])
+            ->assertCount('lineResources', 0);
+
+        $this->assertSame(1, MonthlyExpenditureItem::count());
+        $this->assertSame('Draft line', MonthlyExpenditureItem::firstOrFail()->activity_description);
+        $this->assertSame('project', MonthlyExpenditureItem::firstOrFail()->section);
+
+        // A brand-new editor session opens a blank form.
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix->fresh()])
             ->call('openLineModal', 'operations')
             ->assertSet('lineSection', 'operations')
-            ->assertSet('lineForm.activity_description', '');
+            ->assertSet('lineForm.activity_description', '')
+            ->assertCount('lineResources', 0);
+    }
+
+    public function test_closing_the_edit_modal_without_saving_keeps_the_line_being_edited(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        $item = $matrix->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Original',
+            'quantity' => 1,
+            'unit_cost' => 10,
+        ]);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openEditModal', 'item-1')
+            ->assertSet('editingKey', 'item-1')
+            ->assertSet('lineForm.activity_description', 'Original')
+            ->set('lineForm.activity_description', 'Revised')
+            ->call('closeLineModal')
+            ->assertSet('showLineModal', false)
+            ->assertSet('editingKey', 'item-1')
+            ->call('openLineModal')
+            ->assertSet('showLineModal', true)
+            ->assertSet('editingKey', 'item-1')
+            ->assertSet('lineForm.activity_description', 'Revised');
+
+        // Nothing was committed.
+        $this->assertSame('Original', $item->fresh()->activity_description);
     }
 
     public function test_an_existing_line_is_edited_through_the_same_modal(): void

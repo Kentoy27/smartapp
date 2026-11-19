@@ -423,7 +423,7 @@
          input + preview, the confirmation, and the finished apply's report. --}}
     <div
         class="modal-backdrop {{ $showBulk ? 'is-open' : '' }}"
-        @if ($showBulk) @click="self && $wire.closeBulk()" @endif
+        @if ($showBulk) @mousedown.self="$wire.closeBulk()" @endif
         role="presentation"
     >
         <div
@@ -798,7 +798,7 @@
 
         <div
             class="modal-backdrop is-open"
-            @click="self && $wire.closeCertifyModal()"
+            @mousedown.self="$wire.closeCertifyModal()"
             role="presentation"
         >
             <div

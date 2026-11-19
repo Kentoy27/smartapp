@@ -51,52 +51,6 @@
         ], key('wfp-plan-signoffs-'.$plan->id))
     @endif
 
-    @if (! empty($this->signatoryStatuses))
-        <section class="card wfp-signatory-statuses" aria-label="Signatory status for this WFP">
-            <div class="card-head">
-                <div class="card-title">Signatory Status</div>
-            </div>
-
-            <div class="wfp-signatory-statuses__list">
-                @foreach ($this->signatoryStatuses as $status)
-                    <div @class([
-                        'wfp-signatory-status',
-                        'wfp-signatory-status--'.($status['state'] ?? 'pending'),
-                    ])>
-                        <div class="wfp-signatory-status__header">
-                            <span class="wfp-signatory-status__label">{{ $status['label'] }}</span>
-                            <span @class([
-                                'wfp-signatory-status__badge',
-                                'wfp-signatory-status__badge--pending' => ($status['state'] ?? 'pending') === 'pending',
-                                'wfp-signatory-status__badge--checked' => ($status['state'] ?? 'pending') === 'checked',
-                                'wfp-signatory-status__badge--certified' => ($status['state'] ?? 'pending') === 'certified',
-                                'wfp-signatory-status__badge--approved' => ($status['state'] ?? 'pending') === 'approved',
-                                'wfp-signatory-status__badge--returned' => ($status['state'] ?? 'pending') === 'returned',
-                            ])>{{ $status['badge'] }}</span>
-                        </div>
-
-                        @if (($status['state'] ?? 'pending') === 'pending')
-                            <div class="wfp-signatory-status__meta">{{ $status['pending_text'] ?? 'Pending' }}</div>
-                        @else
-                            @if (! empty($status['name']))
-                                <div class="wfp-signatory-status__meta">{{ $status['name'] }}</div>
-                            @endif
-                            @if (! empty($status['position']))
-                                <div class="wfp-signatory-status__meta">{{ $status['position'] }}</div>
-                            @endif
-                            @if (! empty($status['date']))
-                                <div class="wfp-signatory-status__meta">{{ $status['date']->format('M j, Y g:i A') }}</div>
-                            @endif
-                            @if (! empty($status['remarks']))
-                                <div class="wfp-signatory-status__remarks"><strong>Remarks:</strong> {{ $status['remarks'] }}</div>
-                            @endif
-                        @endif
-                    </div>
-                @endforeach
-            </div>
-        </section>
-    @endif
-
     @if ($errorMessage)
         <div class="ac-import-error mem-banner" role="alert">
             {{ $errorMessage }}
