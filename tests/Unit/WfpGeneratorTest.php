@@ -341,4 +341,40 @@ class WfpGeneratorTest extends TestCase
         $this->assertSame([1 => 3.0], $monthlyRows[1]['physical_targets_by_month']);
         $this->assertSame([1 => 4000.0], $monthlyRows[1]['financial_targets_by_month']);
     }
+
+    public function test_same_activity_same_account_different_section_merges_into_one_row(): void
+    {
+        $this->school();
+        $matrix = $this->matrix();
+
+        // Two MEM lines with the SAME activity and account but DIFFERENT sections.
+        // They must collapse to one WFP row with the targets summed — the WFP is
+        // one row per activity, and section/objective are metadata that should not
+        // split a single activity into multiple rows.
+        $this->line($matrix, [
+            'activity_description' => 'Procurement of Drinking Utensils and Tableware for office use',
+            'account_title' => 'Office Supplies',
+            'account_code' => '5020301000',
+            'quantity' => 12,
+            'section' => 'operations',
+        ]);
+        $this->line($matrix, [
+            'activity_description' => 'Procurement of Drinking Utensils and Tableware for office use',
+            'account_title' => 'Office Supplies',
+            'account_code' => '5020301000',
+            'quantity' => 6,
+            'section' => 'project',
+        ]);
+        $plan = $this->plan();
+
+        WfpGenerator::generate($plan, $matrix);
+
+        $rows = WfpGenerator::buildExportRows($plan, monthly: false);
+
+        // One group → one account-title header row plus one data row.
+        $this->assertCount(2, $rows);
+        $this->assertSame(true, $rows[0]['__account_title__'] ?? false);
+        $this->assertEquals(18.0, (float) $rows[1]['physical_target']);
+        $this->assertEquals(4500.0, (float) $rows[1]['financial_target']);
+    }
 }

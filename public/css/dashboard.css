@@ -3309,6 +3309,17 @@ a.mem-month-tab:hover .mem-month-tab__total { color: var(--text-muted); }
 .mem-list__banner-subtotal strong { font-variant-numeric: tabular-nums; color: var(--text-strong); }
 .mem-list thead th.mem-num { text-align: right; }
 
+.mem-list__subtotal td,
+.mem-list__total td {
+    font-weight: 700;
+    border-top: 2px solid var(--border);
+    background: var(--bg-muted);
+}
+.mem-list__total td {
+    border-top-color: var(--primary);
+    font-size: 0.9375rem;
+}
+
 /* THE NARROW-SCREEN LINE: eleven printed-form columns cannot be read on a
    tablet or a phone, so below the desktop breakpoint each line becomes a
    labelled card. The column headings are hidden and every cell carries its

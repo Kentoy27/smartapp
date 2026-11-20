@@ -109,13 +109,16 @@ class MemMatrixTest extends TestCase
         $this->assertStringContainsString('Page Not Found', Livewire::actingAs($viewer)->test(MemMatrixList::class)->html());
     }
 
-    public function test_template_download_returns_a_csv_for_the_school_head(): void
+    public function test_template_download_returns_an_xlsx_for_the_school_head(): void
     {
-        $this->actingAs($this->schoolHead())
-            ->get(route('wfp.matrices.template'))
-            ->assertOk()
-            ->assertHeader('Content-Type', 'text/csv; charset=UTF-8')
-            ->assertSee('Section,Objective,Activity Description', false);
+        $response = $this->actingAs($this->schoolHead())
+            ->get(route('wfp.matrices.template'));
+
+        $response->assertOk()
+            ->assertHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            ->assertHeader('Content-Disposition', 'attachment; filename="mem-template.xlsx"');
+
+        $this->assertStringStartsWith('PK', $response->getContent());
     }
 
     // ----------------------------------------------------------- year init

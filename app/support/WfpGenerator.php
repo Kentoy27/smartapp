@@ -302,8 +302,8 @@ class WfpGenerator
 
     /**
      * A stable grouping key for a mapped line, from the fields that define a
-     * WFP row's grouping: section + objective + activity + account title +
-     * account code, each normalised.
+     * WFP row's grouping: activity + account title + account code, each
+     * normalised.
      *
      * The resource columns (`resource_kind`, `quantity`, `unit`, `unit_cost`)
      * are deliberately NOT part of the key. Several MEM lines may be the
@@ -311,13 +311,17 @@ class WfpGenerator
      * WFP is one row per activity — the form has no resource, unit or unit-cost
      * column, so keying on them would print the same activity twice.
      *
+     * `section` and `objective` are also NOT part of the key. They describe the
+     * activity but do not make it a different WFP row — two MEM lines with the
+     * same activity and account but different sections or objectives still read
+     * as one line with summed targets, matching the form's one-row-per-activity
+     * layout.
+     *
      * @param  array<string, mixed>  $fields
      */
     public static function groupKey(array $fields): string
     {
         $parts = [
-            (string) ($fields['section'] ?? ''),
-            (string) ($fields['objective'] ?? ''),
             (string) ($fields['activity_description'] ?? $fields['program_activity'] ?? ''),
             (string) ($fields['account_title'] ?? ''),
             (string) ($fields['account_code'] ?? ''),

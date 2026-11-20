@@ -253,7 +253,7 @@
                         </button>
                     @endif
 
-                    {{-- <a
+                    <a
                         href="{{ route('wfp.matrices.template') }}"
                         class="ac-import-btn"
                         download
@@ -266,7 +266,7 @@
                     <button type="button" class="ac-import-btn" wire:click="openImport">
                         <x-icon name="upload" :size="16" />
                         <span>Import CSV</span>
-                    </button> --}}
+                    </button>
                 @endif
             </div>
         </div>
@@ -1475,34 +1475,93 @@
                     </div>
 
                     <div class="table-wrap ac-import-preview">
-                        <table class="data-table">
+                        {{-- Drawn like the printed DepEd form (Image #4): a month
+                             band, section banner rows, Resources Needed as a
+                             sub-column group, line totals and a Subtotal/TOTAL
+                             row — instead of the flat one-column-per-field grid. --}}
+                        <table class="data-table mem-list">
+                            <colgroup>
+                                <col class="mem-col mem-col--objective">
+                                <col class="mem-col mem-col--activity">
+                                <col class="mem-col mem-col--kind">
+                                <col class="mem-col mem-col--quantity">
+                                <col class="mem-col mem-col--unit">
+                                <col class="mem-col mem-col--unit-cost">
+                                <col class="mem-col mem-col--total">
+                                <col class="mem-col mem-col--account-title">
+                                <col class="mem-col mem-col--account-code">
+                            </colgroup>
+                            {{-- Month band, as on the printed form --}}
+                            <tr class="mem-list__banner">
+                                <td colspan="9">
+                                    <div class="mem-list__banner-bar">
+                                        <span class="mem-list__banner-title">
+                                            MONTH: {{ strtoupper($matrix->periodLabel()) }}
+                                        </span>
+                                    </div>
+                                </td>
+                            </tr>
                             <thead>
                                 <tr>
-                                    <th scope="col">Row</th>
-                                    <th scope="col">Section</th>
-                                    <th scope="col">Activity</th>
-                                    <th scope="col">Qty</th>
-                                    <th scope="col">Unit Cost</th>
-                                    <th scope="col">Status</th>
+                                    <th scope="col">Objectives</th>
+                                    <th scope="col">Project/<wbr>Activity/<wbr>Expenditure</th>
+                                    <th scope="colgroup" colspan="4">Resources Needed</th>
+                                    <th scope="col" class="mem-num">Total Estimated Cost</th>
+                                    <th scope="col">Account Title</th>
+                                    <th scope="col">Account Code</th>
+                                </tr>
+                                <tr>
+                                    <th scope="col" class="mem-list__subhead" aria-hidden="true"></th>
+                                    <th scope="col" class="mem-list__subhead" aria-hidden="true"></th>
+                                    <th scope="col">Kind</th>
+                                    <th scope="col" class="mem-num mem-list__quantity">Quantity</th>
+                                    <th scope="col">Unit</th>
+                                    <th scope="col" class="mem-num">Unit Cost</th>
+                                    <th scope="col" class="mem-list__subhead" aria-hidden="true"></th>
+                                    <th scope="col" class="mem-list__subhead" aria-hidden="true"></th>
+                                    <th scope="col" class="mem-list__subhead" aria-hidden="true"></th>
                                 </tr>
                             </thead>
                             <tbody>
-                                @foreach ($importRows as $row)
-                                    <tr wire:key="mem-import-row-{{ $row['line'] }}" @class(['ac-import-row--bad' => ! $row['valid']])>
-                                        <td>{{ $row['line'] }}</td>
-                                        <td>{{ $row['data']['section'] ?: '—' }}</td>
-                                        <td><span class="cell-strong">{{ $row['data']['activity_description'] ?: '—' }}</span></td>
-                                        <td>{{ $row['data']['quantity'] ?? '—' }}</td>
-                                        <td>{{ $row['data']['unit_cost'] ?? '—' }}</td>
-                                        <td>
-                                            @if ($row['valid'])
-                                                <span class="badge">Ready</span>
-                                            @else
-                                                <span class="badge badge-muted" title="{{ implode('; ', $row['errors']) }}">{{ implode('; ', $row['errors']) }}</span>
-                                            @endif
-                                        </td>
-                                    </tr>
+                                @php($grandTotal = 0.0)
+                                @foreach (['operations' => 'Operations', 'project' => 'Project'] as $sectionKey => $sectionShort)
+                                    @php($sectionRows = array_values(array_filter($importRows, fn (array $row): bool => (string) (($row['data']['section'] ?? '') === $sectionKey))))
+                                    @if ($sectionRows !== [])
+                                        <tr class="mem-list__banner">
+                                            <td colspan="9">{{ $sectionShort.'-Related Expenditures' }}</td>
+                                        </tr>
+                                        @php($sectionTotal = 0.0)
+                                        @foreach ($sectionRows as $row)
+                                            @php($data = $row['data'])
+                                            @php($qty = is_numeric($data['quantity'] ?? null) ? (float) $data['quantity'] : 0.0)
+                                            @php($cost = is_numeric($data['unit_cost'] ?? null) ? (float) $data['unit_cost'] : 0.0)
+                                            @php($lineTotal = round($qty * $cost, 2))
+                                            @php($sectionTotal += $lineTotal)
+                                            @php($grandTotal += $lineTotal)
+                                            <tr wire:key="mem-import-row-{{ $row['line'] }}" @class(['ac-import-row--bad' => ! $row['valid']])>
+                                                <td data-label="Objectives">{{ $data['objective'] ?: '—' }}</td>
+                                                <td data-label="Project/Activity/Expenditure"><span class="cell-strong">{{ $data['activity_description'] ?: '—' }}</span></td>
+                                                <td data-label="Kind">{{ $data['resource_kind'] ?: '—' }}</td>
+                                                <td class="mem-num" data-label="Quantity">{{ $data['quantity'] ?: '—' }}</td>
+                                                <td data-label="Unit">{{ $data['unit'] ?: '—' }}</td>
+                                                <td class="mem-num" data-label="Unit Cost">{{ $data['unit_cost'] !== null ? number_format((float) $data['unit_cost'], 2) : '—' }}</td>
+                                                <td class="mem-num mem-linetotal--cell" data-label="Total Estimated Cost">{{ number_format($lineTotal, 2) }}</td>
+                                                <td data-label="Account Title">{{ $data['account_title'] ?: '—' }}</td>
+                                                <td data-label="Account Code"><span class="ac-code">{{ $data['account_code'] ?: '—' }}</span></td>
+                                            </tr>
+                                        @endforeach
+                                        {{-- Section subtotal --}}
+                                        <tr class="mem-list__subtotal">
+                                            <td colspan="8">Subtotal</td>
+                                            <td class="mem-num">{{ number_format($sectionTotal, 2) }}</td>
+                                        </tr>
+                                    @endif
                                 @endforeach
+                                {{-- Monthly total --}}
+                                <tr class="mem-list__total">
+                                    <td colspan="8">TOTAL:</td>
+                                    <td class="mem-num">{{ number_format($grandTotal, 2) }}</td>
+                                </tr>
                             </tbody>
                         </table>
                     </div>

@@ -23,6 +23,7 @@ use App\Models\WfpImportLog;
 use App\Models\WfpPlan;
 use App\Models\WfpSubmission;
 use App\Support\MemDuplicateChecker;
+use App\Support\MemTemplateExporter;
 use App\Support\MemXlsxExporter;
 use App\Support\MemYearInitializer;
 use App\Support\MemYearXlsxExporter;
@@ -1145,20 +1146,17 @@ Route::middleware(['auth', 'password.change.required'])->group(function () {
         return view('wfp.matrices.index');
     })->name('wfp.matrices.index');
 
-    // The CSV template is an authoring aid — it exists to bring new lines
+    // The template is an authoring aid — it exists to bring new lines
     // into a matrix — so it follows the write gate, not the read one.
+    // Delivered as .xlsx (not CSV) so columns open auto-fitted in Excel and
+    // the account code stays as text instead of scientific notation.
     Route::get('/wfp/matrices/template', function () {
         $user = Auth::user();
         abort_unless($user instanceof User && $user->canManageWfp(), 404);
 
-        $csv = implode("\n", [
-            'Section,Objective,Activity Description,Resource Kind,Quantity,Unit,Unit Cost,Account Title,Account Code,Funding Source,Organizational Classification,Activity MOVs',
-            'operations,Improved learner outcomes,Procure office supplies,MOOE,10,ream,250.00,Office Supplies Expenses,5020301000,MOOE,School,PO and RIS',
-        ]) . "\n";
-
-        return response($csv)
-            ->header('Content-Type', 'text/csv; charset=UTF-8')
-            ->header('Content-Disposition', 'attachment; filename="mem-template.csv"');
+        return response(MemTemplateExporter::bytes())
+            ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            ->header('Content-Disposition', 'attachment; filename="'.MemTemplateExporter::downloadName().'"');
     })->name('wfp.matrices.template');
 
     // The whole SELECTED YEAR as one workbook: twelve worksheets (JAN…DEC),
