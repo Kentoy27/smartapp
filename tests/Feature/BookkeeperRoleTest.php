@@ -702,6 +702,28 @@ class BookkeeperRoleTest extends TestCase
         $this->assertSame(0, WfpReportCheck::count());
     }
 
+    public function test_the_check_stays_on_the_report_until_the_lines_change(): void
+    {
+        $bookkeeper = $this->bookkeeper();
+        // The head works the bookkeeper's base school — on its roster.
+        $head = $this->schoolHead($bookkeeper->school);
+        $this->line($head, 3);
+
+        Livewire::actingAs($bookkeeper)
+            ->test(BudgetLineItemAllotment::class, ['schoolId' => (string) $head->school_id])
+            ->call('check');
+
+        $this->assertSame(1, WfpReportCheck::count());
+
+        // Reloading the page keeps the check: nothing about the lines changed.
+        $component = Livewire::actingAs($bookkeeper)
+            ->test(BudgetLineItemAllotment::class, ['schoolId' => (string) $head->school_id]);
+
+        $this->assertNotNull($component->instance()->checking);
+        $this->assertSame('checked', $component->instance()->signatoryStatuses[0]['state']);
+        $this->assertSame('Checked', $component->instance()->signatoryStatuses[0]['badge']);
+    }
+
     public function test_writing_the_lines_clears_the_check(): void
     {
         $bookkeeper = $this->bookkeeper();
@@ -715,13 +737,86 @@ class BookkeeperRoleTest extends TestCase
 
         $this->assertSame(1, WfpReportCheck::count());
 
-        // The SH writes the matrix: any structural edit auto-saves, which
-        // clears the year's check.
+        // The SH adds a real line to the matrix: the check no longer
+        // describes the year's lines, so it is cleared.
+        Livewire::actingAs($head)
+            ->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openLineModal')
+            ->set('lineForm.activity_description', 'Procure more supplies')
+            ->set('lineForm.quantity', '5')
+            ->set('lineForm.unit_cost', '250')
+            ->call('saveLineFromModal');
+
+        $this->assertSame(0, WfpReportCheck::count());
+    }
+
+    public function test_adding_a_blank_row_does_not_clear_the_check(): void
+    {
+        $bookkeeper = $this->bookkeeper();
+        // The head works the bookkeeper's base school — on its roster.
+        $head = $this->schoolHead($bookkeeper->school);
+        $matrix = $this->line($head, 3)->matrix;
+
+        Livewire::actingAs($bookkeeper)
+            ->test(BudgetLineItemAllotment::class, ['schoolId' => (string) $head->school_id])
+            ->call('check');
+
+        $this->assertSame(1, WfpReportCheck::count());
+
+        // A blank row the user never fills writes no lines: nothing about the
+        // account titles and codes changed, so the check stands.
         Livewire::actingAs($head)
             ->test(MemEditor::class, ['matrix' => $matrix])
             ->call('addRow');
 
-        $this->assertSame(0, WfpReportCheck::count());
+        $this->assertSame(1, WfpReportCheck::count());
+    }
+
+    public function test_reordering_the_lines_does_not_clear_the_check(): void
+    {
+        $bookkeeper = $this->bookkeeper();
+        // The head works the bookkeeper's base school — on its roster.
+        $head = $this->schoolHead($bookkeeper->school);
+        $matrix = MonthlyExpenditureMatrix::create([
+            'school_id' => $head->school_id,
+            'year' => 2026,
+            'month' => 3,
+            'status' => MonthlyExpenditureMatrix::STATUS_DRAFT,
+            'version' => 1,
+            'created_by' => $head->id,
+        ]);
+        $matrix->items()->create([
+            'position' => 1,
+            'section' => MonthlyExpenditureMatrix::SECTION_OPERATIONS,
+            'activity_description' => 'Procure supplies',
+            'quantity' => 10,
+            'unit_cost' => 250,
+            'account_title' => 'Office Supplies Expenses',
+            'account_code' => '5020301000',
+        ]);
+        $second = $matrix->items()->create([
+            'position' => 2,
+            'section' => MonthlyExpenditureMatrix::SECTION_OPERATIONS,
+            'activity_description' => 'Print modules',
+            'quantity' => 5,
+            'unit_cost' => 400,
+            'account_title' => 'Printing Expenses',
+            'account_code' => '5020301000',
+        ]);
+
+        Livewire::actingAs($bookkeeper)
+            ->test(BudgetLineItemAllotment::class, ['schoolId' => (string) $head->school_id])
+            ->call('check');
+
+        $this->assertSame(1, WfpReportCheck::count());
+
+        // Reordering the two lines changes no account title or code: the check
+        // still describes the year's lines, so it stands.
+        Livewire::actingAs($head)
+            ->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('reorderRow', 'item-'.$second->id, 0);
+
+        $this->assertSame(1, WfpReportCheck::count());
     }
 
     public function test_deleting_a_matrix_clears_the_check(): void

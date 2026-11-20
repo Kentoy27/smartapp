@@ -1760,14 +1760,11 @@ class MemEditor extends Component
         // warnIfOverAllotment()).
         $beforeConsumed = $this->yearConsumed();
 
-        // Whether the report's check has anything to clear: the lines are
-        // about to be rewritten, so a check that covered them no longer
-        // describes what the report will show.
-        $checkExisted = WfpReportCheck::query()
-            ->where('school_id', $matrix->school_id)
-            ->where('school_division', $matrix->schoolDivision())
-            ->where('year', $matrix->year)
-            ->exists();
+        // The meaningful content of this year's lines before the write: the
+        // Bookkeeper's check is cleared only when the write actually changed
+        // the lines (account titles/codes and the line set) — not on a pure
+        // reorder or a blank-row add that persists nothing.
+        $before = $this->lineContentSignatures($matrix);
 
         DB::transaction(function () use ($matrix): void {
             $position = 0;
@@ -1800,10 +1797,12 @@ class MemEditor extends Component
             $matrix->bumpVersion();
         });
 
-        // The year's lines changed, so the Bookkeeper's check of the account
-        // titles and codes no longer stands for what the report shows; it is
-        // cleared and must be given again (see WfpReportCheck).
-        WfpReportCheck::clearFor((int) $matrix->school_id, (int) $matrix->year, $matrix->schoolDivision());
+        // Only clear the check when the persisted lines actually changed: a
+        // check about account titles and codes still describes lines that were
+        // merely reordered, and a blank-row add wrote no lines at all.
+        if ($this->lineContentSignatures($matrix) !== $before) {
+            WfpReportCheck::clearFor((int) $matrix->school_id, (int) $matrix->year, $matrix->schoolDivision());
+        }
 
         $fresh = MonthlyExpenditureMatrix::findOrFail($matrix->id);
         $this->loadedVersion = (int) $fresh->version;
@@ -1812,6 +1811,37 @@ class MemEditor extends Component
         $this->warnIfOverAllotment($beforeConsumed);
 
         return true;
+    }
+
+    /**
+     * The stored lines of this matrix, as an order-independent signature of
+     * their meaningful content (account titles/codes and the line set).
+     * Position and section are excluded: reordering or moving a line does not
+     * change what a check of the account titles and codes covered.
+     *
+     * @return array<int, array>
+     */
+    private function lineContentSignatures(MonthlyExpenditureMatrix $matrix): array
+    {
+        return MonthlyExpenditureItem::where('matrix_id', $matrix->id)
+            ->orderBy('id')
+            ->get()
+            ->map(fn (MonthlyExpenditureItem $item): array => [
+                $item->account_title,
+                $item->account_code,
+                $item->account_classification_id,
+                $item->activity_description,
+                $item->resource_kind,
+                $item->quantity,
+                $item->unit_cost,
+                $item->funding_source,
+                $item->organizational_classification,
+                $item->activity_movs,
+                $item->major_output,
+                $item->performance_indicator,
+            ])
+            ->values()
+            ->all();
     }
 
     /**
