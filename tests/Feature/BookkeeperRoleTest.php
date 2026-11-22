@@ -286,9 +286,6 @@ class BookkeeperRoleTest extends TestCase
             ->assertSee('WFP')
             ->assertSee('Monthly Expenditure')
             ->assertSee('Per Line Item Expenditure')
-            // The generated plan, read-only: the School Head's Excel-based
-            // generation, seen from the Bookkeeper's side.
-            ->assertSee('WFP Preview')
             // The Budget-only destinations are not the Bookkeeper's…
             ->assertDontSee('Work & Financial Plan')
             ->assertDontSee('School Allotments')
@@ -311,6 +308,25 @@ class BookkeeperRoleTest extends TestCase
         $this->actingAs($bookkeeper)->get(route('wfp.matrices.index'))->assertOk()->assertSee('Monthly Expenditure');
         $this->actingAs($bookkeeper)->get(route('wfp.lineitems.index'))->assertOk()->assertSee('Per Line Item Expenditure');
         $this->actingAs($bookkeeper)->get(route('budget.allotments.index'))->assertNotFound();
+    }
+
+    public function test_a_bookkeepers_dashboard_lists_its_assigned_schools(): void
+    {
+        $bookkeeper = $this->bookkeeper();
+        $assigned = $this->school();
+        $outside = $this->school();
+        $bookkeeper->syncAssignedSchools([$bookkeeper->school_id, $assigned->id]);
+
+        // The dashboard lists exactly the schools on the assignment list —
+        // each as a link to that school's per-line-item report — and never a
+        // school outside it.
+        $this->actingAs($bookkeeper)
+            ->get(route('home'))
+            ->assertOk()
+            ->assertSee('Your schools')
+            ->assertSee($bookkeeper->school->name)
+            ->assertSee($assigned->name)
+            ->assertDontSee($outside->name);
     }
 
     public function test_a_bookkeeper_previews_the_generated_wfp_of_its_assigned_schools_only(): void
@@ -743,6 +759,8 @@ class BookkeeperRoleTest extends TestCase
             ->test(MemEditor::class, ['matrix' => $matrix])
             ->call('openLineModal')
             ->set('lineForm.activity_description', 'Procure more supplies')
+            ->set('lineForm.objective', 'More supplies for operations')
+            ->set('lineForm.account_title', 'Office Supplies Expenses')
             ->set('lineForm.quantity', '5')
             ->set('lineForm.unit_cost', '250')
             ->call('saveLineFromModal');

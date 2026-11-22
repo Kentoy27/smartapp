@@ -87,6 +87,55 @@ class MemMatrixTest extends TestCase
             ->assertOk();
     }
 
+    // ---------------------------------------------------------------- account code correction stamp
+
+    private function matrixItem(MonthlyExpenditureMatrix $matrix): MonthlyExpenditureItem
+    {
+        return $matrix->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Procure supplies',
+            'account_title' => 'Office Supplies Expenses',
+            'account_code' => '5020301000',
+        ]);
+    }
+
+    public function test_a_bookkeeper_matrix_edit_stamps_the_account_code_correction(): void
+    {
+        $head = $this->schoolHead('Stamped School');
+        $matrix = $this->matrixFor($head);
+        $item = $this->matrixItem($matrix);
+
+        $bk = User::factory()->create(['role' => 'bookkeeper', 'is_superadmin' => false]);
+        $bk->syncAssignedSchools([$head->school_id]);
+
+        Livewire::actingAs($bk)
+            ->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openAccountCodeEdit', 'item-'.$item->id)
+            ->set('accountCodeForm', '5020301001')
+            ->call('saveAccountCodeEdit');
+
+        $this->assertTrue($item->fresh()->wasCorrectedByBookkeeper());
+        $this->assertSame($bk->id, $item->fresh()->corrected_by);
+        $this->assertNotNull($item->fresh()->corrected_at);
+    }
+
+    public function test_a_school_head_matrix_edit_is_not_stamped_as_bookkeeper_correction(): void
+    {
+        $head = $this->schoolHead('SH Stamp School');
+        $matrix = $this->matrixFor($head);
+        $item = $this->matrixItem($matrix);
+
+        Livewire::actingAs($head)
+            ->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openAccountCodeEdit', 'item-'.$item->id)
+            ->set('accountCodeForm', '5020301001')
+            ->call('saveAccountCodeEdit');
+
+        $this->assertNull($item->fresh()->corrected_by);
+        $this->assertFalse($item->fresh()->wasCorrectedByBookkeeper());
+    }
+
     public function test_matrix_open_links_navigate_directly_to_the_editor(): void
     {
         $sh = $this->schoolHead();
@@ -392,8 +441,12 @@ class MemMatrixTest extends TestCase
             ->assertSet('showLineModal', true)
             ->assertSet('lineSection', 'project')
             ->set('lineForm.activity_description', 'Procure supplies')
+            ->set('lineForm.objective', 'Office supplies for learners')
+            ->set('lineForm.resource_kind', 'MOOE')
             ->set('lineForm.quantity', '10')
+            ->set('lineForm.unit', 'piece')
             ->set('lineForm.unit_cost', '250')
+            ->set('lineForm.account_title', 'Office Supplies Expenses')
             ->call('saveLineFromModal')
             ->assertSet('showLineModal', false)
             ->assertHasNoErrors();
@@ -440,6 +493,11 @@ class MemMatrixTest extends TestCase
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
             ->call('openLineModal')
             ->set('lineForm.activity_description', 'Conduct reading camp')
+            ->set('lineForm.objective', 'Better reading')
+            ->set('lineForm.resource_kind', 'MOOE')
+            ->set('lineForm.quantity', '1')
+            ->set('lineForm.unit_cost', '100')
+            ->set('lineForm.account_title', 'Other Maintenance and Operating Expenses')
             ->set('lineForm.major_output', 'Reading camp conducted')
             ->set('lineForm.performance_indicator', '80% of learners attend')
             ->set('lineForm.activity_movs', 'Attendance sheet, photos')
@@ -476,6 +534,100 @@ class MemMatrixTest extends TestCase
             ->assertSet('showLineModal', true);
     }
 
+    public function test_the_add_line_modal_requires_an_objective(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openLineModal')
+            ->set('lineForm.activity_description', 'Procure supplies')
+            ->set('lineForm.resource_kind', 'MOOE')
+            ->set('lineForm.quantity', '5')
+            ->set('lineForm.account_title', 'Office Supplies Expenses')
+            ->call('saveLineFromModal')
+            ->assertHasErrors(['lineForm.objective'])
+            ->assertSet('showLineModal', true);
+
+        $this->assertSame(0, MonthlyExpenditureItem::count());
+    }
+
+    public function test_the_add_line_modal_requires_a_resource_needed_row(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openLineModal')
+            ->set('lineForm.activity_description', 'Procure supplies')
+            ->set('lineForm.objective', 'Stocked office')
+            ->set('lineForm.account_title', 'Office Supplies Expenses')
+            ->call('saveLineFromModal')
+            ->assertHasErrors(['lineForm.resource_kind'])
+            ->assertSet('showLineModal', true);
+
+        $this->assertSame(0, MonthlyExpenditureItem::count());
+    }
+
+    public function test_the_add_line_modal_requires_an_account_title_or_code(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openLineModal')
+            ->set('lineForm.activity_description', 'Procure supplies')
+            ->set('lineForm.objective', 'Stocked office')
+            ->set('lineForm.resource_kind', 'MOOE')
+            ->set('lineForm.quantity', '5')
+            ->call('saveLineFromModal')
+            ->assertHasErrors(['lineForm.account_title'])
+            ->assertSet('showLineModal', true);
+
+        $this->assertSame(0, MonthlyExpenditureItem::count());
+    }
+
+    public function test_the_add_line_modal_accepts_an_account_code_without_a_title(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openLineModal')
+            ->set('lineForm.activity_description', 'Procure supplies')
+            ->set('lineForm.objective', 'Stocked office')
+            ->set('lineForm.resource_kind', 'MOOE')
+            ->set('lineForm.quantity', '5')
+            ->set('lineForm.account_code', '5020301000')
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors()
+            ->assertSet('showLineModal', false);
+
+        $item = MonthlyExpenditureItem::firstOrFail();
+        $this->assertSame('5020301000', $item->account_code);
+        $this->assertNull($item->account_title);
+    }
+
+    public function test_the_add_line_modal_saves_when_objective_resource_and_account_are_filled(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openLineModal')
+            ->set('lineForm.activity_description', 'Procure supplies')
+            ->set('lineForm.objective', 'Stocked office')
+            ->set('lineForm.resource_kind', 'MOOE')
+            ->set('lineForm.quantity', '5')
+            ->set('lineForm.unit_cost', '100')
+            ->set('lineForm.account_title', 'Office Supplies Expenses')
+            ->call('saveLineFromModal')
+            ->assertHasNoErrors()
+            ->assertSet('showLineModal', false);
+
+        $this->assertSame(1, MonthlyExpenditureItem::count());
+    }
+
     public function test_a_closed_line_modal_keeps_its_draft_until_it_is_saved(): void
     {
         $sh = $this->schoolHead();
@@ -484,6 +636,8 @@ class MemMatrixTest extends TestCase
         $component = Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
             ->call('openLineModal', 'project')
             ->set('lineForm.activity_description', 'Draft line')
+            ->set('lineForm.objective', 'Draft objective')
+            ->set('lineForm.account_title', 'Office Supplies Expenses')
             ->call('addLineResource')
             ->set('lineResources.0.resource_kind', 'Bond Paper A4 70 gsm')
             ->set('lineResources.0.quantity', '10')
@@ -571,8 +725,10 @@ class MemMatrixTest extends TestCase
             // The modal opens pre-filled with the line's current values.
             ->assertSet('lineForm.activity_description', 'Old description')
             ->set('lineForm.activity_description', 'New description')
+            ->set('lineForm.objective', 'Revised objective')
             ->set('lineForm.quantity', '4')
             ->set('lineForm.unit_cost', '25')
+            ->set('lineForm.account_title', 'Office Supplies Expenses')
             // Editing through the modal is a structural mutation: it
             // auto-saves the edit.
             ->call('saveLineFromModal')
@@ -590,7 +746,245 @@ class MemMatrixTest extends TestCase
         $this->assertEquals(100.0, (float) $item->calculated_total);
     }
 
-    // ---------------------------------------------------- multiple resources
+    // ---------------------------------------------------- account code only edit
+
+    public function test_the_account_code_edit_modal_opens_with_the_current_code(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        $item = $matrix->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Procure supplies',
+            'account_code' => '5020301000',
+            'account_title' => 'Office Supplies Expenses',
+            'quantity' => 1,
+            'unit_cost' => 10,
+        ]);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openAccountCodeEdit', 'item-'.$item->id)
+            ->assertSet('accountCodeEditingKey', 'item-'.$item->id)
+            ->assertSet('accountCodeForm', '5020301000');
+    }
+
+    public function test_saving_the_account_code_changes_only_the_code(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        $item = $matrix->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Procure supplies',
+            'account_code' => '5020301000',
+            'account_title' => 'Office Supplies Expenses',
+            'quantity' => 1,
+            'unit_cost' => 10,
+        ]);
+
+        $versionBefore = $matrix->version;
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openAccountCodeEdit', 'item-'.$item->id)
+            ->set('accountCodeForm', '5020302000')
+            ->call('saveAccountCodeEdit')
+            ->assertHasNoErrors()
+            ->assertSet('accountCodeEditingKey', null)
+            ->assertSet('accountCodeForm', '');
+
+        $this->assertSame('5020302000', $item->fresh()->account_code);
+        // Everything else is untouched.
+        $this->assertSame('Office Supplies Expenses', $item->fresh()->account_title);
+        $this->assertSame(1, (int) $item->fresh()->quantity);
+        $this->assertEquals(10, (float) $item->fresh()->unit_cost);
+        // The matrix version advances.
+        $this->assertSame($versionBefore + 1, $matrix->fresh()->version);
+    }
+
+    public function test_clearing_the_account_code_stores_null(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        $item = $matrix->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Procure supplies',
+            'account_code' => '5020301000',
+            'quantity' => 1,
+            'unit_cost' => 10,
+        ]);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openAccountCodeEdit', 'item-'.$item->id)
+            ->set('accountCodeForm', '')
+            ->call('saveAccountCodeEdit')
+            ->assertHasNoErrors();
+
+        $this->assertNull($item->fresh()->account_code);
+    }
+
+    public function test_only_the_owning_school_head_can_edit_the_account_code(): void
+    {
+        $owner = $this->schoolHead('School A');
+        $matrix = $this->matrixFor($owner);
+
+        $item = $matrix->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Procure supplies',
+            'account_code' => '5020301000',
+            'quantity' => 1,
+            'unit_cost' => 10,
+        ]);
+
+        Livewire::actingAs($owner)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openAccountCodeEdit', 'item-'.$item->id)
+            ->set('accountCodeForm', '5020302000')
+            ->call('saveAccountCodeEdit')
+            ->assertHasNoErrors()
+            ->assertSet('accountCodeEditingKey', null)
+            ->assertSet('accountCodeForm', '');
+
+        $this->assertSame('5020302000', $item->fresh()->account_code);
+    }
+
+    public function test_a_viewer_cannot_open_the_account_code_edit_modal(): void
+    {
+        $viewer = User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]);
+        $sh = $this->schoolHead('School A');
+        $matrix = $this->matrixFor($sh);
+
+        $item = $matrix->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Procure supplies',
+            'account_code' => '5020301000',
+            'quantity' => 1,
+            'unit_cost' => 10,
+        ]);
+
+        $html = Livewire::actingAs($viewer)->test(MemEditor::class, ['matrix' => $matrix])
+            ->html();
+
+        $this->assertStringContainsString('Page Not Found', $html);
+        $this->assertSame('5020301000', $item->fresh()->account_code);
+    }
+
+    public function test_closing_the_account_code_modal_without_saving_keeps_the_code(): void
+    {
+        $sh = $this->schoolHead();
+        $matrix = $this->matrixFor($sh);
+
+        $item = $matrix->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Procure supplies',
+            'account_code' => '5020301000',
+            'quantity' => 1,
+            'unit_cost' => 10,
+        ]);
+
+        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openAccountCodeEdit', 'item-'.$item->id)
+            ->set('accountCodeForm', '9999999999')
+            ->call('closeAccountCodeEdit')
+            ->assertSet('accountCodeEditingKey', null)
+            ->assertSet('accountCodeForm', '');
+
+        // Nothing was committed.
+        $this->assertSame('5020301000', $item->fresh()->account_code);
+    }
+
+    public function test_a_bookkeeper_can_edit_account_code_for_rostered_school(): void
+    {
+        $school = School::create([
+            'district_id' => District::create(['name' => 'Bookkeeper District'])->id,
+            'name' => 'Bookkeeper School',
+            'school_id' => 'BK-001',
+        ]);
+
+        $bookkeeper = User::factory()->create([
+            'role' => 'bookkeeper',
+            'is_superadmin' => false,
+            'school_id' => $school->id,
+        ]);
+        $bookkeeper->syncAssignedSchools([$school->id]);
+
+        $matrix = MonthlyExpenditureMatrix::create([
+            'school_id' => $school->id,
+            'year' => 2026,
+            'month' => 7,
+            'status' => MonthlyExpenditureMatrix::STATUS_DRAFT,
+            'version' => 1,
+            'created_by' => $bookkeeper->id,
+        ]);
+
+        $item = $matrix->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Procure supplies',
+            'account_code' => '5020301000',
+            'quantity' => 1,
+            'unit_cost' => 10,
+        ]);
+
+        Livewire::actingAs($bookkeeper)->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openAccountCodeEdit', 'item-'.$item->id)
+            ->assertSet('accountCodeEditingKey', 'item-'.$item->id)
+            ->set('accountCodeForm', '5020302000')
+            ->call('saveAccountCodeEdit')
+            ->assertHasNoErrors();
+
+        $this->assertSame('5020302000', $item->fresh()->account_code);
+    }
+
+    public function test_a_bookkeeper_cannot_edit_account_code_for_unrostered_school(): void
+    {
+        $rosteredSchool = School::create([
+            'district_id' => District::create(['name' => 'Bookkeeper District'])->id,
+            'name' => 'Bookkeeper School',
+            'school_id' => 'BK-001',
+        ]);
+        $otherSchool = School::create([
+            'district_id' => District::create(['name' => 'Other District'])->id,
+            'name' => 'Other School',
+            'school_id' => 'BK-002',
+        ]);
+
+        $bookkeeper = User::factory()->create([
+            'role' => 'bookkeeper',
+            'is_superadmin' => false,
+            'school_id' => $rosteredSchool->id,
+        ]);
+        $bookkeeper->syncAssignedSchools([$rosteredSchool->id]);
+
+        $matrix = MonthlyExpenditureMatrix::create([
+            'school_id' => $otherSchool->id,
+            'year' => 2026,
+            'month' => 7,
+            'status' => MonthlyExpenditureMatrix::STATUS_DRAFT,
+            'version' => 1,
+            'created_by' => $bookkeeper->id,
+        ]);
+
+        $item = $matrix->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'Procure supplies',
+            'account_code' => '5020301000',
+            'quantity' => 1,
+            'unit_cost' => 10,
+        ]);
+
+        $html = Livewire::actingAs($bookkeeper)->test(MemEditor::class, ['matrix' => $matrix])
+            ->html();
+
+        $this->assertStringContainsString('Page Not Found', $html);
+        $this->assertSame('5020301000', $item->fresh()->account_code);
+    }
 
     public function test_the_add_line_modal_can_encode_several_resources_at_once(): void
     {
@@ -605,6 +999,8 @@ class MemMatrixTest extends TestCase
             ->set('lineForm.quantity', '85')
             ->set('lineForm.unit', 'reams')
             ->set('lineForm.unit_cost', '250')
+            ->set('lineForm.objective', 'Stocked office')
+            ->set('lineForm.account_title', 'Office Supplies Expenses')
             ->call('addLineResource')
             ->assertCount('lineResources', 1)
             // The extra row's money fields are live, so its own total follows.
@@ -647,6 +1043,8 @@ class MemMatrixTest extends TestCase
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
             ->call('openLineModal')
             ->set('lineForm.activity_description', 'Procure office supplies')
+            ->set('lineForm.objective', 'Stocked office')
+            ->set('lineForm.account_title', 'Office Supplies Expenses')
             // The primary row is left empty; the first extra row carries the
             // resource, and a second extra row is never filled in.
             ->call('addLineResource')
@@ -679,6 +1077,8 @@ class MemMatrixTest extends TestCase
             ->set('lineForm.quantity', '85')
             ->set('lineForm.unit', 'reams')
             ->set('lineForm.unit_cost', '250')
+            ->set('lineForm.objective', 'Stocked office')
+            ->set('lineForm.account_title', 'Office Supplies Expenses')
             ->call('addLineResource')
             ->set('lineResources.0.resource_kind', 'Ballpen 0.75 Black')
             ->set('lineResources.0.quantity', '68')
@@ -715,6 +1115,8 @@ class MemMatrixTest extends TestCase
             ->set('lineForm.resource_kind', 'Bond Paper A4 70 gsm')
             ->set('lineForm.quantity', '85')
             ->set('lineForm.unit_cost', '250')
+            ->set('lineForm.objective', 'Stocked office')
+            ->set('lineForm.account_title', 'Office Supplies Expenses')
             ->set('lineRepeated', 'yes')
             ->set('lineMonths', [1, 2])
             ->call('saveLineFromModal')
@@ -814,6 +1216,11 @@ class MemMatrixTest extends TestCase
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
             ->call('openLineModal')
             ->set('lineForm.activity_description', 'Procure office supplies')
+            ->set('lineForm.objective', 'Office supplies for learners')
+            ->set('lineForm.resource_kind', 'MOOE')
+            ->set('lineForm.quantity', '1')
+            ->set('lineForm.unit_cost', '100')
+            ->set('lineForm.account_title', 'Office Supplies Expenses')
             // Even a stale month selection cannot make a "No" line write
             // beyond the month being edited.
             ->set('lineMonths', [1, 2])
@@ -848,6 +1255,8 @@ class MemMatrixTest extends TestCase
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
             ->call('openLineModal')
             ->set('lineForm.activity_description', 'Monthly internet')
+            ->set('lineForm.objective', 'Monthly connectivity')
+            ->set('lineForm.account_title', 'Internet Expenses')
             ->set('lineForm.resource_kind', 'MOOE')
             ->set('lineForm.quantity', '1')
             ->set('lineForm.unit_cost', '1500')
@@ -886,6 +1295,9 @@ class MemMatrixTest extends TestCase
             // is still the only path that creates months.
             ->assertSee('No matrix yet — add the year first')
             ->set('lineForm.activity_description', 'Monthly internet')
+            ->set('lineForm.objective', 'Monthly connectivity')
+            ->set('lineForm.resource_kind', 'MOOE')
+            ->set('lineForm.account_title', 'Internet Expenses')
             ->set('lineMonths', [1, 2])
             ->call('saveLineFromModal')
             ->assertHasErrors(['lineMonths'])
@@ -912,6 +1324,10 @@ class MemMatrixTest extends TestCase
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
             ->call('openLineModal')
             ->set('lineForm.activity_description', 'Monthly internet')
+            ->set('lineForm.objective', 'Monthly connectivity')
+            ->set('lineForm.resource_kind', 'MOOE')
+            ->set('lineForm.unit_cost', '1500')
+            ->set('lineForm.account_title', 'Internet Expenses')
             ->set('lineRepeated', 'yes')
             ->set('lineMonths', [2])
             ->call('saveLineFromModal')
@@ -987,6 +1403,8 @@ class MemMatrixTest extends TestCase
 
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
             ->call('openEditModal', 'item-'.$jan->id)
+            ->set('lineForm.objective', 'Monthly connectivity')
+            ->set('lineForm.account_title', 'Internet Expenses')
             ->set('lineForm.unit_cost', '2000')
             ->set('lineMonths', [1, 2])
             ->call('saveLineFromModal')
@@ -1029,6 +1447,8 @@ class MemMatrixTest extends TestCase
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
             ->call('openEditModal', 'item-'.$jan->id)
             ->set('lineForm.activity_description', 'Monthly internet (revised)')
+            ->set('lineForm.objective', 'Monthly connectivity')
+            ->set('lineForm.account_title', 'Internet Expenses')
             ->set('lineRepeated', 'yes')
             ->set('lineMonths', [1, 2])
             ->call('saveLineFromModal')
@@ -1068,6 +1488,8 @@ class MemMatrixTest extends TestCase
 
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
             ->call('openEditModal', 'item-'.$jan->id)
+            ->set('lineForm.objective', 'Monthly connectivity')
+            ->set('lineForm.account_title', 'Internet Expenses')
             ->set('lineForm.unit_cost', '2000')
             ->set('lineRepeated', 'yes')
             ->set('lineMonths', [1, 2])
@@ -1099,6 +1521,8 @@ class MemMatrixTest extends TestCase
 
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
             ->call('openEditModal', 'item-'.$jan->id)
+            ->set('lineForm.objective', 'Monthly connectivity')
+            ->set('lineForm.account_title', 'Internet Expenses')
             ->set('lineForm.unit_cost', '2000')
             ->set('lineRepeated', 'yes')
             // February has no matrix: adding the year is still the only path
@@ -1130,6 +1554,8 @@ class MemMatrixTest extends TestCase
 
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
             ->call('openEditModal', 'item-'.$jan->id)
+            ->set('lineForm.objective', 'Monthly connectivity')
+            ->set('lineForm.account_title', 'Internet Expenses')
             ->set('lineRepeated', 'yes')
             // January is just a month like the rest: clearing it removes the
             // line from this month and leaves it only where still checked.
@@ -1177,6 +1603,8 @@ class MemMatrixTest extends TestCase
 
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
             ->call('openEditModal', 'item-'.$jan->id)
+            ->set('lineForm.objective', 'Monthly connectivity')
+            ->set('lineForm.account_title', 'Internet Expenses')
             ->assertSet('lineMonths', [1, 2, 3])
             // Clearing March takes the line out of that month on save.
             ->set('lineMonths', [1, 2])
@@ -1225,6 +1653,8 @@ class MemMatrixTest extends TestCase
 
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
             ->call('openEditModal', 'item-'.$jan->id)
+            ->set('lineForm.objective', 'Monthly connectivity')
+            ->set('lineForm.account_title', 'Internet Expenses')
             // March is not a copy of this line any more, so it is not claimed
             // by the picker...
             ->assertSet('lineMonths', [1, 2])
@@ -1261,6 +1691,8 @@ class MemMatrixTest extends TestCase
 
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrices[1]])
             ->call('openEditModal', 'item-'.$jan->id)
+            ->set('lineForm.objective', 'Monthly connectivity')
+            ->set('lineForm.account_title', 'Internet Expenses')
             // The line lives in every month, so the picker opens with them
             // all checked...
             ->assertSet('lineMonths', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
@@ -1341,6 +1773,8 @@ class MemMatrixTest extends TestCase
 
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
             ->call('openEditModal', 'item-'.$jan->id)
+            ->set('lineForm.objective', 'Monthly connectivity')
+            ->set('lineForm.account_title', 'Internet Expenses')
             ->assertSet('lineMonths', [1, 2])
             // Save without touching a field: the reopened months are checked,
             // but February already matches, so it must not be rewritten.
@@ -1359,6 +1793,11 @@ class MemMatrixTest extends TestCase
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
             ->call('openLineModal')
             ->set('lineForm.activity_description', 'Monthly internet')
+            ->set('lineForm.objective', 'Monthly connectivity')
+            ->set('lineForm.resource_kind', 'MOOE')
+            ->set('lineForm.quantity', '1')
+            ->set('lineForm.unit_cost', '1500')
+            ->set('lineForm.account_title', 'Internet Expenses')
             ->set('lineMonths', [])
             ->call('saveLineFromModal')
             ->assertHasErrors(['lineMonths'])
@@ -1375,6 +1814,11 @@ class MemMatrixTest extends TestCase
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
             ->call('openLineModal')
             ->set('lineForm.activity_description', 'Monthly internet')
+            ->set('lineForm.objective', 'Monthly connectivity')
+            ->set('lineForm.resource_kind', 'MOOE')
+            ->set('lineForm.quantity', '1')
+            ->set('lineForm.unit_cost', '1500')
+            ->set('lineForm.account_title', 'Internet Expenses')
             ->set('lineMonths', [13])
             ->call('saveLineFromModal')
             ->assertHasErrors(['lineMonths.0']);
@@ -1383,29 +1827,8 @@ class MemMatrixTest extends TestCase
         $this->assertSame(1, MonthlyExpenditureMatrix::count());
     }
 
-    public function test_choosing_an_account_fills_the_modal_form(): void
-    {
-        $sh = $this->schoolHead();
-        $matrix = $this->matrixFor($sh);
 
-        $classification = AccountClassification::create([
-            'account_title' => 'Office Supplies Expenses',
-            'rca_code' => '3020301',
-            'uacs_sub_object_code' => '5020301',
-            'uacs_object_code' => '5020301000',
-            'is_active' => true,
-        ]);
-
-        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
-            ->call('openLineModal')
-            ->call('chooseAccount', $classification->id)
-            ->assertSet('lineForm.account_title', 'Office Supplies Expenses')
-            ->assertSet('lineForm.account_code', '5020301000')
-            ->assertSet('lineForm.account_classification_id', $classification->id)
-            ->assertSet('accountSearch', 'Office Supplies Expenses');
-    }
-
-    public function test_the_account_combobox_filters_by_title_or_object_code(): void
+    public function test_each_resource_row_carries_its_own_account(): void
     {
         $sh = $this->schoolHead();
         $matrix = $this->matrixFor($sh);
@@ -1425,56 +1848,35 @@ class MemMatrixTest extends TestCase
             'is_active' => true,
         ]);
 
-        $component = Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
-            ->call('openLineModal');
-
-        // By a title fragment.
-        $component->set('accountSearch', 'office')
-            ->assertSee('Office Supplies Expenses')
-            ->assertDontSee('Traveling Expenses');
-
-        // By object code.
-        $component->set('accountSearch', '5020101')
-            ->assertSee('Traveling Expenses')
-            ->assertDontSee('Office Supplies Expenses');
-    }
-
-    public function test_typing_without_picking_saves_the_text_as_the_account_title(): void
-    {
-        $sh = $this->schoolHead();
-        $matrix = $this->matrixFor($sh);
-
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
             ->call('openLineModal')
-            ->set('accountSearch', 'Miscellaneous Expenses')
-            ->set('lineForm.activity_description', 'Buy sundries')
+            ->set('lineForm.activity_description', 'Quarterly supplies')
+            ->set('lineForm.objective', 'Stocked office')
+            ->set('lineForm.resource_kind', 'MOOE')
+            ->set('lineForm.quantity', '10')
+            ->set('lineForm.unit', 'piece')
+            ->set('lineForm.unit_cost', '250')
+            ->set('lineForm.account_title', 'Office Supplies Expenses')
+            ->call('addLineResource')
+            ->set('lineResources.0.resource_kind', 'MOOE')
+            ->set('lineResources.0.quantity', '4')
+            ->set('lineResources.0.unit', 'piece')
+            ->set('lineResources.0.unit_cost', '300')
+            ->set('lineResources.0.account_title', 'Traveling Expenses')
+            ->set('lineResources.0.account_code', '5020101000')
             ->call('saveLineFromModal')
             ->assertHasNoErrors()
-            ->assertSet('items.0.account_title', 'Miscellaneous Expenses')
-            ->assertSet('items.0.account_classification_id', null);
-    }
+            ->assertSet('showLineModal', false);
 
-    public function test_clear_account_empties_the_line_account(): void
-    {
-        $sh = $this->schoolHead();
-        $matrix = $this->matrixFor($sh);
+        $items = MonthlyExpenditureItem::orderBy('id')->get();
 
-        $classification = AccountClassification::create([
-            'account_title' => 'Office Supplies Expenses',
-            'rca_code' => '3020301',
-            'uacs_sub_object_code' => '5020301',
-            'uacs_object_code' => '5020301000',
-            'is_active' => true,
-        ]);
-
-        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
-            ->call('openLineModal')
-            ->call('chooseAccount', $classification->id)
-            ->call('clearAccount')
-            ->assertSet('lineForm.account_title', '')
-            ->assertSet('lineForm.account_code', '')
-            ->assertSet('lineForm.account_classification_id', null)
-            ->assertSet('accountSearch', '');
+        $this->assertCount(2, $items);
+        $this->assertSame('Quarterly supplies', $items[0]->activity_description);
+        $this->assertSame('Office Supplies Expenses', $items[0]->account_title);
+        $this->assertSame('5020301000', $items[0]->account_code);
+        $this->assertSame('Quarterly supplies', $items[1]->activity_description);
+        $this->assertSame('Traveling Expenses', $items[1]->account_title);
+        $this->assertSame('5020101000', $items[1]->account_code);
     }
 
     public function test_duplicating_a_line_copies_it_as_a_fresh_unsaved_row(): void
@@ -1801,6 +2203,8 @@ class MemMatrixTest extends TestCase
         $component = Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $july])
             ->call('openLineModal')
             ->set('lineForm.activity_description', 'Procure supplies')
+            ->set('lineForm.objective', 'Office supplies for learners')
+            ->set('lineForm.account_title', 'Office Supplies Expenses')
             ->set('lineForm.quantity', '3')
             ->set('lineForm.unit_cost', '500')
             ->call('saveLineFromModal')
@@ -2180,6 +2584,8 @@ class MemMatrixTest extends TestCase
         $component = Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
             ->call('openLineModal')
             ->set('lineForm.activity_description', 'Payment for Electricity')
+            ->set('lineForm.objective', 'Kept the lights on')
+            ->set('lineForm.account_title', 'Electricity Expenses')
             ->set('lineForm.quantity', '1')
             ->set('lineForm.unit_cost', '6000')
             ->call('saveLineFromModal')
@@ -2207,6 +2613,8 @@ class MemMatrixTest extends TestCase
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
             ->call('openLineModal')
             ->set('lineForm.activity_description', 'Payment for Electricity')
+            ->set('lineForm.objective', 'Kept the lights on')
+            ->set('lineForm.account_title', 'Electricity Expenses')
             ->set('lineForm.quantity', '1')
             ->set('lineForm.unit_cost', '6000')
             ->call('saveLineFromModal')
@@ -2222,6 +2630,8 @@ class MemMatrixTest extends TestCase
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
             ->call('openLineModal')
             ->set('lineForm.activity_description', 'Payment for Electricity')
+            ->set('lineForm.objective', 'Kept the lights on')
+            ->set('lineForm.account_title', 'Electricity Expenses')
             ->set('lineForm.quantity', '1')
             ->set('lineForm.unit_cost', '6000')
             ->call('saveLineFromModal')
@@ -2248,6 +2658,8 @@ class MemMatrixTest extends TestCase
         $component = Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $january])
             ->call('openLineModal')
             ->set('lineForm.activity_description', 'Payment for Electricity')
+            ->set('lineForm.objective', 'Kept the lights on')
+            ->set('lineForm.account_title', 'Electricity Expenses')
             ->set('lineForm.quantity', '1')
             ->set('lineForm.unit_cost', '30000')
             ->set('lineRepeated', 'yes')

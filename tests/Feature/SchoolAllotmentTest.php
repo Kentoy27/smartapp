@@ -677,6 +677,8 @@ class SchoolAllotmentTest extends TestCase
             ->test(MemEditor::class, ['matrix' => $january->matrix])
             ->call('openLineModal')
             ->set('lineForm.activity_description', 'Purchase bond paper')
+            ->set('lineForm.objective', 'Bond paper for operations')
+            ->set('lineForm.account_title', 'Office Supplies Expenses')
             ->set('lineForm.quantity', '3')
             ->set('lineForm.unit_cost', '500')
             ->call('saveLineFromModal')

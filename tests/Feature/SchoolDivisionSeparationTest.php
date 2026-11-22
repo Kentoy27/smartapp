@@ -248,6 +248,39 @@ class SchoolDivisionSeparationTest extends TestCase
             ->assertSee('WFP');
     }
 
+    public function test_the_budget_sidebar_lists_every_division_without_a_switcher(): void
+    {
+        $budget = User::factory()->create(['role' => 'budget', 'is_superadmin' => false]);
+
+        $component = Livewire::actingAs($budget)->test(Sidebar::class);
+
+        // The Budget office oversees every division: one WFP group per
+        // division, all visible at once, with no toggle bar to switch it
+        // from — like the School Head's per-division groups.
+        $component
+            ->assertSee('WFP')
+            ->assertSee('WFP — Junior High')
+            ->assertSee('WFP — Senior High')
+            ->assertSee('Work & Financial Plan')
+            ->assertSee('School Allotments')
+            ->assertSee('Monthly Expenditure')
+            ->assertSee('Per Line Item Expenditure')
+            ->assertDontSee('id="divisionSwitcher"', false)
+            ->assertDontSee('Junior High School')
+            ->assertDontSee('Senior High School');
+
+        $wfpGroups = collect($component->instance()->items())->where('division')->values();
+        $this->assertSame(
+            ['ELEMENTARY', 'JUNIOR_HIGH', 'SENIOR_HIGH'],
+            $wfpGroups->pluck('division')->all(),
+        );
+
+        // Clicking a division's group switches to it, the same as the
+        // School Head's groups.
+        $component->call('selectWfpDivision', 'SENIOR_HIGH');
+        $this->assertSame('SENIOR_HIGH', $budget->activeDivision());
+    }
+
     public function test_a_division_the_school_does_not_offer_is_rejected(): void
     {
         $admin = User::factory()->create(['role' => 'administrator', 'is_superadmin' => false]);

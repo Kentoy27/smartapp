@@ -296,6 +296,13 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
     grid-template-columns: minmax(0, 1fr);
 }
 
+/* Budget dashboard: review panel and allotment monitor share the top row,
+   while the submitted-WFP table spans the full width below it so its columns
+   are not cramped in the narrow side column. */
+.staff-dashboard-grid--budget .budget-panel--full {
+    grid-column: 1 / -1;
+}
+
 .staff-dashboard-panel {
     min-width: 0;
 }
@@ -431,6 +438,83 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
 }
 
 .dashboard-plan-card__link:hover {
+    text-decoration: underline;
+}
+
+/* Bookkeeper dashboard quick actions: each checking surface is its own
+   card-like button so the near-empty panel reads as a dashboard rather than
+   a pair of plain links. */
+.dashboard-action-cards {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.dashboard-action-card {
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-panel);
+    color: var(--text-strong);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    text-decoration: none;
+    min-width: 150px;
+}
+
+.dashboard-action-card__icon {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    color: var(--primary-strong);
+}
+
+.dashboard-action-card:hover {
+    border-color: var(--primary);
+    background: var(--primary-soft);
+    text-decoration: underline;
+}
+
+/* Bookkeeper dashboard: each school on the assignment list links straight to
+   that school’s per-line-item report, so the “Your schools” list doubles as
+   quick navigation. */
+.dashboard-school-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.dashboard-school-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 9px 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-panel);
+    color: var(--text-strong);
+    font-size: 0.8125rem;
+    text-decoration: none;
+}
+
+.dashboard-school-card__name {
+    font-weight: 600;
+}
+
+.dashboard-school-card__code {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.dashboard-school-card:hover {
+    border-color: var(--primary);
+    background: var(--primary-soft);
     text-decoration: underline;
 }
 
@@ -2175,7 +2259,7 @@ control to a real radio size and keep it from growing as a flex item. */
 .mem-resource-table__head,
 .mem-resource-row {
     display: grid;
-    grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.65fr) minmax(0, 0.8fr) minmax(0, 0.85fr) minmax(120px, auto) 36px;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.5fr) minmax(0, 0.65fr) minmax(0, 0.7fr) minmax(100px, auto) minmax(0, 0.8fr) 34px;
     gap: 10px 12px;
     align-items: start;
 }
@@ -2191,6 +2275,7 @@ control to a real radio size and keep it from growing as a flex item. */
 .mem-resource-cell { min-width: 0; }
 .mem-resource-cell--total,
 .mem-resource-cell--action { display: flex; justify-content: flex-end; }
+.mem-resource-cell--account-title { grid-column: 1 / -1; }
 .mem-resource-row + .mem-resource-row { padding-top: 10px; border-top: 1px dashed var(--border); }
 .mem-resource-total {
     display: flex;

@@ -112,6 +112,16 @@ final class WfpPlanExporter
                 $bytes = WfpTemplateFiller::writeCells($bytes, [$block['name_cell'] => $name]);
             }
 
+            // Stamp the signer's actual profile position under the signature,
+            // overwriting the template's pre-printed designation — so the
+            // School Head's export shows "School Principal" (from their profile)
+            // rather than the template's "School Principal I", matching the
+            // Per Line Item report and the profile itself.
+            $position = trim((string) ($signer->position ?? ''));
+            if ($position !== '') {
+                $bytes = WfpTemplateFiller::writeCells($bytes, [$block['title_cell'] => $position]);
+            }
+
             $bytes = self::stampSignature($bytes, $signer, $block);
         }
 
@@ -168,6 +178,7 @@ final class WfpPlanExporter
 
         foreach ($blocks as $block) {
             $cells[$block['name_cell']] = '';
+            $cells[$block['title_cell']] = '';
         }
 
         return WfpTemplateFiller::writeCells($bytes, $cells);

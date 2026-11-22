@@ -60,7 +60,7 @@
              superadmin sees who has handed their plan in. --}}
         <livewire:wfp-uploads-list />
     @elseif ($isBudgetReviewer)
-        <div class="staff-dashboard-grid">
+        <div class="staff-dashboard-grid staff-dashboard-grid--budget">
             <section class="staff-dashboard-panel" aria-labelledby="dashboard-budget-heading">
                 <div class="staff-dashboard-panel__intro">
                     <span class="staff-dashboard-panel__step">01</span>
@@ -69,28 +69,41 @@
                         <p>Review submitted financial plans and certify each school’s allotment. This role cannot edit or submit school plans.</p>
                     </div>
                 </div>
-                <livewire:wfp-uploads-list />
-                {{-- The per-line list the budget is checked against: every
-                     school's expenditure lines, read-only. It lives beside the
-                     plans the Budget office already reviews because it is the
-                     detail behind the same money. --}}
-                <a href="{{ route('budget.lineitems.index') }}" class="dashboard-plan-card__link" wire:navigate>
-                    <x-icon name="check-check" :size="14" />
-                    Check expenditure line items <span aria-hidden="true">→</span>
-                </a>
 
-                {{-- The printed annual report those lines add up to: the same
-                     form the School Head reads, per school. --}}
-                <a href="{{ route('budget.per-line-item.index') }}" class="dashboard-plan-card__link" wire:navigate>
-                    <x-icon name="file-spreadsheet" :size="14" />
-                    Per line item expenditure <span aria-hidden="true">→</span>
-                </a>
+                <div class="dashboard-action-cards">
+                    <a href="{{ route('budget.lineitems.index') }}" class="dashboard-action-card" wire:navigate>
+                        <span class="dashboard-action-card__icon"><x-icon name="file-spreadsheet" :size="16" /></span>
+                        <span>Monthly Expenditure</span>
+                        <span aria-hidden="true">→</span>
+                    </a>
+                    <a href="{{ route('budget.per-line-item.index') }}" class="dashboard-action-card" wire:navigate>
+                        <span class="dashboard-action-card__icon"><x-icon name="check-check" :size="16" /></span>
+                        <span>Per Line Item Expenditure</span>
+                        <span aria-hidden="true">→</span>
+                    </a>
+                    {{-- <a href="{{ route('aip.review') }}" class="dashboard-action-card" wire:navigate>
+                        <span class="dashboard-action-card__icon"><x-icon name="file-spreadsheet" :size="16" /></span>
+                        <span>Review submitted AIP plans</span>
+                        <span aria-hidden="true">→</span>
+                    </a> --}}
+                </div>
             </section>
 
             {{-- Allotments are the other half of the Budget office's work:
                  monitoring the year's ceilings and certifying the amount each
                  school may actually consume. --}}
-            <livewire:budget-allotment-monitor />
+            {{-- <livewire:budget-allotment-monitor /> --}}
+
+            {{-- <section class="staff-dashboard-panel budget-panel--full" aria-labelledby="dashboard-wfp-uploads-heading">
+                <div class="staff-dashboard-panel__intro">
+                    <span class="staff-dashboard-panel__step">02</span>
+                    <div>
+                        <h2 id="dashboard-wfp-uploads-heading">Submitted WFP plans</h2>
+                        <p>Every school’s uploaded Work and Financial Plan, newest first. Download a workbook to review it.</p>
+                    </div>
+                </div>
+                <livewire:wfp-uploads-list />
+            </section> --}}
         </div>
     @elseif ($isBookkeeper)
         {{-- The Bookkeeper's dashboard: the same division-wide checking
@@ -111,16 +124,51 @@
                     </div>
                 </div>
 
-                <a href="{{ route('budget.lineitems.index') }}" class="dashboard-plan-card__link" wire:navigate>
-                    <x-icon name="file-spreadsheet" :size="14" />
-                    Monthly Expenditure <span aria-hidden="true">→</span>
-                </a>
-
-                <a href="{{ route('budget.per-line-item.index') }}" class="dashboard-plan-card__link" wire:navigate>
-                    <x-icon name="check-check" :size="14" />
-                    Per Line Item Expenditure <span aria-hidden="true">→</span>
-                </a>
+                <div class="dashboard-action-cards">
+                    <a href="{{ route('budget.lineitems.index') }}" class="dashboard-action-card" wire:navigate>
+                        <span class="dashboard-action-card__icon"><x-icon name="file-spreadsheet" :size="16" /></span>
+                        <span>Monthly Expenditure</span>
+                        <span aria-hidden="true">→</span>
+                    </a>
+                    <a href="{{ route('budget.per-line-item.index') }}" class="dashboard-action-card" wire:navigate>
+                        <span class="dashboard-action-card__icon"><x-icon name="check-check" :size="16" /></span>
+                        <span>Per Line Item Expenditure</span>
+                        <span aria-hidden="true">→</span>
+                    </a>
+                </div>
             </section>
+
+            @php
+                $assignedSchoolIds = $user->assignedSchoolIds();
+                $assignedSchools = $assignedSchoolIds
+                    ? \App\Models\School::query()->whereIn('id', $assignedSchoolIds)->get()->sortBy(fn ($school) => array_search($school->id, $assignedSchoolIds, true))
+                    : collect();
+            @endphp
+
+            @if ($assignedSchools->isNotEmpty())
+                <section class="staff-dashboard-panel" aria-labelledby="dashboard-bookkeeper-schools">
+                    <div class="staff-dashboard-panel__intro">
+                        <span class="staff-dashboard-panel__step">02</span>
+                        <div>
+                            <h2 id="dashboard-bookkeeper-schools">Your schools</h2>
+                            <p>
+                                Schools on your assignment list. Open a school’s annual report to check its
+                                account titles and codes.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-school-list">
+                        @foreach ($assignedSchools as $school)
+                            <a href="{{ route('budget.per-line-item.index', ['school' => $school->id]) }}" class="dashboard-school-card" wire:navigate>
+                                <span class="dashboard-school-card__name">{{ $school->name }}</span>
+                                <span class="dashboard-school-card__code">{{ $school->school_id }}</span>
+                                <span aria-hidden="true">→</span>
+                            </a>
+                        @endforeach
+                    </div>
+                </section>
+            @endif
         </div>
     @elseif ($user->isPsdsRole())
         {{-- The PSDS's dashboard IS the monitoring workspace: the summary

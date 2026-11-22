@@ -8976,5 +8976,44 @@
             }, true);
         })();
     </script>
+
+    <script>
+        /* Account-tile pickers (.mem-combo): open the option list on focus and
+           close on Escape or a click outside. Delegated on `document` so rows
+           that Livewire adds after page load (e.g. "+ Add resource") work too;
+           Alpine is not loaded in this app, so the x-data/:class directives on
+           these menus are inert. Menus keep stable ids, so Livewire's morph
+           reuses them and the .open class survives re-renders. */
+        (function () {
+            function closeAll() {
+                document.querySelectorAll('.mem-combo__menu.open').forEach(function (m) {
+                    m.classList.remove('open');
+                });
+            }
+            document.addEventListener('focusin', function (e) {
+                var input = e.target.closest('.mem-combo input');
+                if (!input) return;
+                var menu = input.closest('.mem-combo').querySelector('.mem-combo__menu');
+                if (menu) {
+                    closeAll();
+                    menu.classList.add('open');
+                }
+            });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') closeAll();
+            });
+            document.addEventListener('click', function (e) {
+                var combo = e.target.closest('.mem-combo');
+                if (!combo) {
+                    closeAll();
+                    return;
+                }
+                if (e.target.closest('.mem-combo__option')) {
+                    var menu = combo.querySelector('.mem-combo__menu');
+                    if (menu) menu.classList.remove('open');
+                }
+            });
+        })();
+    </script>
 </body>
 </html>

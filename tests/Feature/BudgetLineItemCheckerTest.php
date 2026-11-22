@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Livewire\BudgetLineItemChecker;
 use App\Livewire\Sidebar;
+use App\Models\AccountClassification;
 use App\Models\District;
 use App\Models\MonthlyExpenditureItem;
 use App\Models\MonthlyExpenditureMatrix;
@@ -34,6 +35,11 @@ class BudgetLineItemCheckerTest extends TestCase
     private function budgetOfficer(): User
     {
         return User::factory()->create(['role' => 'budget', 'is_superadmin' => false]);
+    }
+
+    private function bookkeeper(): User
+    {
+        return User::factory()->create(['role' => 'bookkeeper', 'is_superadmin' => false]);
     }
 
     private function allotment(User $schoolHead, float $amount, int $year = 2026): SchoolAllotment
@@ -570,5 +576,230 @@ class BudgetLineItemCheckerTest extends TestCase
         // Both schools' records are still there; opening one only narrowed
         // the Budget officer's view.
         $this->assertSame(2, MonthlyExpenditureItem::count());
+    }
+
+    // ------------------------------------------------------------ account code editing
+
+    public function test_a_bookkeeper_can_edit_account_codes_for_a_rostered_school(): void
+    {
+        $head = $this->schoolHead('Rostered School');
+        $matrix = $this->matrix($head, 1);
+        $item = $this->line($matrix, ['account_code' => '5020301000']);
+
+        $bk = $this->bookkeeper();
+        $bk->syncAssignedSchools([$head->school_id]);
+
+        $component = Livewire::actingAs($bk)
+            ->test(BudgetLineItemChecker::class)
+            ->call('openSchool', $head->school_id);
+
+        // The bookkeeper reaches the account code edit action.
+        $component->call('openAccountCodeEdit', $item->id);
+        $component->assertSet('accountCodeEditingKey', (string) $item->id);
+        $component->assertSet('accountCodeForm', '5020301000');
+
+        // Saving changes only the account code.
+        $component->set('accountCodeForm', '5020301001');
+        $component->call('saveAccountCodeEdit');
+
+        $this->assertSame('5020301001', $item->fresh()->account_code);
+        $component->assertSet('accountCodeEditingKey', null);
+        $component->assertSet('accountCodeForm', '');
+        $component->assertSet('successMessage', 'Account code saved.');
+    }
+
+    public function test_a_bookkeeper_cannot_edit_account_codes_for_a_non_rostered_school(): void
+    {
+        $head = $this->schoolHead('Other School');
+        $matrix = $this->matrix($head, 1);
+        $item = $this->line($matrix, ['account_code' => '5020301000']);
+
+        $bk = $this->bookkeeper(); // not assigned to this school
+
+        // The open action is refused: no school is selected, so the roster
+        // gate in canEditAccountCode() fails. openSchool() itself would also
+        // refuse (404), so we call the edit action directly.
+        Livewire::actingAs($bk)
+            ->test(BudgetLineItemChecker::class)
+            ->call('openAccountCodeEdit', $item->id)
+            ->assertNotFound();
+
+        // The save action is refused too.
+        Livewire::actingAs($bk)
+            ->test(BudgetLineItemChecker::class)
+            ->set('accountCodeForm', '5020301001')
+            ->call('saveAccountCodeEdit')
+            ->assertNotFound();
+
+        $this->assertSame('5020301000', $item->fresh()->account_code);
+    }
+
+    public function test_a_budget_officer_cannot_edit_account_codes(): void
+    {
+        $head = $this->schoolHead('Budget School');
+        $matrix = $this->matrix($head, 1);
+        $item = $this->line($matrix, ['account_code' => '5020301000']);
+
+        Livewire::actingAs($this->budgetOfficer())
+            ->test(BudgetLineItemChecker::class)
+            ->call('openSchool', $head->school_id)
+            ->call('openAccountCodeEdit', $item->id)
+            ->assertSet('accountCodeEditingKey', null);
+
+        $this->assertSame('5020301000', $item->fresh()->account_code);
+    }
+
+    public function test_clearing_the_account_code_stores_null(): void
+    {
+        $head = $this->schoolHead('Clear School');
+        $matrix = $this->matrix($head, 1);
+        $item = $this->line($matrix, ['account_code' => '5020301000']);
+
+        $bk = $this->bookkeeper();
+        $bk->syncAssignedSchools([$head->school_id]);
+
+        Livewire::actingAs($bk)
+            ->test(BudgetLineItemChecker::class)
+            ->call('openSchool', $head->school_id)
+            ->call('openAccountCodeEdit', $item->id)
+            ->set('accountCodeForm', '')
+            ->call('saveAccountCodeEdit');
+
+        $this->assertNull($item->fresh()->account_code);
+    }
+
+    public function test_closing_the_account_code_modal_without_saving_keeps_the_code(): void
+    {
+        $head = $this->schoolHead('Close School');
+        $matrix = $this->matrix($head, 1);
+        $item = $this->line($matrix, ['account_code' => '5020301000']);
+
+        $bk = $this->bookkeeper();
+        $bk->syncAssignedSchools([$head->school_id]);
+
+        $component = Livewire::actingAs($bk)
+            ->test(BudgetLineItemChecker::class)
+            ->call('openSchool', $head->school_id)
+            ->call('openAccountCodeEdit', $item->id)
+            ->set('accountCodeForm', '5020301009')
+            ->call('closeAccountCodeEdit');
+
+        $component->assertSet('accountCodeEditingKey', null);
+        $component->assertSet('accountCodeForm', '');
+        $this->assertSame('5020301000', $item->fresh()->account_code);
+    }
+
+    public function test_the_account_code_edit_button_renders_for_a_bookkeeper_on_a_rostered_school(): void
+    {
+        $head = $this->schoolHead('Button School');
+        $matrix = $this->matrix($head, 1);
+        $item = $this->line($matrix, ['account_code' => '5020301000']);
+
+        $bk = $this->bookkeeper();
+        $bk->syncAssignedSchools([$head->school_id]);
+
+        $html = Livewire::actingAs($bk)
+            ->test(BudgetLineItemChecker::class)
+            ->call('openSchool', $head->school_id)
+            ->html();
+
+        $this->assertStringContainsString('mem-row-action', $html);
+    }
+
+    public function test_a_bookkeeper_correction_stamps_who_corrected_the_account_code(): void
+    {
+        $head = $this->schoolHead('Corrected School');
+        $matrix = $this->matrix($head, 1);
+        $item = $this->line($matrix, ['account_code' => '5020301000']);
+
+        $bk = $this->bookkeeper();
+        $bk->syncAssignedSchools([$head->school_id]);
+
+        $component = Livewire::actingAs($bk)
+            ->test(BudgetLineItemChecker::class)
+            ->call('openSchool', $head->school_id)
+            ->call('openAccountCodeEdit', $item->id)
+            ->set('accountCodeForm', '5020301001')
+            ->call('saveAccountCodeEdit');
+
+        $fresh = $item->fresh();
+
+        $this->assertTrue($fresh->wasCorrectedByBookkeeper());
+        $this->assertSame($bk->id, $fresh->corrected_by);
+        $this->assertNotNull($fresh->corrected_at);
+
+        $component->assertSee('Corrected by bookkeeper');
+    }
+
+    public function test_a_school_head_edit_is_not_stamped_as_bookkeeper_correction_on_the_checker_page(): void
+    {
+        $head = $this->schoolHead('SH Edit School');
+        $matrix = $this->matrix($head, 1);
+        $item = $this->line($matrix, ['account_code' => '5020301000']);
+
+        // The checker page is closed to School Heads entirely, so no
+        // bookkeeper correction stamp can originate from it.
+        Livewire::actingAs($head)
+            ->test(BudgetLineItemChecker::class)
+            ->assertSee('Page Not Found');
+
+        $this->assertNull($item->fresh()->corrected_by);
+    }
+
+    public function test_saving_a_known_account_code_writes_its_title_too(): void
+    {
+        $head = $this->schoolHead('Title School');
+        $matrix = $this->matrix($head, 1);
+        $item = $this->line($matrix, ['account_code' => '5020301000']);
+
+        AccountClassification::create([
+            'account_title' => 'Accountable Forms Expenses',
+            'rca_code' => '100',
+            'uacs_sub_object_code' => '000',
+            'uacs_object_code' => '5020302000',
+            'is_active' => true,
+        ]);
+
+        $bk = $this->bookkeeper();
+        $bk->syncAssignedSchools([$head->school_id]);
+
+        $component = Livewire::actingAs($bk)
+            ->test(BudgetLineItemChecker::class)
+            ->call('openSchool', $head->school_id)
+            ->call('openAccountCodeEdit', $item->id)
+            ->set('accountCodeForm', '5020302000')
+            ->call('saveAccountCodeEdit');
+
+        $fresh = $item->fresh();
+
+        $this->assertSame('5020302000', $fresh->account_code);
+        $this->assertSame('Accountable Forms Expenses', $fresh->account_title);
+
+        $component->assertSet('successMessage', 'Account code saved.');
+    }
+
+    public function test_saving_a_code_that_names_no_classification_leaves_the_title_alone(): void
+    {
+        $head = $this->schoolHead('Unknown Code School');
+        $matrix = $this->matrix($head, 1);
+        $item = $this->line($matrix, [
+            'account_code' => '5020301000',
+            'account_title' => 'Office Supplies Expenses',
+        ]);
+
+        $bk = $this->bookkeeper();
+        $bk->syncAssignedSchools([$head->school_id]);
+
+        Livewire::actingAs($bk)
+            ->test(BudgetLineItemChecker::class)
+            ->call('openSchool', $head->school_id)
+            ->call('openAccountCodeEdit', $item->id)
+            ->set('accountCodeForm', '5029999999')
+            ->call('saveAccountCodeEdit');
+
+        $fresh = $item->fresh();
+
+        $this->assertSame('5029999999', $fresh->account_code);
+        $this->assertSame('Office Supplies Expenses', $fresh->account_title);
     }
 }

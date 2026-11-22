@@ -35,6 +35,8 @@ class MonthlyExpenditureItem extends Model
         'calculated_total',
         'account_title',
         'account_code',
+        'corrected_by',
+        'corrected_at',
         'account_classification_id',
         'funding_source',
         'organizational_classification',
@@ -53,6 +55,7 @@ class MonthlyExpenditureItem extends Model
         'quantity' => 'decimal:2',
         'unit_cost' => 'decimal:2',
         'calculated_total' => 'decimal:2',
+        'corrected_at' => 'datetime',
         'resource_kind_id' => 'integer',
         'unit_id' => 'integer',
         'funding_source_id' => 'integer',
@@ -67,6 +70,21 @@ class MonthlyExpenditureItem extends Model
     public function classification(): BelongsTo
     {
         return $this->belongsTo(AccountClassification::class, 'account_classification_id');
+    }
+
+    /**
+     * The account that corrected this line's account code, or null when it was
+     * not corrected (or was corrected by someone other than a bookkeeper).
+     */
+    public function corrector(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'corrected_by');
+    }
+
+    /** Whether the account code on this line was corrected by a bookkeeper. */
+    public function wasCorrectedByBookkeeper(): bool
+    {
+        return $this->corrected_by !== null;
     }
 
     public function resourceKindRecord(): BelongsTo

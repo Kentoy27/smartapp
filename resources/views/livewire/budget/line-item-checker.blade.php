@@ -13,6 +13,22 @@
      never a stored figure. --}}
 <div class="budget-line-check">
 
+    {{-- SUCCESS ALERT: popped once as a SweetAlert, then cleared. --}}
+    @if ($successMessage)
+        <div
+            wire:key="budget-line-alert-{{ md5($successMessage) }}"
+            x-data
+            x-init="
+                if (window.smartAlert) {
+                    smartAlert.success({{ \Illuminate\Support\Js::from($successMessage) }});
+                }
+                $wire.clearSuccess();
+            "
+            class="success-alert-sentinel"
+            aria-hidden="true"
+        ></div>
+    @endif
+
     @if ($selectedSchool === null)
         {{-- THE INDEX: one row per school, the equivalent of the School Head's
              month rows. A school with no lines still appears — the Budget
@@ -520,6 +536,24 @@
                                 @else
                                     <span class="mem-list__muted">—</span>
                                 @endif
+
+                                @if ($row->wasCorrectedByBookkeeper())
+                                    <span
+                                        class="badge"
+                                        title="Account code corrected by the bookkeeper"
+                                    >Corrected by bookkeeper</span>
+                                @endif
+
+                                @if ($this->canEditAccountCode())
+                                    <button
+                                        type="button"
+                                        class="mem-row-action"
+                                        wire:click="openAccountCodeEdit({{ $row->id }})"
+                                        title="Edit account code"
+                                    >
+                                        <x-icon name="tags" :size="14" />
+                                    </button>
+                                @endif
                             </td>
                         </tr>
                     @empty
@@ -562,6 +596,98 @@
             from the School Head’s own editor, so nothing on this page can alter a
             school’s plan.
         </p>
-    </div>
+    @endif
+
+    {{-- ACCOUNT CODE ONLY EDIT — offered only to an account that may correct
+         codes (a bookkeeper for a rostered school, or a writing SH). Each
+         action re-checks the gate server-side. --}}
+    @if ($this->canEditAccountCode())
+        <div class="modal-backdrop {{ $accountCodeEditingKey !== null ? 'is-open' : '' }}"
+             @if ($accountCodeEditingKey !== null) @mousedown.self="$wire.closeAccountCodeEdit()" @endif
+             role="presentation">
+            <div class="modal" role="dialog" aria-modal="true" aria-labelledby="budgetAccountCodeTitle" @click.stop>
+                <div class="modal-head">
+                    <h2 id="budgetAccountCodeTitle">Edit Account Code</h2>
+                    <button type="button" class="modal-close" wire:click="closeAccountCodeEdit" aria-label="Close" title="Close">×</button>
+                </div>
+
+                <form wire:submit="saveAccountCodeEdit" class="modal-form">
+                    <div class="field">
+                        <label for="budgetAccountCode">Account Code</label>
+                        <div class="mem-combo" x-data="{ open: false }" @click.outside="open = false">
+                            <span class="mem-combo__search" aria-hidden="true">
+                                <x-icon name="search" :size="15" />
+                            </span>
+
+                            <input
+                                id="budgetAccountCodeSearch"
+                                type="text"
+                                autocomplete="off"
+                                role="combobox"
+                                aria-autocomplete="list"
+                                aria-controls="budgetAccountOptions"
+                                :aria-expanded="String(open)"
+                                wire:model.live.debounce.300ms="accountSearch"
+                                placeholder="Search title or object code…"
+                                @focus="open = true"
+                                @keydown.escape="open = false"
+                            >
+
+                            @if (trim($accountSearch) !== '')
+                                <button
+                                    type="button"
+                                    class="mem-combo__clear"
+                                    wire:click="clearAccountCode"
+                                    aria-label="Clear account"
+                                    title="Clear"
+                                >
+                                    <x-icon name="x" :size="14" />
+                                </button>
+                            @endif
+
+                            {{-- The open/closed state is a class (like the
+                                 notifications panel), so Livewire re-renders
+                                 never resurrect the menu mid-typing. --}}
+                            <div
+                                id="budgetAccountOptions"
+                                class="mem-combo__menu"
+                                role="listbox"
+                                :class="open ? 'open' : ''"
+                            >
+                                @forelse ($this->accountOptions as $option)
+                                    <button
+                                        type="button"
+                                        role="option"
+                                        class="mem-combo__option"
+                                        wire:key="budget-ac-opt-{{ $option->id }}"
+                                        wire:click="chooseAccount({{ $option->id }})"
+                                        @click="open = false"
+                                    >
+                                        <span class="mem-combo__option-title">{{ $option->account_title }}</span>
+                                        <span class="mem-combo__option-meta">
+                                            <span class="ac-code">{{ $option->uacs_object_code }}</span>
+                                        </span>
+                                    </button>
+                                @empty
+                                    <div class="mem-combo__empty">No matching account classifications.</div>
+                                @endforelse
+                            </div>
+                        </div>
+
+                        <input type="hidden" wire:model="accountCodeForm" autocomplete="off">
+                        @error('accountCodeForm') <div class="error-text">{{ $message }}</div> @enderror
+                        <div class="field-hint">A known account classification brings its title along; everything else on the line stays as it is.</div>
+                    </div>
+
+                    <div class="modal-actions">
+                        <button type="button" class="btn-ghost" wire:click="closeAccountCodeEdit">Cancel</button>
+                        <button type="submit" class="btn-primary" wire:loading.attr="disabled" wire:target="saveAccountCodeEdit">
+                            <span wire:loading.remove wire:target="saveAccountCodeEdit">Save Code</span>
+                            <span wire:loading wire:target="saveAccountCodeEdit">Saving…</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
     @endif
 </div>

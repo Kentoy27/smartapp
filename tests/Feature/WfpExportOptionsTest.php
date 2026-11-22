@@ -381,6 +381,14 @@ class WfpExportOptionsTest extends TestCase
             $this->assertStringContainsString($superadmin->name, $drawingXml);
             $this->assertStringNotContainsString($budget->name, $drawingXml);
             $this->assertStringNotContainsString($budget->name, $drawingXml);
+
+            // A signer whose registered e-signature image is missing still has
+            // their printed name and position written to the sheet cells — only
+            // the image stamp is skipped. The export never drops a signer's
+            // name/position just because there is no e-signature on file.
+            $sheet = $parts['xl/worksheets/sheet1.xml'];
+            $this->assertStringContainsString($budget->name, $sheet);
+            $this->assertStringContainsString($budget->position, $sheet);
         } finally {
             @unlink(storage_path('forms/'.$template));
         }

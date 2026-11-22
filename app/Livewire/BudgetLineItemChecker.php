@@ -2,10 +2,12 @@
 
 namespace App\Livewire;
 
+use App\Models\AccountClassification;
 use App\Models\MonthlyExpenditureItem;
 use App\Models\MonthlyExpenditureMatrix;
 use App\Models\School;
 use App\Models\User;
+use App\Models\WfpReportCheck;
 use App\Support\MemYearInitializer;
 use App\Support\WfpAllotment;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -77,6 +79,18 @@ class BudgetLineItemChecker extends Component
 
     public int $perPage = 25;
 
+    /** The id of the line whose account code is being edited in the small modal. */
+    public ?string $accountCodeEditingKey = null;
+
+    /** The account code being typed in the small edit modal. */
+    public string $accountCodeForm = '';
+
+    /** Search term for the account classification dropdown. */
+    public string $accountSearch = '';
+
+    /** Popped once as a SweetAlert success toast, then cleared. */
+    public ?string $successMessage = null;
+
     public function mount(): void
     {
         $this->user();
@@ -129,6 +143,90 @@ class BudgetLineItemChecker extends Component
     private function division(): string
     {
         return $this->user()->activeDivision();
+    }
+
+    /**
+     * Whether the signed-in account may edit an account code on this page.
+     * Only Bookkeepers can reach this page's edit surface (the mount gate is
+     * canCheckLineItems(), which excludes School Heads), so this is the
+     * roster gate for the open school.
+     */
+    public function canEditAccountCode(): bool
+    {
+        $user = Auth::user();
+
+        if (! $user?->isBookkeeperRole()) {
+            return false;
+        }
+
+        $schoolId = $this->schoolId();
+
+        return $schoolId !== null && $user->canAccessSchool($schoolId);
+    }
+
+    /**
+     * Active account classifications (RCA/UACS master data) matching the
+     * search term, for the dropdown picker in the account code edit modal.
+     *
+     * @return array<int, AccountClassification>
+     */
+    #[Computed]
+    public function accountOptions(): array
+    {
+        $term = trim($this->accountSearch);
+
+        return AccountClassification::query()
+            ->active()
+            ->when($term !== '', function ($query) use ($term): void {
+                $like = '%'.str_replace(['%', '_'], ['\%', '\_'], $term).'%';
+
+                $query->where(function ($query) use ($like): void {
+                    $query
+                        ->where('account_title', 'like', $like)
+                        ->orWhere('uacs_object_code', 'like', $like)
+                        ->orWhere('rca_code', 'like', $like);
+                });
+            })
+            ->orderBy('account_title')
+            ->limit(50)
+            ->get()
+            ->all();
+    }
+
+    /**
+     * Pick an account classification from the dropdown: only the UACS object
+     * code is written to the form — the account title stays as it is.
+     */
+    public function chooseAccount(int $classificationId): void
+    {
+        abort_unless($this->canEditAccountCode(), 404);
+
+        $classification = AccountClassification::query()->find($classificationId);
+        abort_if($classification === null, 404);
+        abort_unless($classification->is_active, 404);
+
+        $this->accountCodeForm = (string) $classification->uacs_object_code;
+        $this->accountSearch = (string) $classification->account_title;
+
+        $this->resetValidation('accountCodeForm');
+    }
+
+    /** Clear the account code and the dropdown search. */
+    public function clearAccountCode(): void
+    {
+        $this->accountCodeForm = '';
+        $this->accountSearch = '';
+        $this->resetValidation('accountCodeForm');
+    }
+
+    /** Keep the typed code in sync when the user enters it manually. */
+    public function updatedAccountSearch(): void
+    {
+        $term = trim($this->accountSearch);
+
+        if ($term !== '' && ctype_digit($term)) {
+            $this->accountCodeForm = $term;
+        }
     }
 
     /**
@@ -223,6 +321,12 @@ class BudgetLineItemChecker extends Component
         $this->forgetFigures();
     }
 
+    /** Dismiss the success toast. */
+    public function clearSuccess(): void
+    {
+        $this->successMessage = null;
+    }
+
     /** Open one school's detail from the index. */
     public function openSchool(int $schoolId): void
     {
@@ -270,6 +374,91 @@ class BudgetLineItemChecker extends Component
         $this->month = '';
         $this->resetPage();
         $this->forgetFigures();
+    }
+
+    /**
+     * Open the small account-code-only edit modal for one line. Only the code
+     * field may change — nothing else on the line is touched.
+     */
+    public function openAccountCodeEdit(int $itemId): void
+    {
+        abort_unless($this->canEditAccountCode(), 404);
+
+        $item = MonthlyExpenditureItem::query()->find($itemId);
+        abort_if($item === null, 404);
+
+        // The bookkeeper's roster gate: only lines in schools they may read.
+        abort_unless($this->user()->canAccessSchool((int) $item->matrix->school_id), 404);
+
+        $this->accountCodeEditingKey = (string) $itemId;
+        $this->accountCodeForm = (string) ($item->account_code ?? '');
+        $this->resetValidation('accountCodeForm');
+    }
+
+    /** Close the account-code edit modal without saving. */
+    public function closeAccountCodeEdit(): void
+    {
+        $this->accountCodeEditingKey = null;
+        $this->accountCodeForm = '';
+        $this->accountSearch = '';
+        $this->resetValidation('accountCodeForm');
+    }
+
+    /**
+     * Save the account code for one line: only the code changes. The matrix
+     * version is bumped and the Bookkeeper's report check is cleared so the
+     * check no longer describes what the report will show.
+     */
+    public function saveAccountCodeEdit(): void
+    {
+        abort_unless($this->canEditAccountCode(), 404);
+
+        $this->validate([
+            'accountCodeForm' => ['nullable', 'string', 'max:64'],
+        ], [
+            'accountCodeForm.string' => 'The account code must be text.',
+            'accountCodeForm.max' => 'The account code may not be longer than 64 characters.',
+        ]);
+
+        $code = trim($this->accountCodeForm);
+
+        $item = MonthlyExpenditureItem::query()->find((int) $this->accountCodeEditingKey);
+        abort_if($item === null, 404);
+
+        // A code that names a live account classification brings its title
+        // with it: the title on the line is a snapshot, so keep it in step
+        // with the code being saved. A code that names nothing active leaves
+        // the title untouched — only the code changes.
+        $classification = $code !== ''
+            ? AccountClassification::query()->active()->where('uacs_object_code', $code)->first()
+            : null;
+
+        $item->account_code = $code !== '' ? $code : null;
+        $item->account_title = $classification?->account_title ?? $item->account_title;
+        $item->syncTotal();
+
+        // Only a bookkeeper's correction is stamped "corrected by bookkeeper";
+        // the Budget office gate already guarantees that here, but the check
+        // keeps the label honest if the gate ever widens.
+        if ($this->user()->isBookkeeperRole()) {
+            $item->corrected_by = $this->user()->id;
+            $item->corrected_at = now();
+        }
+
+        $item->save();
+
+        // A line's content changed — the Bookkeeper's check no longer
+        // describes what the report will show.
+        WfpReportCheck::clearFor(
+            (int) $item->matrix->school_id,
+            (int) $item->matrix->year,
+            $item->matrix->schoolDivision(),
+        );
+
+        $item->matrix->bumpVersion();
+
+        $this->closeAccountCodeEdit();
+        $this->successMessage = 'Account code saved.';
     }
 
     /**

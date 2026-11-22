@@ -514,45 +514,67 @@
                                             @else
                                                 <span class="mem-list__muted">—</span>
                                             @endif
+
+                                            @if ((int) ($row['corrected_by'] ?? 0) > 0)
+                                                <span
+                                                    class="badge"
+                                                    title="Account code corrected by the bookkeeper"
+                                                >Corrected by bookkeeper</span>
+                                            @endif
                                         </td>
                                         <td class="users-actions-col">
-                                            @if ($this->canEdit())
+                                            @if ($this->canEdit() || $this->canEditAccountCode())
                                                 <div class="users-actions-row">
-                                                    <button
-                                                        type="button"
-                                                        class="mem-row-action"
-                                                        wire:click="openEditModal('{{ $rowKey }}')"
-                                                        title="Edit this line"
-                                                    >
-                                                        <x-icon name="pencil" :size="15" />
-                                                    </button>
+                                                    @if ($this->canEdit())
+                                                        <button
+                                                            type="button"
+                                                            class="mem-row-action"
+                                                            wire:click="openEditModal('{{ $rowKey }}')"
+                                                            title="Edit this line"
+                                                        >
+                                                            <x-icon name="pencil" :size="15" />
+                                                        </button>
+                                                    @endif
 
-                                                    <button
-                                                        type="button"
-                                                        class="mem-row-action"
-                                                        wire:click="duplicateRow('{{ $rowKey }}')"
-                                                        title="Duplicate this line"
-                                                    >
-                                                        <x-icon name="copy" :size="15" />
-                                                    </button>
+                                                    @if ($this->canEditAccountCode())
+                                                        <button
+                                                            type="button"
+                                                            class="mem-row-action"
+                                                            wire:click="openAccountCodeEdit('{{ $rowKey }}')"
+                                                            title="Edit account code"
+                                                        >
+                                                            <x-icon name="tags" :size="15" />
+                                                        </button>
+                                                    @endif
 
-                                                    <button
-                                                        type="button"
-                                                        class="mem-row-action"
-                                                        wire:click="moveRow('{{ $rowKey }}')"
-                                                        title="Move to {{ $sectionKey === 'operations' ? 'Project' : 'Operations' }}"
-                                                    >
-                                                        <x-icon name="arrow-right-left" :size="15" />
-                                                    </button>
+                                                    @if ($this->canEdit())
+                                                        <button
+                                                            type="button"
+                                                            class="mem-row-action"
+                                                            wire:click="duplicateRow('{{ $rowKey }}')"
+                                                            title="Duplicate this line"
+                                                        >
+                                                            <x-icon name="copy" :size="15" />
+                                                        </button>
 
-                                                    <button
-                                                        type="button"
-                                                        class="mem-row-remove"
-                                                        wire:click="removeRow('{{ $rowKey }}')"
-                                                        title="Remove this line"
-                                                    >
-                                                        <x-icon name="trash" :size="15" />
-                                                    </button>
+                                                        <button
+                                                            type="button"
+                                                            class="mem-row-action"
+                                                            wire:click="moveRow('{{ $rowKey }}')"
+                                                            title="Move to {{ $sectionKey === 'operations' ? 'Project' : 'Operations' }}"
+                                                        >
+                                                            <x-icon name="arrow-right-left" :size="15" />
+                                                        </button>
+
+                                                        <button
+                                                            type="button"
+                                                            class="mem-row-remove"
+                                                            wire:click="removeRow('{{ $rowKey }}')"
+                                                            title="Remove this line"
+                                                        >
+                                                            <x-icon name="trash" :size="15" />
+                                                        </button>
+                                                    @endif
                                                 </div>
                                             @endif
                                         </td>
@@ -784,7 +806,7 @@
 
                     <div class="field">
                         <label for="memLineObjective">
-                            Objectives
+                            Objectives <span class="field-required">required</span>
                             @if ($this->templateFieldIsFilled('objective'))
                                 <span class="field-template-tag">from template</span>
                             @endif
@@ -1061,7 +1083,7 @@
                          while typing instead of waiting for a save. --}}
                     <div class="mem-line-resource mem-line-span" role="group" aria-labelledby="memLineResourceLabel">
                         <span id="memLineResourceLabel" class="mem-line-resource__label">
-                            Resource Needed
+                            Resource Needed <span class="field-required">required</span>
                             @if ($this->templateFieldIsFilled('resource_kind') || $this->templateFieldIsFilled('unit') || $this->templateFieldIsFilled('quantity') || $this->templateFieldIsFilled('unit_cost'))
                                 <span class="field-template-tag">from template</span>
                             @endif
@@ -1074,6 +1096,7 @@
                                 <span>Unit</span>
                                 <span>Unit cost</span>
                                 <span class="mem-resource-table__total">Total Estimated Cost</span>
+                                <span>Account code</span>
                                 <span></span>
                             </div>
 
@@ -1107,7 +1130,84 @@
                                     </div>
                                 </div>
 
+                                <div class="mem-resource-cell" data-label="Account code">
+                                    <input type="text" wire:model="lineForm.account_code" placeholder="Object code" aria-label="Account code">
+                                    @error('lineForm.account_code') <div class="error-text">{{ $message }}</div> @enderror
+                                </div>
+
                                 <div class="mem-resource-cell mem-resource-cell--action mem-resource-cell--placeholder" aria-hidden="true"></div>
+
+                                <div class="mem-resource-cell mem-resource-cell--account-title" data-label="Account title">
+                                    {{-- The account picker keeps the searchable
+                                         combobox the SH is used to: type a title
+                                         or object code, pick from the list, and the
+                                         row's title, code and master link are set.
+                                         Typing without picking still saves the
+                                         typed title (server-side fallback). --}}
+                                    <div class="mem-combo" x-data="{ open: false }" @click.outside="open = false">
+                                        <span class="mem-combo__search" aria-hidden="true">
+                                            <x-icon name="search" :size="15" />
+                                        </span>
+
+                                        <input
+                                            id="memLineAccountTitle"
+                                            type="text"
+                                            autocomplete="off"
+                                            role="combobox"
+                                            aria-autocomplete="list"
+                                            aria-controls="memAccountOptions"
+                                            :aria-expanded="String(open)"
+                                            wire:model.live.debounce.300ms="accountSearch"
+                                            placeholder="Account title"
+                                            @focus="open = true"
+                                            @keydown.escape="open = false"
+                                        >
+
+                                        @if (trim($accountSearch) !== '')
+                                            <button
+                                                type="button"
+                                                class="mem-combo__clear"
+                                                wire:click="clearAccount"
+                                                aria-label="Clear account"
+                                                title="Clear"
+                                            >
+                                                <x-icon name="x" :size="14" />
+                                            </button>
+                                        @endif
+
+                                        <div
+                                            id="memAccountOptions"
+                                            class="mem-combo__menu"
+                                            role="listbox"
+                                            :class="open ? 'open' : ''"
+                                        >
+                                            @forelse ($this->accountOptions as $option)
+                                                <button
+                                                    type="button"
+                                                    role="option"
+                                                    class="mem-combo__option"
+                                                    wire:key="acct-opt-{{ $option->id }}"
+                                                    wire:click="chooseAccount({{ $option->id }})"
+                                                    @click="open = false"
+                                                >
+                                                    <span class="mem-combo__option-main">
+                                                        <span class="mem-combo__option-title">{{ $option->account_title }}</span>
+                                                        @if (trim((string) ($option->uacs_object_code ?? '')) !== '')
+                                                            <span class="mem-combo__option-sub">{{ $option->uacs_object_code }}</span>
+                                                        @endif
+                                                    </span>
+                                                    <span class="mem-combo__option-meta">
+                                                        <span class="mem-combo__rca">[{{ $option->uacs_object_code }}]</span>
+                                                    </span>
+                                                </button>
+                                            @empty
+                                                <div class="mem-combo__empty">No matching accounts.</div>
+                                            @endforelse
+                                        </div>
+                                    </div>
+
+                                    @error('lineForm.account_title') <div class="error-text">{{ $message }}</div> @enderror
+                                </div>
                             </div>
 
                             @foreach ($lineResources as $index => $resource)
@@ -1138,6 +1238,11 @@
                                         </div>
                                     </div>
 
+                                    <div class="mem-resource-cell" data-label="Account code">
+                                        <input type="text" wire:model="lineResources.{{ $index }}.account_code" placeholder="Object code" aria-label="Account code">
+                                        @error("lineResources.{$index}.account_code") <div class="error-text">{{ $message }}</div> @enderror
+                                    </div>
+
                                     <div class="mem-resource-cell mem-resource-cell--action">
                                         <button
                                             type="button"
@@ -1148,6 +1253,76 @@
                                         >
                                             <x-icon name="trash" :size="15" />
                                         </button>
+                                    </div>
+
+                                    <div class="mem-resource-cell mem-resource-cell--account-title" data-label="Account title">
+                                        {{-- Every resource row carries its own searchable
+                                             account picker, so a row's account travels
+                                             with it instead of living below the row. --}}
+                                        <div class="mem-combo" x-data="{ open: false }" @click.outside="open = false">
+                                            <span class="mem-combo__search" aria-hidden="true">
+                                                <x-icon name="search" :size="15" />
+                                            </span>
+
+                                            <input
+                                                type="text"
+                                                autocomplete="off"
+                                                role="combobox"
+                                                aria-autocomplete="list"
+                                                aria-controls="memAccountOptions-{{ $index }}"
+                                                :aria-expanded="String(open)"
+                                                wire:model.live.debounce.300ms="lineResources.{{ $index }}.accountSearch"
+                                                placeholder="Account title"
+                                                @focus="open = true"
+                                                @keydown.escape="open = false"
+                                            >
+
+                                            @if (trim((string) ($resource['accountSearch'] ?? '')) !== '')
+                                                <button
+                                                    type="button"
+                                                    class="mem-combo__clear"
+                                                    wire:click="clearAccount({{ $index }})"
+                                                    aria-label="Clear account"
+                                                    title="Clear"
+                                                >
+                                                    <x-icon name="x" :size="14" />
+                                                </button>
+                                            @endif
+
+                                            <div
+                                                id="memAccountOptions-{{ $index }}"
+                                                class="mem-combo__menu"
+                                                role="listbox"
+                                                :class="open ? 'open' : ''"
+                                            >
+                                                @forelse ($this->accountOptionsFor((string) ($resource['accountSearch'] ?? '')) as $option)
+                                                    <button
+                                                        type="button"
+                                                        role="option"
+                                                        class="mem-combo__option"
+                                                        wire:key="acct-opt-res-{{ $index }}-{{ $option->id }}"
+                                                        wire:click="chooseAccount({{ $option->id }}, {{ $index }})"
+                                                        @click="open = false"
+                                                    >
+                                                        <span class="mem-combo__option-main">
+                                                            <span class="mem-combo__option-title">{{ $option->account_title }}</span>
+                                                            @if (trim((string) ($option->uacs_object_code ?? '')) !== '')
+                                                                <span class="mem-combo__option-sub">{{ $option->uacs_object_code }}</span>
+                                                            @endif
+                                                        </span>
+                                                        <span class="mem-combo__option-meta">
+                                                            <span class="mem-combo__rca">[{{ $option->uacs_object_code }}]</span>
+                                                        </span>
+                                                    </button>
+                                                @empty
+                                                    @if (trim((string) ($resource['accountSearch'] ?? '')) !== '')
+                                                        <div class="mem-combo__empty">No matching accounts.</div>
+                                                    @endif
+                                                @endforelse
+                                            </div>
+                                        </div>
+
+                                        @error("lineResources.{$index}.account_title") <div class="error-text">{{ $message }}</div> @enderror
                                     </div>
                                 </div>
                             @endforeach
@@ -1176,87 +1351,6 @@
                         </div>
                     </div>
 
-                    {{-- Account title / code: one searchable dropdown. Typing
-                         filters the active account classifications by title or
-                         object code; picking one fills the title, the code and
-                         the classification link. Free text still works — if
-                         nothing is picked, what was typed becomes the title. --}}
-                    <div class="field">
-                        <label for="memLineAccount">
-                            Account title / Account code
-                            @if ($this->templateFieldIsFilled('account_title'))
-                                <span class="field-template-tag">from template</span>
-                            @endif
-                        </label>
-
-                        <div class="mem-combo" x-data="{ open: false }" @click.outside="open = false">
-                            <span class="mem-combo__search" aria-hidden="true">
-                                <x-icon name="search" :size="15" />
-                            </span>
-
-                            <input
-                                id="memLineAccount"
-                                type="text"
-                                autocomplete="off"
-                                role="combobox"
-                                aria-autocomplete="list"
-                                aria-controls="memAccountOptions"
-                                :aria-expanded="String(open)"
-                                wire:model.live.debounce.300ms="accountSearch"
-                                placeholder="Search title or object code…"
-                                @focus="open = true"
-                                @keydown.escape="open = false"
-                                @class(['error' => $errors->has('lineForm.account_title')])
-                            >
-
-                            @if (trim($accountSearch) !== '')
-                                <button
-                                    type="button"
-                                    class="mem-combo__clear"
-                                    wire:click="clearAccount"
-                                    aria-label="Clear account"
-                                    title="Clear"
-                                >
-                                    <x-icon name="x" :size="14" />
-                                </button>
-                            @endif
-
-                            {{-- The open/closed state is a class (like the
-                                 notifications panel), so Livewire re-renders
-                                 never resurrect the menu mid-typing. --}}
-                            <div
-                                id="memAccountOptions"
-                                class="mem-combo__menu"
-                                role="listbox"
-                                :class="open ? 'open' : ''"
-                            >
-                                @forelse ($this->accountOptions as $option)
-                                    <button
-                                        type="button"
-                                        role="option"
-                                        class="mem-combo__option"
-                                        wire:key="ac-opt-{{ $option->id }}"
-                                        wire:click="chooseAccount({{ $option->id }})"
-                                        @click="open = false"
-                                    >
-                                        <span class="mem-combo__option-title">{{ $option->account_title }}</span>
-                                        <span class="mem-combo__option-meta">
-                                            <span class="ac-code">{{ $option->uacs_object_code }}</span>
-                                            @if ($option->rca_code)
-                                                <span class="mem-combo__rca">RCA {{ $option->rca_code }}</span>
-                                            @endif
-                                        </span>
-                                    </button>
-                                @empty
-                                    <div class="mem-combo__empty">No matching account classifications.</div>
-                                @endforelse
-                            </div>
-                        </div>
-
-                        <input type="text" wire:model="lineForm.account_code" placeholder="Object code" aria-label="Account code">
-                        @error('lineForm.account_title') <div class="error-text">{{ $message }}</div> @enderror
-                        @error('lineForm.account_code') <div class="error-text">{{ $message }}</div> @enderror
-                    </div>
 
                     <div class="field">
                         <label for="memLineFunding">
@@ -1417,6 +1511,10 @@
                                     <x-icon name="check" :size="15" />
                                     <span>Apply to all</span>
                                 </button>
+                                <button type="button" class="ac-import-btn" wire:click="uncheckAllMonths">
+                                    <x-icon name="x" :size="15" />
+                                    <span>Uncheck all</span>
+                                </button>
                             </div>
                         </div>
                     @endif
@@ -1427,6 +1525,43 @@
                     <button type="submit" class="btn-primary" wire:loading.attr="disabled" wire:target="saveLineFromModal">
                         <span wire:loading.remove wire:target="saveLineFromModal">{{ $editingKey !== null ? 'Save changes' : 'Add line' }}</span>
                         <span wire:loading wire:target="saveLineFromModal">Saving…</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    {{-- ACCOUNT CODE ONLY EDIT --}}
+    <div class="modal-backdrop {{ $accountCodeEditingKey !== null ? 'is-open' : '' }}"
+         @if ($accountCodeEditingKey !== null) @mousedown.self="$wire.closeAccountCodeEdit()" @endif
+         role="presentation">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="memAccountCodeTitle" @click.stop>
+            <div class="modal-head">
+                <h2 id="memAccountCodeTitle">Edit Account Code</h2>
+                <button type="button" class="modal-close" wire:click="closeAccountCodeEdit" aria-label="Close" title="Close">×</button>
+            </div>
+
+            <form wire:submit="saveAccountCodeEdit" class="modal-form">
+                <div class="field">
+                    <label for="memAccountCode">Account Code</label>
+                    <input
+                        id="memAccountCode"
+                        type="text"
+                        placeholder="e.g. 5020301000"
+                        autocomplete="off"
+                        wire:model="accountCodeForm"
+                        @class(['error' => $errors->has('accountCodeForm')])
+                        required
+                    >
+                    @error('accountCodeForm') <div class="error-text">{{ $message }}</div> @enderror
+                    <div class="field-hint">Only the account code changes — the account title and every other field stay as they are.</div>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn-ghost" wire:click="closeAccountCodeEdit">Cancel</button>
+                    <button type="submit" class="btn-primary" wire:loading.attr="disabled" wire:target="saveAccountCodeEdit">
+                        <span wire:loading.remove wire:target="saveAccountCodeEdit">Save Code</span>
+                        <span wire:loading wire:target="saveAccountCodeEdit">Saving…</span>
                     </button>
                 </div>
             </form>

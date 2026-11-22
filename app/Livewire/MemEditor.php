@@ -113,7 +113,16 @@ class MemEditor extends Component
      */
     public string $lineRepeated = 'no';
 
-    /** The live query behind the account combobox (title or object code). */
+    /**
+     * The _key of the line whose account code is being edited in the small
+     * account-code-only modal.
+     */
+    public ?string $accountCodeEditingKey = null;
+
+    /** The account code being typed in the small edit modal. */
+    public string $accountCodeForm = '';
+
+    /** The account being searched for in the line modal's account picker. */
     public string $accountSearch = '';
 
     /* Template picker for the Add a Line form. */
@@ -231,6 +240,30 @@ class MemEditor extends Component
         return Auth::user()?->canManageWfp() === true;
     }
 
+    /**
+     * Whether the signed-in account may edit the account code of one line.
+     * School heads (canManageWfp) may edit any line in their matrix;
+     * bookkeepers may edit only lines in matrices belonging to schools on
+     * their roster. This is narrower than full line editing: bookkeepers
+     * correct account codes but do not restructure lines.
+     */
+    public function canEditAccountCode(): bool
+    {
+        $user = Auth::user();
+
+        if ($user?->canManageWfp() === true) {
+            return true;
+        }
+
+        if ($user?->isBookkeeperRole() === true) {
+            $matrix = MonthlyExpenditureMatrix::find($this->matrixId);
+
+            return $matrix !== null && $user->canAccessSchool((int) $matrix->school_id);
+        }
+
+        return false;
+    }
+
     private function loadItems(MonthlyExpenditureMatrix $matrix): void
     {
         $this->items = $matrix->items()
@@ -257,6 +290,7 @@ class MemEditor extends Component
             'unit_cost' => $item->unit_cost !== null ? (string) (float) $item->unit_cost : '',
             'account_title' => (string) ($item->account_title ?? ''),
             'account_code' => (string) ($item->account_code ?? ''),
+            'corrected_by' => $item->corrected_by,
             'account_classification_id' => $item->account_classification_id,
             'funding_source' => (string) ($item->funding_source ?? ''),
             'organizational_classification' => (string) ($item->organizational_classification ?? ''),
@@ -313,6 +347,10 @@ class MemEditor extends Component
             'quantity' => '',
             'unit' => '',
             'unit_cost' => '',
+            'account_title' => '',
+            'account_code' => '',
+            'account_classification_id' => null,
+            'accountSearch' => '',
             'resource_kind_id' => null,
             'unit_id' => null,
         ];
@@ -407,8 +445,8 @@ class MemEditor extends Component
             $this->lineSection = in_array($section, ['operations', 'project'], true) ? $section : 'operations';
             $this->lineForm = $this->blankRow($this->lineSection);
             $this->lineResources = [];
-            $this->accountSearch = '';
             $this->templateSearch = '';
+            $this->accountSearch = '';
             $this->appliedTemplateId = null;
             $this->appliedTemplateName = '';
             $this->appliedTemplateSnapshot = [];
@@ -464,8 +502,8 @@ class MemEditor extends Component
                 ? $row['section']
                 : 'operations';
             $this->lineForm = $row;
-            $this->lineResources = [];
             $this->accountSearch = (string) ($row['account_title'] ?? '');
+            $this->lineResources = [];
             $this->templateSearch = '';
 
             // If this line was encoded from a template, remember it so the
@@ -534,8 +572,8 @@ class MemEditor extends Component
         $this->lineResources = [];
         $this->lineMonths = [];
         $this->lineRepeated = 'no';
-        $this->accountSearch = '';
         $this->templateSearch = '';
+        $this->accountSearch = '';
         $this->appliedTemplateId = null;
         $this->appliedTemplateName = '';
         $this->appliedTemplateSnapshot = [];
@@ -548,8 +586,6 @@ class MemEditor extends Component
      * Whether the modal holds a line the user started filling but never
      * saved: an open edit, or any filled field. A blank draft is nothing to
      * keep.
-     *
-     * @return bool
      */
     private function lineModalHasData(): bool
     {
@@ -708,6 +744,7 @@ class MemEditor extends Component
         $this->lineForm['account_title'] = (string) ($item->account_title ?? '');
         $this->lineForm['account_code'] = (string) ($item->account_code ?? '');
         $this->lineForm['account_classification_id'] = $item->account_classification_id;
+        $this->accountSearch = (string) ($item->account_title ?? '');
         $this->lineForm['funding_source'] = (string) ($item->funding_source ?? '');
         $this->lineForm['funding_source_id'] = $item->funding_source_id;
         $this->lineForm['organizational_classification'] = (string) ($item->organizational_classification ?? '');
@@ -716,8 +753,6 @@ class MemEditor extends Component
         $this->lineForm['performance_indicator'] = (string) ($item->performance_indicator ?? '');
         $this->lineForm['activity_movs'] = (string) ($item->activity_movs ?? '');
         $this->lineForm['wfp_line_template_id'] = $item->wfp_line_template_id;
-
-        $this->accountSearch = (string) ($item->account_title ?? '');
 
         // The user engaged with the existing entry deliberately: the save
         // gate treats this as the confirmation for this description.
@@ -825,6 +860,19 @@ class MemEditor extends Component
     }
 
     /**
+     * "Uncheck all": clear every checked month. Saving still requires at least
+     * one month — the save gate enforces it — so clearing only restarts the
+     * month picker.
+     */
+    public function uncheckAllMonths(): void
+    {
+        $this->guard();
+
+        $this->lineMonths = [];
+        $this->resetValidation('lineMonths');
+    }
+
+    /**
      * Validate the modal's line and write it to the checked months. Adding
      * copies the line in; editing changes only the month being edited — this
      * month's row is updated (or deleted when its checkbox is cleared), a
@@ -840,10 +888,14 @@ class MemEditor extends Component
         $this->lineForm['section'] = $this->lineSection;
         $this->lineForm['wfp_line_template_id'] = $this->appliedTemplateId;
 
-        // The combobox doubles as a free-text title: when no classification was
-        // chosen, whatever was typed becomes the line's account title.
-        if (trim((string) ($this->lineForm['account_title'] ?? '')) === '' && trim($this->accountSearch) !== '') {
-            $this->lineForm['account_title'] = $this->accountSearch;
+        // The combobox is the primary row's account picker: typing a title
+        // without picking still means that title — keep it so the save does
+        // not throw it away, and normaliseAccount() links it to a master
+        // record when it matches one.
+        if (trim((string) ($this->lineForm['account_title'] ?? '')) === ''
+            && trim($this->accountSearch) !== '') {
+            $this->lineForm['account_title'] = trim($this->accountSearch);
+            $this->lineForm['account_classification_id'] = null;
         }
 
         $existing = ! empty($this->lineForm['id'])
@@ -858,6 +910,31 @@ class MemEditor extends Component
         $this->lineForm = $this->normaliseRow($this->lineForm, $existing);
 
         $this->validate($this->lineRules(), $this->lineAttributes());
+
+        // A saved line names what it is for (Objectives), what it needs (at
+        // least one filled Resource Needed row) and the account it is charged
+        // to (title and/or code). Refuse an incomplete save before anything
+        // is written — the modal stays open so the user can finish it.
+        $incomplete = false;
+
+        if (trim((string) ($this->lineForm['objective'] ?? '')) === '') {
+            $this->addError('lineForm.objective', 'Objectives are required.');
+            $incomplete = true;
+        }
+
+        if (self::resourcesAreBlank($this->lineForm, $this->lineResources)) {
+            $this->addError('lineForm.resource_kind', 'Resource Needed is required — fill in at least one row.');
+            $incomplete = true;
+        }
+
+        if (self::accountIsBlank($this->lineForm, $this->lineResources)) {
+            $this->addError('lineForm.account_title', 'Account title / Account code is required.');
+            $incomplete = true;
+        }
+
+        if ($incomplete) {
+            return;
+        }
 
         // The duplicate gate: a FRESH server-side check for an exact
         // description match already standing in this matrix — the suggestion
@@ -1072,6 +1149,113 @@ class MemEditor extends Component
         unset($this->months, $this->allocation, $this->totals);
 
         $this->warnIfOverAllotment($beforeConsumed);
+    }
+
+    /**
+     * Open the small account-code-only edit modal for one line. Only the code
+     * field may change — the title, classification link, and every other field
+     * are left untouched.
+     */
+    public function openAccountCodeEdit(string $key): void
+    {
+        abort_unless($this->canEditAccountCode(), 404);
+
+        foreach ($this->items as $row) {
+            if (($row['_key'] ?? null) !== $key) {
+                continue;
+            }
+
+            $this->accountCodeEditingKey = $key;
+            $this->accountCodeForm = (string) ($row['account_code'] ?? '');
+            $this->resetValidation('accountCodeForm');
+
+            return;
+        }
+    }
+
+    public function closeAccountCodeEdit(): void
+    {
+        $this->accountCodeEditingKey = null;
+        $this->accountCodeForm = '';
+        $this->resetValidation('accountCodeForm');
+    }
+
+    /**
+     * Save the account code for one line: only the code changes, nothing else.
+     * The matrix version is bumped and the computed caches cleared so the grid
+     * and the year's balance reflect the write.
+     */
+    public function saveAccountCodeEdit(): void
+    {
+        abort_unless($this->canEditAccountCode(), 404);
+
+        $this->validate([
+            'accountCodeForm' => ['nullable', 'string', 'max:64'],
+        ], [
+            'accountCodeForm.string' => 'The account code must be text.',
+            'accountCodeForm.max' => 'The account code may not be longer than 64 characters.',
+        ]);
+
+        $code = trim($this->accountCodeForm);
+
+        foreach ($this->items as $row) {
+            if (($row['_key'] ?? null) !== $this->accountCodeEditingKey) {
+                continue;
+            }
+
+            $item = ! empty($row['id'])
+                ? MonthlyExpenditureItem::query()
+                    ->where('matrix_id', $this->matrixId)
+                    ->find((int) $row['id'])
+                : null;
+
+            if ($item === null) {
+                $this->closeAccountCodeEdit();
+
+                return;
+            }
+
+            $item->account_code = $code !== '' ? $code : null;
+            $item->syncTotal();
+
+            // A bookkeeper's correction is stamped so the line can be shown as
+            // "corrected by bookkeeper" on the matrix and checking pages. A
+            // School Head's own edit is not.
+            if (Auth::user()?->isBookkeeperRole()) {
+                $item->corrected_by = Auth::id();
+                $item->corrected_at = now();
+            }
+
+            $item->save();
+
+            // Reflect in the grid without a full reload.
+            foreach ($this->items as $index => $r) {
+                if (($r['_key'] ?? null) !== $this->accountCodeEditingKey) {
+                    continue;
+                }
+                $this->items[$index]['account_code'] = $item->account_code;
+
+                break;
+            }
+
+            // A line's content changed — the Bookkeeper's check no longer
+            // describes what the report will show.
+            WfpReportCheck::clearFor(
+                (int) $this->matrix->school_id,
+                (int) $this->matrix->year,
+                $this->matrix->schoolDivision(),
+            );
+
+            $matrix = MonthlyExpenditureMatrix::findOrFail($this->matrixId);
+            $matrix->bumpVersion();
+
+            unset($this->months, $this->allocation, $this->totals);
+
+            $this->closeAccountCodeEdit();
+            $this->successMessage = 'Account code saved.';
+
+            return;
+        }
     }
 
     /**
@@ -1350,6 +1534,9 @@ class MemEditor extends Component
         $rules['lineResources.*.unit_cost'] = ['nullable', 'numeric', 'min:0'];
         $rules['lineResources.*.resource_kind_id'] = ['nullable', 'integer'];
         $rules['lineResources.*.unit_id'] = ['nullable', 'integer'];
+        $rules['lineResources.*.account_title'] = ['nullable', 'string', 'max:255'];
+        $rules['lineResources.*.account_code'] = ['nullable', 'string', 'max:64'];
+        $rules['lineResources.*.account_classification_id'] = ['nullable', 'integer'];
 
         return $rules;
     }
@@ -1369,6 +1556,9 @@ class MemEditor extends Component
         $attributes['lineResources.*.quantity'] = 'quantity';
         $attributes['lineResources.*.unit'] = 'unit';
         $attributes['lineResources.*.unit_cost'] = 'unit cost';
+        $attributes['lineResources.*.account_title'] = 'account title';
+        $attributes['lineResources.*.account_code'] = 'account code';
+        $attributes['lineResources.*.account_classification_id'] = 'account';
 
         return $attributes;
     }
@@ -1389,6 +1579,9 @@ class MemEditor extends Component
             'quantity' => $row['quantity'] ?? '',
             'unit' => (string) ($row['unit'] ?? ''),
             'unit_cost' => $row['unit_cost'] ?? '',
+            'account_title' => (string) ($row['account_title'] ?? ''),
+            'account_code' => (string) ($row['account_code'] ?? ''),
+            'account_classification_id' => $row['account_classification_id'] ?? null,
             'resource_kind_id' => $row['resource_kind_id'] ?? null,
             'unit_id' => $row['unit_id'] ?? null,
         ];
@@ -1413,6 +1606,51 @@ class MemEditor extends Component
     }
 
     /**
+     * Whether the Resource Needed block carries nothing at all: the primary
+     * row and every extra row are completely empty. Any one filled field in
+     * any row counts as the block being filled (`resourceIsBlank()`).
+     *
+     * @param  array<string, mixed>  $form
+     * @param  array<int, array<string, mixed>>  $resources
+     */
+    private static function resourcesAreBlank(array $form, array $resources): bool
+    {
+        if (! self::resourceIsBlank($form)) {
+            return false;
+        }
+
+        foreach ($resources as $resource) {
+            if (! self::resourceIsBlank($resource)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Whether the line names no account at all — neither a typed title nor a
+     * code on the primary row or on any resource row. The Resource Needed
+     * block carries one account per row, so every row is checked.
+     */
+    private static function accountIsBlank(array $form, array $resources): bool
+    {
+        if (trim((string) ($form['account_title'] ?? '')) !== ''
+            || trim((string) ($form['account_code'] ?? '')) !== '') {
+            return false;
+        }
+
+        foreach ($resources as $resource) {
+            if (trim((string) ($resource['account_title'] ?? '')) !== ''
+                || trim((string) ($resource['account_code'] ?? '')) !== '') {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
      * The complete lines the modal's resource rows stand for. Each row is the
      * line's shared fields (activity, account, section…) plus that row's own
      * resource columns, normalised exactly like a grid row.
@@ -1424,37 +1662,62 @@ class MemEditor extends Component
      */
     private function lineRowsForSave(?MonthlyExpenditureItem $existing, bool $editing): array
     {
-        $resources = [self::resourceFields($this->lineForm)];
+        /** @var array<int, array{row: array<string, mixed>, isPrimary: bool}> */
+        $resources = [
+            ['row' => self::resourceFields($this->lineForm), 'isPrimary' => true],
+        ];
 
         foreach ($this->lineResources as $resource) {
-            $resources[] = self::resourceFields($resource);
+            $resources[] = ['row' => self::resourceFields($resource), 'isPrimary' => false];
         }
 
-        if (! $editing && $resources !== [] && self::resourceIsBlank($resources[0])) {
-            array_shift($resources);
+        if (! $editing && self::resourceIsBlank($resources[0]['row'])) {
+            unset($resources[0]);
         }
 
         $resources = array_values(array_filter(
             $resources,
-            static fn (array $resource): bool => $editing || ! self::resourceIsBlank($resource),
+            static fn (array $entry): bool => $editing || ! self::resourceIsBlank($entry['row']),
         ));
 
         // No resource details at all: keep one row with empty resource
-        // columns, exactly as the single-resource form allowed.
+        // columns, exactly as the single-resource form allowed — it still
+        // carries the line form's account, since there is no other row.
         if ($resources === []) {
-            $resources[] = self::resourceFields([]);
+            $resources[] = ['row' => self::resourceFields([]), 'isPrimary' => true];
         }
 
         $rows = [];
 
-        foreach ($resources as $index => $resource) {
+        foreach ($resources as $entry) {
+            $resource = $entry['row'];
+
+            if (! $entry['isPrimary']) {
+                // A typed title without a picked account still names the
+                // account on save, just like the primary row's fallback.
+                if (trim((string) ($resource['account_title'] ?? '')) === ''
+                    && trim((string) ($resource['accountSearch'] ?? '')) !== '') {
+                    $resource['account_title'] = trim($resource['accountSearch']);
+                    $resource['account_classification_id'] = null;
+                }
+            }
+
             $row = array_merge($this->lineForm, $resource);
+
+            if (! $entry['isPrimary']) {
+                // Sibling resource rows carry their own account title and
+                // code: the line form's account belongs to the primary row
+                // alone and never leaks into an extra row.
+                $row['account_title'] = $resource['account_title'];
+                $row['account_code'] = $resource['account_code'];
+                $row['account_classification_id'] = $resource['account_classification_id'];
+            }
 
             // Only the row being edited may keep an inactive lookup link; a
             // new line can never be stamped with one.
             $rows[] = $this->normaliseRow(
                 $row,
-                $editing && $index === 0 ? $existing : null,
+                $editing && $entry['isPrimary'] ? $existing : null,
             );
         }
 
@@ -2183,52 +2446,86 @@ class MemEditor extends Component
     /* ------------------------------------------------------ account combobox */
 
     /**
-     * Pick an account from the combobox into the line being encoded. The
-     * title, object code and the classification link are all set, and the
-     * search box is left showing the chosen title.
+     * Pick an account from the searchable picker: its title, code and master
+     * record stamp the primary resource row. Locked is not needed here — the
+     * id comes from a rendered option and is re-validated server-side on save.
      */
-    public function chooseAccount(int $classificationId): void
+    public function chooseAccount(int $id, ?int $resourceIndex = null): void
     {
-        $this->guard();
+        $classification = AccountClassification::query()->active()->find($id);
 
-        $classification = AccountClassification::findOrFail($classificationId);
+        abort_if($classification === null, 404);
 
-        // New selections may only come from the active master list; the line's
-        // existing (possibly retired) link is preserved by normaliseAccount().
-        abort_unless($classification->is_active, 404);
+        $title = (string) $classification->account_title;
+        $code = (string) $classification->uacs_object_code;
+        $key = (int) $classification->getKey();
 
-        $this->lineForm['account_title'] = (string) $classification->account_title;
-        $this->lineForm['account_code'] = (string) $classification->uacs_object_code;
-        $this->lineForm['account_classification_id'] = $classification->id;
-        $this->accountSearch = (string) $classification->account_title;
+        if ($resourceIndex === null || ! isset($this->lineResources[$resourceIndex])) {
+            $this->lineForm['account_title'] = $title;
+            $this->lineForm['account_code'] = $code;
+            $this->lineForm['account_classification_id'] = $key;
+            $this->accountSearch = $title;
 
-        $this->resetValidation('lineForm.account_title');
-        $this->resetValidation('lineForm.account_code');
+            $this->resetValidation('lineForm.account_title', 'lineForm.account_code');
+
+            return;
+        }
+
+        $this->lineResources[$resourceIndex]['account_title'] = $title;
+        $this->lineResources[$resourceIndex]['account_code'] = $code;
+        $this->lineResources[$resourceIndex]['account_classification_id'] = $key;
+        $this->lineResources[$resourceIndex]['accountSearch'] = $title;
+
+        $this->resetValidation("lineResources.{$resourceIndex}.account_title", "lineResources.{$resourceIndex}.account_code");
     }
 
-    /** Clear the line's account — the combobox's × button. */
-    public function clearAccount(): void
+    /** Clear the account picker: the primary row when no index is given,
+     *  otherwise one extra resource row. */
+    public function clearAccount(?int $resourceIndex = null): void
     {
-        $this->guard();
+        if ($resourceIndex !== null && isset($this->lineResources[$resourceIndex])) {
+            $this->lineResources[$resourceIndex]['accountSearch'] = '';
+            $this->lineResources[$resourceIndex]['account_title'] = '';
+            $this->lineResources[$resourceIndex]['account_code'] = '';
+            $this->lineResources[$resourceIndex]['account_classification_id'] = null;
 
+            $this->resetValidation("lineResources.{$resourceIndex}.account_title", "lineResources.{$resourceIndex}.account_code");
+
+            return;
+        }
+
+        $this->accountSearch = '';
         $this->lineForm['account_title'] = '';
         $this->lineForm['account_code'] = '';
         $this->lineForm['account_classification_id'] = null;
-        $this->accountSearch = '';
 
-        $this->resetValidation('lineForm.account_title');
-        $this->resetValidation('lineForm.account_code');
+        $this->resetValidation('lineForm.account_title', 'lineForm.account_code');
     }
 
     /**
-     * The user edited the search box. Once it no longer reads as the chosen
-     * title the line is no longer bound to a specific classification, so drop
-     * the link — a stale id must not be saved under a hand-typed title.
+     * The user typed a title without picking from the list: if it no longer
+     * matches the account currently linked to the row, drop the link so a
+     * saved line is never stamped with an account the user did not choose.
+     * normaliseAccount() re-links a typed title to a master record when it
+     * matches one.
      */
     public function updatedAccountSearch(): void
     {
-        if (trim($this->accountSearch) !== trim((string) ($this->lineForm['account_title'] ?? ''))) {
+        $id = ! empty($this->lineForm['account_classification_id'])
+            ? (int) $this->lineForm['account_classification_id']
+            : null;
+
+        if ($id === null) {
+            return;
+        }
+
+        $classification = AccountClassification::query()->active()->find($id);
+
+        if ($classification === null
+            || (string) $classification->account_title !== trim($this->accountSearch)) {
             $this->lineForm['account_classification_id'] = null;
+            $this->lineForm['account_code'] = '';
+            $this->resetValidation('lineForm.account_code');
         }
     }
 
@@ -2416,13 +2713,6 @@ class MemEditor extends Component
             }
         }
 
-        // Wire the account combobox to show the chosen account's wording.
-        $accountTitle = (string) ($template->accountClassification?->account_title ?? '');
-
-        if ($accountTitle !== '') {
-            $this->accountSearch = $accountTitle;
-        }
-
         $this->appliedTemplateId = $template->id;
         $this->appliedTemplateName = (string) $template->name;
         $this->appliedTemplateSnapshot = $snapshot;
@@ -2514,9 +2804,7 @@ class MemEditor extends Component
         return WfpOrgClassification::query()->active()->orderBy('name')->limit(50)->get()->all();
     }
 
-    /**
-     * @return array<int, AccountClassification>
-     */
+    /** @return array<int, AccountClassification> */
     #[Computed]
     public function accountOptions(): array
     {
@@ -2529,9 +2817,37 @@ class MemEditor extends Component
 
                 $query->where(function ($query) use ($like): void {
                     $query->where('account_title', 'like', $like)
-                        ->orWhere('uacs_object_code', 'like', $like)
-                        ->orWhere('rca_code', 'like', $like);
+                        ->orWhere('uacs_object_code', 'like', $like);
                 });
+            })
+            ->orderBy('account_title')
+            ->limit(50)
+            ->get()
+            ->all();
+    }
+
+    /**
+     * Active accounts matching a search term, for one resource row's picker.
+     * Returns nothing when there's nothing to search for, so an empty row
+     * does not query on every render.
+     *
+     * @return array<int, AccountClassification>
+     */
+    public function accountOptionsFor(string $search): array
+    {
+        $term = trim($search);
+
+        if ($term === '') {
+            return [];
+        }
+
+        return AccountClassification::query()
+            ->active()
+            ->where(function ($query) use ($term): void {
+                $like = '%'.str_replace(['%', '_'], ['\%', '\_'], $term).'%';
+
+                $query->where('account_title', 'like', $like)
+                    ->orWhere('uacs_object_code', 'like', $like);
             })
             ->orderBy('account_title')
             ->limit(50)

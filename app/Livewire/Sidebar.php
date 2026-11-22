@@ -54,14 +54,18 @@ class Sidebar extends Component
         abort_unless(Auth::check(), 404);
 
         // The active WFP division opens on arrival; dual-division School
-        // Heads get one group per division.
+        // Heads get one group per division, and so does the Budget office:
+        // its WFP navigation is one group per division instead of a toggle bar.
         $user = Auth::user();
-        $wfpPath = $user?->canAccessWfp() && $user->canSwitchDivision()
-            ? 'wfp-'.strtolower($user->activeDivision())
-            : 'wfp';
+        $wfpPath = 'wfp';
+
+        if ($user?->canSwitchDivision() && ($user?->canAccessWfp() || $user?->isBudgetRole())) {
+            $wfpPath = 'wfp-'.strtolower($user->activeDivision());
+        }
+
         $this->openGroups[$wfpPath] = true;
 
-        if (!request()->routeIs('mov.index')) {
+        if (! request()->routeIs('mov.index')) {
             return;
         }
 
@@ -99,7 +103,7 @@ class Sidebar extends Component
             if ($requirement?->category?->part !== null) {
                 $partId = $requirement->category->part->id;
                 $this->movOpenParts[$partId] = true;
-                $this->movOpenCategories[$partId . ':' . $requirement->category->id] = true;
+                $this->movOpenCategories[$partId.':'.$requirement->category->id] = true;
 
                 if ($requirement->kra_label !== null && trim($requirement->kra_label) !== '') {
                     $this->movOpenKras[$this->kraNodeKey($requirement->category->id, $requirement->kra_label)] = true;
@@ -115,7 +119,7 @@ class Sidebar extends Component
 
             if ($category?->part !== null) {
                 $this->movOpenParts[$category->part->id] = true;
-                $this->movOpenCategories[$category->part->id . ':' . $category->id] = true;
+                $this->movOpenCategories[$category->part->id.':'.$category->id] = true;
             }
         }
     }
@@ -369,57 +373,76 @@ class Sidebar extends Component
             // and the printed annual report the School Head reads. All four
             // are plain links one level down, and the group opens by default
             // (see mount()).
-            $items[] = [
-                'label' => 'WFP',
-                'route' => 'wfp.submissions.index',
-                // The group lights up on any page it holds, including the
-                // Budget-only pages that do not start with `wfp.`.
-                'active' => ['wfp.submissions.*', 'budget.*'],
-                'path' => 'wfp',
-                'icon' => 'chart-column',
-                'section' => 'Files',
-                'order' => 14,
-                'children' => [
-                    [
-                        'key' => 'budget-wfp-plans',
-                        'label' => 'Work & Financial Plan',
-                        'title' => 'Review the Work and Financial Plans the schools uploaded',
-                        'url' => route('wfp.submissions.index'),
-                        'route' => 'wfp.submissions.*',
-                    ],
-                    [
-                        'key' => 'budget-wfp-signoffs',
-                        'label' => 'WFP Sign-offs',
-                        'title' => 'View and sign the WFP sections assigned to your role',
-                        'url' => route('wfp.index'),
-                        'route' => 'wfp.index',
-                    ],
-                    [
-                        'key' => 'budget-allotments',
-                        'label' => 'School Allotments',
-                        'title' => 'Set and certify each school\'s annual allotment',
-                        'url' => route('budget.allotments.index'),
-                        'route' => 'budget.allotments.*',
-                    ],
-                    [
-                        'key' => 'budget-line-items',
-                        'label' => 'Monthly Expenditure',
-                        'title' => 'Every school\'s expenditure lines, per line item, read-only',
-                        'url' => route('budget.lineitems.index'),
-                        'route' => 'budget.lineitems.*',
-                    ],
-                    // The printed annual report those lines add up to: the same
-                    // form the School Head reads, per school. It sits last
-                    // because it is what the pages above it produce.
-                    [
-                        'key' => 'budget-line-item-allotment',
-                        'label' => 'Per Line Item Expenditure',
-                        'title' => 'A school\'s annual MOOE allotment, allocated per line item or object of expenditure',
-                        'url' => route('budget.per-line-item.index'),
-                        'route' => 'budget.per-line-item.*',
-                    ],
+            // One WFP group per division the Budget office oversees — like the
+            // School Head's navigation, every division is visible at once, so
+            // there is no toggle bar to switch division access from.
+            $children = [
+                [
+                    'key' => 'budget-wfp-plans',
+                    'label' => 'Work & Financial Plan',
+                    'title' => 'Review the Work and Financial Plans the schools uploaded',
+                    'url' => route('wfp.submissions.index'),
+                    'route' => 'wfp.submissions.*',
+                ],
+                [
+                    'key' => 'budget-wfp-signoffs',
+                    'label' => 'WFP Sign-offs',
+                    'title' => 'View and sign the WFP sections assigned to your role',
+                    'url' => route('wfp.index'),
+                    'route' => 'wfp.index',
+                ],
+                [
+                    'key' => 'budget-allotments',
+                    'label' => 'School Allotments',
+                    'title' => 'Set and certify each school\'s annual allotment',
+                    'url' => route('budget.allotments.index'),
+                    'route' => 'budget.allotments.*',
+                ],
+                [
+                    'key' => 'budget-line-items',
+                    'label' => 'Monthly Expenditure',
+                    'title' => 'Every school\'s expenditure lines, per line item, read-only',
+                    'url' => route('budget.lineitems.index'),
+                    'route' => 'budget.lineitems.*',
+                ],
+                // The printed annual report those lines add up to: the same
+                // form the School Head reads, per school. It sits last
+                // because it is what the pages above it produce.
+                [
+                    'key' => 'budget-line-item-allotment',
+                    'label' => 'Per Line Item Expenditure',
+                    'title' => 'A school\'s annual MOOE allotment, allocated per line item or object of expenditure',
+                    'url' => route('budget.per-line-item.index'),
+                    'route' => 'budget.per-line-item.*',
                 ],
             ];
+
+            $divisions = Auth::user()->authorizedDivisions();
+            $hasMultipleDivisions = count($divisions) > 1;
+
+            foreach ($divisions as $division) {
+                $suffix = SchoolDivision::sidebarSuffix($division);
+                $divisionChildren = $children;
+
+                foreach ($divisionChildren as &$child) {
+                    $child['label'] .= $suffix;
+                }
+                unset($child);
+
+                $items[] = [
+                    'label' => 'WFP'.$suffix,
+                    'route' => 'wfp.submissions.index',
+                    // The group lights up on any page it holds, including the
+                    // Budget-only pages that do not start with `wfp.`.
+                    'active' => ['wfp.submissions.*', 'budget.*'],
+                    'path' => $hasMultipleDivisions ? 'wfp-'.strtolower($division) : 'wfp',
+                    'division' => $division,
+                    'icon' => 'chart-column',
+                    'section' => 'Files',
+                    'order' => 14,
+                    'children' => $divisionChildren,
+                ];
+            }
         } elseif (Auth::user()?->isBookkeeperRole()) {
             // The Bookkeeper works the same checking pages the Budget office
             // does — the Monthly Expenditure lines and the annual Per Line
@@ -464,6 +487,7 @@ class Sidebar extends Component
                         'url' => route('budget.per-line-item.index'),
                         'route' => 'budget.per-line-item.*',
                     ],
+                    /*
                     // The generated plan itself, read-only: the School Head's
                     // Excel-based generation of the WFP, seen from the
                     // Bookkeeper's side so the account titles and codes can be
@@ -476,6 +500,7 @@ class Sidebar extends Component
                         'url' => route('wfp.preview.index'),
                         'route' => 'wfp.preview.index',
                     ],
+                    */
                 ],
             ];
         } elseif (Auth::user()?->isPsdsRole()) {
@@ -584,34 +609,34 @@ class Sidebar extends Component
             // group opens by default (see mount()).
             if (Auth::user()?->canAccessWfp()) {
                 $children = [
-                        // The matrix is where the lines are entered: the
-                        // source of truth, so it comes first.
-                        [
-                            'key' => 'wfp-matrices',
-                            'label' => 'Monthly Expenditure Matrix',
-                            'title' => 'The source of truth the WFP is generated from',
-                            'url' => route('wfp.matrices.index'),
-                            'route' => 'wfp.matrices.*',
-                        ],
-                        // The report the matrices add up to: the year's lines
-                        // rolled up per account code, as the printed form.
-                        [
-                            'key' => 'wfp-line-items',
-                            'label' => 'Per Line Item Expenditure',
-                            'title' => 'Your school\'s annual MOOE allotment, allocated per line item or object of expenditure',
-                            'url' => route('wfp.lineitems.index'),
-                            'route' => 'wfp.lineitems.*',
-                        ],
-                        // The plan generated from the matrix sits last: it is
-                        // the document the pages above it produce.
-                        [
-                            'key' => 'wfp-plans',
-                            'label' => 'Work & Financial Plan',
-                            'title' => 'Download, upload and review your school\'s Work and Financial Plan',
-                            'url' => route('wfp.index'),
-                            'route' => 'wfp.index',
-                        ],
-                    ];
+                    // The matrix is where the lines are entered: the
+                    // source of truth, so it comes first.
+                    [
+                        'key' => 'wfp-matrices',
+                        'label' => 'Monthly Expenditure Matrix',
+                        'title' => 'The source of truth the WFP is generated from',
+                        'url' => route('wfp.matrices.index'),
+                        'route' => 'wfp.matrices.*',
+                    ],
+                    // The report the matrices add up to: the year's lines
+                    // rolled up per account code, as the printed form.
+                    [
+                        'key' => 'wfp-line-items',
+                        'label' => 'Per Line Item Expenditure',
+                        'title' => 'Your school\'s annual MOOE allotment, allocated per line item or object of expenditure',
+                        'url' => route('wfp.lineitems.index'),
+                        'route' => 'wfp.lineitems.*',
+                    ],
+                    // The plan generated from the matrix sits last: it is
+                    // the document the pages above it produce.
+                    [
+                        'key' => 'wfp-plans',
+                        'label' => 'Work & Financial Plan',
+                        'title' => 'Download, upload and review your school\'s Work and Financial Plan',
+                        'url' => route('wfp.index'),
+                        'route' => 'wfp.index',
+                    ],
+                ];
 
                 $divisions = Auth::user()->authorizedDivisions();
                 $hasMultipleDivisions = count($divisions) > 1;
@@ -649,14 +674,22 @@ class Sidebar extends Component
         if ($suffix !== '') {
             foreach ($items as $index => $item) {
                 if (($item['path'] ?? null) === 'wfp' && ! isset($item['division'])) {
-                    $items[$index]['label'] = ($item['label'] ?? '') . $suffix;
+                    $items[$index]['label'] = ($item['label'] ?? '').$suffix;
                 }
 
                 foreach (($item['children'] ?? []) as $childIndex => $child) {
+                    // A group that already carries a division suffixed its
+                    // own children when it was built (one group per
+                    // division); the active-division suffix below is only
+                    // for the single division-switcher group.
+                    if (isset($item['division'])) {
+                        continue;
+                    }
+
                     $key = (string) ($child['key'] ?? '');
 
                     if (str_starts_with($key, 'wfp-') || str_starts_with($key, 'budget-')) {
-                        $items[$index]['children'][$childIndex]['label'] = ($child['label'] ?? '') . $suffix;
+                        $items[$index]['children'][$childIndex]['label'] = ($child['label'] ?? '').$suffix;
                     }
                 }
             }
@@ -697,7 +730,11 @@ class Sidebar extends Component
     public function selectWfpDivision(string $division): void
     {
         $user = Auth::user();
-        abort_unless($user?->canAccessWfp() && $user->canAccessDivision($division), 404);
+        abort_unless(
+            $user?->canAccessDivision($division)
+            && ($user?->canAccessWfp() || $user?->canManageAllotments()),
+            404,
+        );
 
         $path = $user->canSwitchDivision() ? 'wfp-'.strtolower($division) : 'wfp';
 
@@ -731,7 +768,7 @@ class Sidebar extends Component
         if (str_starts_with($node, 'category-')) {
             $segments = explode('-', substr($node, 9));
 
-            $this->toggleKey($this->movOpenCategories, ($segments[0] ?? '') . ':' . ($segments[1] ?? ''));
+            $this->toggleKey($this->movOpenCategories, ($segments[0] ?? '').':'.($segments[1] ?? ''));
 
             return;
         }
@@ -782,7 +819,7 @@ class Sidebar extends Component
 
         $parts = MovPart::query()
             ->active()
-            ->with(['categories' => fn($query) => $query->active()->with(['requirements' => fn($q) => $q->active()])])
+            ->with(['categories' => fn ($query) => $query->active()->with(['requirements' => fn ($q) => $q->active()])])
             ->orderBy('part_order')
             ->orderBy('id')
             ->get();
@@ -820,14 +857,14 @@ class Sidebar extends Component
                     $categoryDone += $own->isEmpty() ? 0 : 1;
 
                     $mov = [
-                        'key' => 'mov-' . $requirement->id,
+                        'key' => 'mov-'.$requirement->id,
                         'sort_number' => $requirement->mov_number,
                         'section' => (string) $requirement->id,
                         'label' => $requirement->label(),
                         'hint' => $requirement->title,
                         // A MOV number means nothing on its own in a list
                         // this deep, so the tooltip carries the whole trail.
-                        'title' => $requirement->trail() . ' — ' . $requirement->title,
+                        'title' => $requirement->trail().' — '.$requirement->title,
                         'url' => route('mov.index', ['mov' => $requirement->id]),
                         'status' => $status['key'],
                         'status_label' => $status['label'],
@@ -846,12 +883,12 @@ class Sidebar extends Component
 
                     $kraKey = $this->kraNodeKey($category->id, $kraLabel);
 
-                    if (!isset($kraGroups[$kraKey])) {
+                    if (! isset($kraGroups[$kraKey])) {
                         $kraGroups[$kraKey] = [
                             'key' => $kraKey,
                             'section' => null,
                             'label' => $kraLabel,
-                            'title' => $category->trail() . ' → ' . $kraLabel,
+                            'title' => $category->trail().' → '.$kraLabel,
                             'meta' => '0/0',
                             'open' => isset($this->movOpenKras[$kraKey]),
                             'children' => [],
@@ -862,7 +899,7 @@ class Sidebar extends Component
 
                     $kraGroups[$kraKey]['children'][] = $mov;
                     $kraGroups[$kraKey]['done'] += $own->isEmpty() ? 0 : 1;
-                    $kraGroups[$kraKey]['meta'] = $kraGroups[$kraKey]['done'] . '/' . count($kraGroups[$kraKey]['children']);
+                    $kraGroups[$kraKey]['meta'] = $kraGroups[$kraKey]['done'].'/'.count($kraGroups[$kraKey]['children']);
                 }
 
                 $orderedKras = array_values($kraGroups);
@@ -887,8 +924,7 @@ class Sidebar extends Component
                 foreach ($orderedKras as &$kraGroup) {
                     usort(
                         $kraGroup['children'],
-                        static fn(array $left, array $right): int =>
-                            [$left['sort_number'], (int) $left['section']] <=> [$right['sort_number'], (int) $right['section']]
+                        static fn (array $left, array $right): int => [$left['sort_number'], (int) $left['section']] <=> [$right['sort_number'], (int) $right['section']]
                     );
 
                     foreach ($kraGroup['children'] as &$mov) {
@@ -913,15 +949,15 @@ class Sidebar extends Component
                 $partDone += $categoryDone;
 
                 $categories[] = [
-                    'key' => 'category-' . $part->id . '-' . $category->id,
+                    'key' => 'category-'.$part->id.'-'.$category->id,
                     'section' => (string) $category->id,
                     'label' => $category->name,
                     'title' => $category->trail(),
                     // The letter alone is ambiguous this deep; the trail says
                     // where it sits, and the count says how far it is.
-                    'meta' => $categoryDone . '/' . $categoryTotal,
+                    'meta' => $categoryDone.'/'.$categoryTotal,
                     'url' => route('mov.index', ['category' => $category->id]),
-                    'open' => isset($this->movOpenCategories[$part->id . ':' . $category->id]),
+                    'open' => isset($this->movOpenCategories[$part->id.':'.$category->id]),
                     'children' => $movs,
                 ];
             }
@@ -936,8 +972,8 @@ class Sidebar extends Component
                     $tree[] = [
                         'key' => $category['key'],
                         'section' => $category['section'],
-                        'label' => 'PART 1-' . $category['label'],
-                        'title' => 'PART 1-' . $category['label'],
+                        'label' => 'PART 1-'.$category['label'],
+                        'title' => 'PART 1-'.$category['label'],
                         'meta' => $category['meta'],
                         'open' => $category['open'],
                         'children' => $category['children'],
@@ -948,11 +984,11 @@ class Sidebar extends Component
             }
 
             $tree[] = [
-                'key' => 'part-' . $part->id,
+                'key' => 'part-'.$part->id,
                 'section' => null,
                 'label' => $part->name,
                 'title' => $part->name,
-                'meta' => $partDone . '/' . $partTotal,
+                'meta' => $partDone.'/'.$partTotal,
                 'open' => isset($this->movOpenParts[$part->id]),
                 'children' => $categories,
             ];
@@ -963,7 +999,7 @@ class Sidebar extends Component
 
     private function kraNodeKey(int $categoryId, string $kraLabel): string
     {
-        return 'kra-' . $categoryId . '-' . sha1($kraLabel);
+        return 'kra-'.$categoryId.'-'.sha1($kraLabel);
     }
 
     /**

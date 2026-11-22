@@ -294,6 +294,8 @@ class WfpActivityTemplateTest extends TestCase
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
             ->call('openLineModal', 'operations')
             ->set('lineForm.activity_description', 'Procure supplies')
+            ->set('lineForm.objective', 'Office supplies for operations')
+            ->set('lineForm.resource_kind', 'School Supplies')
             // The request claims a different title and code than the chosen
             // classification; the server must re-derive both from the record.
             ->set('lineForm.account_classification_id', $real->id)
@@ -319,7 +321,9 @@ class WfpActivityTemplateTest extends TestCase
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
             ->call('openLineModal', 'operations')
             ->set('lineForm.activity_description', 'Procure supplies')
+            ->set('lineForm.objective', 'School supplies for operations')
             ->set('lineForm.resource_kind', 'school supplies')
+            ->set('lineForm.account_title', 'Office Supplies Expenses')
             ->call('saveLineFromModal')
             ->assertHasNoErrors();
 
@@ -338,7 +342,9 @@ class WfpActivityTemplateTest extends TestCase
         Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $matrix])
             ->call('openLineModal', 'operations')
             ->set('lineForm.activity_description', 'Procure other things')
+            ->set('lineForm.objective', 'Other things for operations')
             ->set('lineForm.resource_kind', 'Retired Kind')
+            ->set('lineForm.account_title', 'Office Supplies Expenses')
             ->call('saveLineFromModal')
             ->assertHasNoErrors();
 
@@ -369,6 +375,8 @@ class WfpActivityTemplateTest extends TestCase
             ->assertSet('appliedTemplateId', $template->id)
             ->assertSet('appliedTemplateName', $template->name)
             ->set('lineForm.major_output', 'Supplies delivered')
+            ->set('lineForm.objective', 'Supplies delivered to the school')
+            ->set('lineForm.resource_kind', 'School Supplies')
             ->call('saveLineFromModal')
             ->assertHasNoErrors();
 

@@ -18,7 +18,7 @@
      replaces the very row under the pointer mid-click and discards the
      click; the counts on this component are already refreshed by events. --}}
 <div class="sidebar-main">
-    @if (Auth::user()->canManageAllotments() && Auth::user()->canSwitchDivision())
+    @if (Auth::user()->canManageAllotments() && ! Auth::user()->isBudgetRole() && Auth::user()->canSwitchDivision())
         <form method="POST" action="{{ route('division.switch') }}" class="sidebar-division-switcher" id="divisionSwitcher">
             @csrf
             <div class="sidebar-division-switcher-label">Division</div>
