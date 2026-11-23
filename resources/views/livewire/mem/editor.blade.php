@@ -225,7 +225,7 @@
 
 
             <div class="ac-toolbar-actions mem-toolbar">
-                <a
+                {{-- <a
                     href="{{ route('wfp.matrices.export', ['matrix' => $matrix->id]) }}"
                     class="ac-import-btn"
                     download
@@ -233,11 +233,11 @@
                 >
                     <x-icon name="file-spreadsheet" :size="16" />
                     <span>Export XLSX</span>
-                </a>
+                </a> --}}
 
                {{-- The template and the CSV import exist to bring lines in —
                     writing work, so only a writing account is offered them. --}}
-                @if ($this->canEdit())
+                {{-- @if ($this->canEdit())
                     @if ($items !== [])
                         <button
                             type="button"
@@ -251,9 +251,9 @@
                             <span wire:loading.remove wire:target="generateWfp">Generate WFP Plan</span>
                             <span wire:loading wire:target="generateWfp">Generating…</span>
                         </button>
-                    @endif
+                    @endif --}}
 
-                    <a
+                    {{-- <a
                         href="{{ route('wfp.matrices.template') }}"
                         class="ac-import-btn"
                         download
@@ -261,13 +261,13 @@
                     >
                         <x-icon name="download" :size="16" />
                         <span>Template</span>
-                    </a>
+                    </a> --}}
 
-                    <button type="button" class="ac-import-btn" wire:click="openImport">
+                    {{-- <button type="button" class="ac-import-btn" wire:click="openImport">
                         <x-icon name="upload" :size="16" />
                         <span>Import CSV</span>
-                    </button>
-                @endif
+                    </button> --}}
+                {{-- @endif --}}
             </div>
         </div>
 

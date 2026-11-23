@@ -36,9 +36,10 @@ use Livewire\Component;
  * The report is DERIVED, never stored: a line entered this afternoon shows up
  * in the report this afternoon, with no regeneration step in between.
  *
- * Scope is the Budget role and the school Bookkeeper (canCheckLineItems()):
- * the route guard and this component both refuse any other account with a
- * 404.
+ * Scope is the Budget role and the school Bookkeeper (canCheckLineItems()),
+ * plus the superadmin, who may read any school's report but cannot check or
+ * certify it. The route guard and this component enforce canCheckLineItems()
+ * or canApproveWfp(), and refuse any other account with a 404.
  *
  * WHICH schools the report can reach is a second, independent boundary: the
  * Budget office reads every school, but a Bookkeeper reads only the schools
@@ -122,7 +123,10 @@ class BudgetLineItemAllotment extends Component
     private function user(): User
     {
         $user = Auth::user();
-        abort_unless($user instanceof User && $user->canCheckLineItems(), 404);
+        // Read-only: the Budget office, the school Bookkeeper, and the
+        // superadmin (who may read any submitted plan's report) all pass.
+        // Check/certify writes stay Bookkeeper/Budget-only on the actions.
+        abort_unless($user instanceof User && ($user->canCheckLineItems() || $user->canApproveWfp()), 404);
 
         return $user;
     }

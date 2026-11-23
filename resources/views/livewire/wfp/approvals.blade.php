@@ -172,13 +172,25 @@
                                         <span>{{ $plan->isPendingApproval() ? 'Review & Sign' : 'Review' }}</span>
                                     </span>
                                 </button>
-                                <a
-                                    class="users-action"
-                                    href="{{ route('wfp.plans.edit', ['plan' => $plan->id]) }}"
-                                    wire:navigate
-                                >
-                                    <span class="users-action-inner">Open</span>
-                                </a>
+                                @if (auth()->user()?->canCheckLineItems() || auth()->user()?->canApproveWfp())
+                                    {{-- Budget and Bookkeeper readers open the school's per-line-item
+                                         expenditure report — the same annual allotment view the
+                                         School Head reads on /wfp/line-items. The superadmin opens
+                                         it too, read-only: no check or certify ability. --}}
+                                    <a class="users-action"
+                                        href="{{ route('budget.per-line-item.index', [
+                                            'school' => $plan->school_id,
+                                            'year' => $plan->year,
+                                        ]) }}"
+                                        wire:navigate
+                                    >
+                                        <span class="users-action-inner">Open</span>
+                                    </a>
+                                @else
+                                    <a class="users-action" href="{{ route('wfp.plans.edit', ['plan' => $plan->id]) }}" wire:navigate>
+                                        <span class="users-action-inner">Open</span>
+                                    </a>
+                                @endif
                             </td>
                         </tr>
                     @empty

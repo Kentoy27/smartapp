@@ -109,7 +109,6 @@ class BudgetLineItemAllotmentTest extends TestCase
             $this->schoolHead(),
             User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]),
             User::factory()->create(['role' => 'administrator', 'is_superadmin' => false]),
-            User::factory()->create(['role' => 'superadmin', 'is_superadmin' => true]),
         ];
 
         foreach ($users as $user) {
@@ -117,6 +116,31 @@ class BudgetLineItemAllotmentTest extends TestCase
                 ->get(route('budget.per-line-item.index'))
                 ->assertNotFound();
         }
+    }
+
+    public function test_the_superadmin_can_read_the_report(): void
+    {
+        $head = $this->schoolHead('Alpha Elementary School');
+
+        $this->line($head, 1, [
+            'quantity' => 53,
+            'unit_cost' => 1000,
+            'account_title' => 'Travelling Expense (Local)',
+            'account_code' => '5020101000',
+        ]);
+
+        $superadmin = User::factory()->create(['role' => 'superadmin', 'is_superadmin' => true]);
+
+        $this->actingAs($superadmin)
+            ->get(route('budget.per-line-item.index', [
+                'school' => $head->school_id,
+                'year' => 2026,
+            ]))
+            ->assertOk()
+            ->assertSeeLivewire('budget-line-item-allotment')
+            ->assertSee('Alpha Elementary School')
+            ->assertSee('Travelling Expense (Local)')
+            ->assertSee('53,000.00');
     }
 
     public function test_the_component_refuses_guests_and_every_other_role(): void
@@ -130,7 +154,6 @@ class BudgetLineItemAllotmentTest extends TestCase
             $this->schoolHead(),
             User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]),
             User::factory()->create(['role' => 'administrator', 'is_superadmin' => false]),
-            User::factory()->create(['role' => 'superadmin', 'is_superadmin' => true]),
         ] as $user) {
             $this->assertStringContainsString(
                 'Page Not Found',
@@ -537,7 +560,6 @@ class BudgetLineItemAllotmentTest extends TestCase
             $head,
             User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]),
             User::factory()->create(['role' => 'administrator', 'is_superadmin' => false]),
-            User::factory()->create(['role' => 'superadmin', 'is_superadmin' => true]),
         ] as $user) {
             $this->actingAs($user)
                 ->get(route('budget.per-line-item.export', ['school' => $head->school_id]))

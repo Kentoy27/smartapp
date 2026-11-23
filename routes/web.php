@@ -204,6 +204,16 @@ Route::middleware(['auth', 'password.change.required'])->group(function () {
         return view('psds.monitoring');
     })->name('psds.monitoring');
 
+    // The MOV-only half of the same monitoring workspace — the checklist
+    // evidence view of the schools in the account's assigned districts. Same
+    // read-only, district-scoped guard as the submission overview.
+    Route::get('/psds/mov-monitoring', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->isPsdsRole(), 404);
+
+        return view('psds.monitoring', ['monitoringMode' => 'mov']);
+    })->name('psds.mov-monitoring');
+
     // The read-only CSV of the monitoring table. The role gate is the same
     // as the page, and every row is re-scoped inside the report from the
     // account's own district assignments — the query string only narrows.
@@ -1019,15 +1029,19 @@ Route::middleware(['auth', 'password.change.required'])->group(function () {
      * Expenditure Matrices (WfpAllotment); nothing here edits a school's
      * plan. The Bookkeeper's copy also carries the "Checked as to the
      * Correctness of Account Titles and Codes" sign-off (a component action).
-     * Scope is the Budget role and the Bookkeeper — the route guard and the
-     * component both enforce canCheckLineItems(), and the component narrows
-     * the picker, the figures and the sign-off to the Bookkeeper's own
-     * assigned schools (User::canAccessSchool()).
+     * Scope is the Budget role and the school Bookkeeper, plus the superadmin
+     * who may read any submitted plan's report but cannot check or certify it.
+     * The route guard and the component enforce canCheckLineItems() or
+     * canApproveWfp(), and the component narrows the picker, the figures and
+     * the sign-off to the Bookkeeper's own assigned schools (User::canAccessSchool()).
      * ----------------------------------------------------------------- */
 
     Route::get('/budget/per-line-item', function () {
         $user = Auth::user();
-        abort_unless($user instanceof User && $user->canCheckLineItems(), 404);
+        // Read-only: the Budget office, the school Bookkeeper, and the
+        // superadmin (who may read any submitted plan's report) all pass.
+        // Check/certify writes stay Bookkeeper/Budget-only on the actions.
+        abort_unless($user instanceof User && ($user->canCheckLineItems() || $user->canApproveWfp()), 404);
 
         return view('budget.per-line-item');
     })->name('budget.per-line-item.index');
@@ -1043,7 +1057,9 @@ Route::middleware(['auth', 'password.change.required'])->group(function () {
     // `signatures=without` leaves the signature bands empty for wet signing.
     Route::get('/budget/per-line-item/export', function (Request $request) {
         $user = Auth::user();
-        abort_unless($user instanceof User && $user->canCheckLineItems(), 404);
+        // Read-only: the Budget office, the school Bookkeeper, and the
+        // superadmin (who may read any submitted plan's report) all pass.
+        abort_unless($user instanceof User && ($user->canCheckLineItems() || $user->canApproveWfp()), 404);
 
         /** @var User $user */
         $schoolId = (int) $request->query('school');

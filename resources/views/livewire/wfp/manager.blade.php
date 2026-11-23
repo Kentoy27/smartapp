@@ -84,9 +84,24 @@
                                     ], key('wfp-plan-signoffs-'.$plan->id))
                                 </td>
                                 <td class="users-actions-col">
-                                    <a class="users-action" href="{{ route('wfp.plans.edit', ['plan' => $plan->id]) }}" wire:navigate>
-                                        <span class="users-action-inner">Open plan</span>
-                                    </a>
+                                    @if (auth()->user()?->canCheckLineItems())
+                                        {{-- Budget and Bookkeeper readers open the plan's
+                                             monthly expenditure — its school's JAN–DEC
+                                             matrix lines for the plan's year — the same
+                                             monthly view the School Head works from. --}}
+                                        <a class="users-action"
+                                            href="{{ route('budget.lineitems.index', [
+                                                'school' => $plan->school_id,
+                                                'year' => $plan->year,
+                                            ]) }}"
+                                            wire:navigate>
+                                            <span class="users-action-inner">Open plan</span>
+                                        </a>
+                                    @else
+                                        <a class="users-action" href="{{ route('wfp.plans.edit', ['plan' => $plan->id]) }}" wire:navigate>
+                                            <span class="users-action-inner">Open plan</span>
+                                        </a>
+                                    @endif
                                 </td>
                             </tr>
                         @empty

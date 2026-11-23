@@ -225,9 +225,10 @@
                     to one of those districts.
                 </p>
             </section>
-        @else
-            @if ($mode === 'all')
-                <section class="card psds-coverage-card" aria-labelledby="psds-coverage-title">
+        @endif
+
+        @if ($mode === 'all' && $this->districts->sum('schools_count') > 0)
+            <section class="card psds-coverage-card" aria-labelledby="psds-coverage-title">
                 <div class="card-head">
                     <div>
                         <h2 class="card-title" id="psds-coverage-title">District coverage</h2>
@@ -377,7 +378,6 @@
                     </div>
                 @endif
             </section>
-        @endif
     @endif
 
     @php($detail = $this->detail)

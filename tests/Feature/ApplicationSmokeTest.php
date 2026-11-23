@@ -157,6 +157,7 @@ class ApplicationSmokeTest extends TestCase
             '/opcrf/part/4',
             '/opcrf-submissions/'.$submission->id.'/download',
             '/psds',
+            '/psds/mov-monitoring',
             '/psds/report',
         ];
     }
