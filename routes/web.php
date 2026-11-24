@@ -105,9 +105,8 @@ Route::get('/android-app/update', [AndroidAppController::class, 'update'])
 Route::get('/android-app/download/{token}', [AndroidAppController::class, 'download'])
     ->where('token', '[a-f0-9]{64}')
     ->name('app.android.token-download');
-Route::get('/downloads/smartapp-android.apk', function () {
-    return redirect()->route('app.android.update');
-})->name('app.android.download');
+Route::get('/downloads/smartapp-android.apk', [AndroidAppController::class, 'update'])
+    ->name('app.android.download');
 
 Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login')->middleware('guest');
 Route::post('/login', [LoginController::class, 'login']);
@@ -125,10 +124,10 @@ Route::middleware(['auth'])->group(function () {
 });
 
 Route::get('/home', [DashboardController::class, 'index'])
-    ->middleware(['auth', 'password.change.required'])
+    ->middleware(['auth'])
     ->name('home');
 
-Route::middleware(['auth', 'password.change.required'])->group(function () {
+Route::middleware(['auth'])->group(function () {
     /* ------------------------------------------------------------------
      * The financial division the account is working in. The choice is a
      * preference held in the session; it is only ever honoured while the

@@ -7,7 +7,6 @@ use App\Models\User;
 use App\Models\UserDeviceSession;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
-use Illuminate\Validation\Rules\Password;
 
 class ForcedPasswordChangeController extends Controller
 {
@@ -21,6 +20,7 @@ class ForcedPasswordChangeController extends Controller
         }
 
         return view('auth.password-change', [
+            'user' => $user,
             'canUseGoogleSignIn' => (bool) $request->session()->get('password_change_google_authenticated', false),
             'canUseGoogleSignIn' => $request->session()->get('password_change_google_authenticated', false),
         ]);
@@ -37,12 +37,7 @@ class ForcedPasswordChangeController extends Controller
             'current_password' => $googleAuthenticated
                 ? ['nullable', 'string', 'current_password']
                 : ['required', 'string', 'current_password'],
-            'password' => [
-                'required',
-                'string',
-                'confirmed',
-                Password::min(12)->mixedCase()->numbers()->symbols(),
-            ],
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
         ]);
 
         $user->forceFill([

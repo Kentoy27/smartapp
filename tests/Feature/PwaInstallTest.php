@@ -49,18 +49,10 @@ class PwaInstallTest extends TestCase
         $apkPath = public_path('downloads/smartapp-android.apk');
 
         $this->assertFileExists($apkPath);
-        $this->get(route('app.android.download'))
-            ->assertRedirect(route('app.android.update'));
+        $redirect = $this->get(route('app.android.download'));
+        $redirect->assertRedirect();
 
-        $page = $this->get(route('app.android.update'));
-        $page->assertOk()
-            ->assertSee('Version '.config('android_app.version_name'))
-            ->assertSee('15 minutes');
-
-        $downloadUrl = $page->viewData('downloadUrl');
-        $this->assertIsString($downloadUrl);
-
-        $response = $this->get($downloadUrl);
+        $response = $this->get($redirect->headers->get('Location'));
         $response
             ->assertOk()
             ->assertHeader('content-type', 'application/vnd.android.package-archive')
@@ -73,10 +65,13 @@ class PwaInstallTest extends TestCase
 
     public function test_android_update_links_are_unique_and_expire_after_the_retry_window(): void
     {
-        $firstLink = $this->get(route('app.android.update'))->viewData('downloadUrl');
-        $secondLink = $this->get(route('app.android.update'))->viewData('downloadUrl');
+        $firstResponse = $this->get(route('app.android.update'));
+        $secondResponse = $this->get(route('app.android.update'));
+        $firstLink = $firstResponse->headers->get('Location');
+        $secondLink = $secondResponse->headers->get('Location');
 
         $this->assertNotSame($firstLink, $secondLink);
+        $this->assertStringContainsString('/android-app/download/', $firstLink);
 
         $token = basename(parse_url($firstLink, PHP_URL_PATH));
         DB::table('android_app_download_tokens')

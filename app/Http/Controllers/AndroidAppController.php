@@ -4,7 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
-use Illuminate\View\View;
+use Illuminate\Http\RedirectResponse;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class AndroidAppController extends Controller
@@ -19,34 +19,26 @@ class AndroidAppController extends Controller
         ])->header('Cache-Control', 'no-store');
     }
 
-    public function update(): View
+    public function update(): RedirectResponse
     {
-        $downloadUrl = null;
         $apkPath = public_path('downloads/smartapp-android.apk');
+        abort_unless(is_file($apkPath), 404);
 
-        if (is_file($apkPath)) {
-            $now = now();
-            DB::table('android_app_download_tokens')
-                ->where('expires_at', '<', $now)
-                ->delete();
+        $now = now();
+        DB::table('android_app_download_tokens')
+            ->where('expires_at', '<', $now)
+            ->delete();
 
-            $token = bin2hex(random_bytes(32));
-            DB::table('android_app_download_tokens')->insert([
-                'token_hash' => hash('sha256', $token),
-                'created_at' => $now,
-                'expires_at' => $now->copy()->addMinutes(
-                    config('android_app.download_link_ttl_minutes')
-                ),
-            ]);
-
-            $downloadUrl = route('app.android.token-download', ['token' => $token]);
-        }
-
-        return view('android-app.update', [
-            'downloadUrl' => $downloadUrl,
-            'versionName' => config('android_app.version_name'),
-            'expiresInMinutes' => config('android_app.download_link_ttl_minutes'),
+        $token = bin2hex(random_bytes(32));
+        DB::table('android_app_download_tokens')->insert([
+            'token_hash' => hash('sha256', $token),
+            'created_at' => $now,
+            'expires_at' => $now->copy()->addMinutes(
+                config('android_app.download_link_ttl_minutes')
+            ),
         ]);
+
+        return redirect()->route('app.android.token-download', ['token' => $token]);
     }
 
     public function download(string $token): BinaryFileResponse

@@ -103,7 +103,7 @@ class GoogleAuthTest extends TestCase
         $this->assertAuthenticatedAs($existing);
     }
 
-    public function test_google_authenticated_user_can_set_a_new_password_when_required(): void
+    public function test_google_authenticated_user_with_a_temporary_password_can_use_the_dashboard(): void
     {
         $existing = User::factory()->create([
             'email' => 'jane@example.com',
@@ -114,7 +114,7 @@ class GoogleAuthTest extends TestCase
         $this->mockSocialite($this->fakeGoogleUser());
 
         $this->get(route('google.callback'))->assertRedirect('/home');
-        $this->get(route('home'))->assertRedirect(route('password.change'));
+        $this->get(route('home'))->assertOk();
         $this->get(route('password.change'))
             ->assertOk()
             ->assertSee('set a new password below');

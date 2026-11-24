@@ -54,7 +54,9 @@
                 <input id="password_confirmation" name="password_confirmation" type="password" autocomplete="new-password" required>
             </div>
 
-            <p class="password-guidance">Use at least 12 characters with uppercase and lowercase letters, a number, and a symbol.</p>
+            <p class="password-guidance">
+                Use at least 8 characters.
+            </p>
             <button type="submit" class="btn-primary">Save new password</button>
         </form>
 

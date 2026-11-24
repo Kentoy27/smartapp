@@ -333,7 +333,7 @@
                         @if ($resetPasswordTemporaryPassword !== '')
                             <p role="status">
                                 A temporary password was created for <strong>{{ $resetPasswordUsername }}</strong>.
-                                Share it securely. They must choose a new password before using SmartApp.
+                                Share it securely with the account holder.
                             </p>
                             <div class="field">
                                 <label for="temporaryPassword">Temporary password (shown once)</label>
@@ -345,8 +345,8 @@
                             </div>
                         @else
                             <p>
-                                Create a random temporary password for <strong>{{ $resetPasswordUsername }}</strong>?
-                                Their current sessions will be signed out, and they must choose a new password at their next sign-in.
+                                Create a temporary password for <strong>{{ $resetPasswordUsername }}</strong>?
+                                Their current sessions will be signed out.
                             </p>
 
                             <div class="modal-actions">
@@ -642,7 +642,7 @@
                         <input
                             id="formPassword"
                             type="password"
-                            placeholder="{{ $editingUserId ? ($this->isSchoolHead() ? 'Leave blank to keep current password; reset requires 12+ strong characters' : 'Leave blank to keep current password') : ($this->isSchoolHead() ? '12+ characters, mixed case, number and symbol' : 'Minimum 8 characters') }}"
+                            placeholder="{{ $editingUserId ? 'Leave blank to keep current password; minimum 8 characters to change' : 'Minimum 8 characters' }}"
                             autocomplete="new-password"
                             wire:model="password"
                             @class(['error' => $errors->has('password')])
@@ -665,7 +665,7 @@
                         </button>
                     </div>
                     @if ($this->isSchoolHead())
-                        <span class="field-hint">Use at least 12 characters with uppercase and lowercase letters, a number, and a symbol.</span>
+                        <span class="field-hint">Use at least 8 characters.</span>
                     @endif
                     @error('password') <div class="error-text">{{ $message }}</div> @enderror
                 </div>

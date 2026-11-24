@@ -12,7 +12,6 @@ use App\Support\SchoolDivision;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
-use Illuminate\Validation\Rules\Password;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Title;
@@ -151,12 +150,8 @@ class UsersTable extends Component
         $editing = $this->editingUserId !== null;
         $belongsToSchool = $this->belongsToSchool();
         $passwordRules = $editing
-            ? ($this->isSchoolHead()
-                ? ['nullable', Password::min(12)->mixedCase()->numbers()->symbols()]
-                : ['nullable', 'string', 'min:8'])
-            : ($this->isSchoolHead()
-                ? ['required', Password::min(12)->mixedCase()->numbers()->symbols()]
-                : ['required', 'string', 'min:8']);
+            ? ['nullable', 'string', 'min:8']
+            : ['required', 'string', 'min:8'];
 
         $rules = [
             // Only the school-side roles (SH and Bookkeeper) belong to a
@@ -194,8 +189,8 @@ class UsersTable extends Component
                 'required', 'string', 'email', 'max:255',
                 Rule::unique('users', 'email')->ignore($this->editingUserId),
             ],
-            // School Head passwords must be private, strong, and entered
-            // explicitly; a public school identifier is never a password.
+            // Passwords must be at least eight characters; school IDs are
+            // never used as account passwords.
             'password' => $passwordRules,
             'role' => ['required', Rule::in(['user', 'viewer', 'bookkeeper', 'budget', 'psds', 'administrator', 'superadmin'])],
         ];
@@ -410,17 +405,19 @@ class UsersTable extends Component
         $user = User::with('school')->findOrFail($this->resetPasswordUserId);
         abort_unless($this->canResetPassword($user), 403);
 
-        $temporaryPassword = Str::random(40);
+        $temporaryPassword = trim((string) $user->school?->school_id) !== ''
+            ? trim((string) $user->school->school_id)
+            : 'welcome@123';
         $user->forceFill([
             'password' => $temporaryPassword,
-            'must_change_password' => true,
+            'must_change_password' => false,
             'remember_token' => Str::random(60),
         ])->save();
         UserDeviceSession::endAllSessions($user);
         $username = $user->username;
 
         $this->resetPasswordTemporaryPassword = $temporaryPassword;
-        $this->successMessage = "Password reset for {$username}. They must change the temporary password when they sign in.";
+        $this->successMessage = "Password reset for {$username}.";
         $this->announce();
     }
 
@@ -716,9 +713,7 @@ class UsersTable extends Component
         if (($validated['password'] ?? '') !== '') {
             $user->password = $validated['password']; // hashed by the model cast
             $user->remember_token = Str::random(60);
-            if (! $user->is($this->authenticatedUser())) {
-                $user->must_change_password = true;
-            }
+            $user->must_change_password = false;
             UserDeviceSession::endAllSessions($user);
         }
 

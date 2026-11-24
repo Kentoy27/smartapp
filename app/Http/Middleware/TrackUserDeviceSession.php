@@ -23,7 +23,6 @@ class TrackUserDeviceSession
             if (
                 UserDeviceSession::wasRevoked($user, $sessionId)
                 || (is_string($storedFingerprint) && ! hash_equals($storedFingerprint, $passwordFingerprint))
-                || ($storedFingerprint === null && $user->requiresPasswordChange())
             ) {
                 UserDeviceSession::endCurrentSession($user, $sessionId);
                 Auth::logout();

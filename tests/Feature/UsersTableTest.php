@@ -204,13 +204,13 @@ class UsersTableTest extends TestCase
             ->assertSet('resetPasswordUsername', $schoolHead->username)
             ->call('confirmResetPassword')
             ->assertSet('showResetPasswordModal', true)
-            ->assertSet('successMessage', "Password reset for {$schoolHead->username}. They must change the temporary password when they sign in.")
+            ->assertSet('successMessage', "Password reset for {$schoolHead->username}.")
             ->assertSee('Temporary password (shown once)');
 
         $temporaryPassword = $component->get('resetPasswordTemporaryPassword');
-        $this->assertNotSame($school->school_id, $temporaryPassword);
+        $this->assertSame($school->school_id, $temporaryPassword);
         $this->assertTrue(Hash::check($temporaryPassword, $schoolHead->fresh()->password));
-        $this->assertTrue($schoolHead->fresh()->must_change_password);
+        $this->assertFalse($schoolHead->fresh()->must_change_password);
         $this->assertNotNull(
             UserDeviceSession::query()
                 ->where('user_id', $schoolHead->id)
@@ -234,14 +234,15 @@ class UsersTableTest extends TestCase
             'email' => '117881@deped.gov.ph',
         ]);
 
-        Livewire::actingAs($admin)
+        $component = Livewire::actingAs($admin)
             ->test('users-table')
             ->assertSee('Reset Password')
             ->call('openResetPasswordModal', $schoolHead->id)
             ->call('confirmResetPassword');
 
-        $this->assertTrue($schoolHead->fresh()->must_change_password);
-        $this->assertFalse(Hash::check('117881', $schoolHead->fresh()->password));
+        $this->assertSame('welcome@123', $component->get('resetPasswordTemporaryPassword'));
+        $this->assertTrue(Hash::check('welcome@123', $schoolHead->fresh()->password));
+        $this->assertFalse($schoolHead->fresh()->must_change_password);
     }
 
     public function test_administrator_cannot_reset_passwords_for_accounts_without_a_school_id(): void
@@ -369,7 +370,7 @@ class UsersTableTest extends TestCase
             ->call('saveUser')
             ->assertHasErrors(['username' => 'unique'])
             ->assertHasErrors(['email'])
-            ->assertHasErrors('password')
+            ->assertHasErrors(['password' => 'min'])
             ->assertSet('showCreateModal', true); // stays open on failure
 
         $this->assertSame(2, User::count());
@@ -382,13 +383,14 @@ class UsersTableTest extends TestCase
 
         Livewire::actingAs($admin)->test('users-table')
             ->call('openCreateModal')
+            ->assertSee('Use at least 8 characters.')
             ->set('school_division', (string) $division->id)
             ->set('school_id_choice', (string) $school->id)
             ->set('division_access', ['ELEMENTARY'])
             ->set('name', 'Jane Doe')
             ->set('username', 'jane')
             ->set('email', 'jane@example.com')
-            ->set('password', 'StrongPassword123!')
+            ->set('password', 'passw0rd')
             ->call('saveUser')
             ->assertSet('showCreateModal', false)
             ->assertSee('jane')
@@ -399,7 +401,7 @@ class UsersTableTest extends TestCase
         $this->assertNotNull($user);
         $this->assertSame('jane@example.com', $user->email);
         $this->assertSame('Jane Doe', $user->name);
-        $this->assertNotSame('StrongPassword123!', $user->password); // hashed
+        $this->assertNotSame('passw0rd', $user->password); // hashed
         $this->assertFalse($user->is_superadmin); // never created as superadmin
     }
 
