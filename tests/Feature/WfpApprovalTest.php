@@ -20,6 +20,7 @@ use App\Models\WfpPlan;
 use App\Models\WfpReportCheck;
 use App\Support\SchoolDivision;
 use App\Support\WfpGenerator;
+use App\Support\WfpReportSignoffs;
 use App\Support\WfpTemplateFiller;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -907,6 +908,122 @@ class WfpApprovalTest extends TestCase
     }
 
     /* ------------------------------------------------------------ filtering */
+
+    /* -------------------------------------------- sign-off persistence */
+
+    /** The bookkeeper's check must survive Budget certification and the plan must reach the superadmin queue. */
+    public function test_bookkeeper_check_persists_after_budget_certifies_and_plan_reaches_queue(): void
+    {
+        $sh = $this->schoolHead();
+        $plan = $this->generatedPlan($sh);
+
+        $bookkeeper = User::factory()->create([
+            'role' => 'bookkeeper',
+            'is_superadmin' => false,
+            'school_id' => $plan->school_id,
+        ]);
+        $bookkeeper->syncAssignedSchools([$plan->school_id]);
+
+        $budget = User::factory()->create(['role' => 'budget', 'is_superadmin' => false]);
+
+        SchoolAllotment::create([
+            'school_id' => $plan->school_id,
+            'school_division' => $plan->schoolDivision(),
+            'year' => $plan->year,
+            'amount' => 50000,
+        ]);
+
+        // Bookkeeper checks via the signatory actions component.
+        Livewire::actingAs($bookkeeper)
+            ->test(WfpSignatoryActions::class, ['schoolId' => $plan->school_id, 'year' => $plan->year])
+            ->call('signCheck')
+            ->assertSet('successMessage', fn ($value) => str_contains((string) $value, 'Signed the account-title'));
+
+        $this->assertDatabaseHas('wfp_report_checks', [
+            'school_id' => $plan->school_id,
+            'year' => $plan->year,
+            'checked_by' => $bookkeeper->id,
+        ]);
+
+        // Budget certifies via the signatory actions component — this should
+        // submit the plan and leave the bookkeeper's check intact.
+        Livewire::actingAs($budget)
+            ->test(WfpSignatoryActions::class, ['schoolId' => $plan->school_id, 'year' => $plan->year])
+            ->call('signCertification')
+            ->assertSet('successMessage', fn ($value) => str_contains((string) $value, 'submitted'));
+
+        // The check was NOT cleared by certification.
+        $this->assertDatabaseHas('wfp_report_checks', [
+            'school_id' => $plan->school_id,
+            'year' => $plan->year,
+            'checked_by' => $bookkeeper->id,
+        ]);
+
+        // The plan was submitted and appears in the superadmin queue.
+        $this->assertSame(WfpPlan::STATUS_PENDING_APPROVAL, $plan->fresh()->status);
+
+        $superadmin = $this->superadmin();
+        $component = Livewire::actingAs($superadmin)->test(WfpApprovals::class);
+        $this->assertContains($plan->school_id, $component->instance()->plans->pluck('school_id')->all());
+    }
+
+    /** A check recorded under a different division than the plan's is invisible to hasBudgetReview(), so the plan is never submitted. */
+    public function test_division_mismatch_blocks_submission_and_hides_check_from_superadmin(): void
+    {
+        $sh = $this->schoolHead();
+        $plan = $this->generatedPlan($sh); // plan's schoolDivision = ELEMENTARY
+
+        $bookkeeper = User::factory()->create([
+            'role' => 'bookkeeper',
+            'is_superadmin' => false,
+            'school_id' => $plan->school_id,
+        ]);
+        $bookkeeper->syncAssignedSchools([$plan->school_id]);
+
+        $budget = User::factory()->create(['role' => 'budget', 'is_superadmin' => false]);
+
+        // The bookkeeper checks under JUNIOR_HIGH while the plan is ELEMENTARY.
+        WfpReportCheck::updateOrCreate(
+            [
+                'school_id' => $plan->school_id,
+                'school_division' => SchoolDivision::JUNIOR_HIGH,
+                'year' => $plan->year,
+            ],
+            ['checked_by' => $bookkeeper->id, 'checked_at' => now()],
+        );
+
+        SchoolAllotment::updateOrCreate(
+            [
+                'school_id' => $plan->school_id,
+                'school_division' => $plan->schoolDivision(), // ELEMENTARY
+                'year' => $plan->year,
+            ],
+            ['amount' => 50000, 'certified_by' => $budget->id, 'certified_at' => now()],
+        );
+
+        // submitReadyPlan uses the plan's division for hasBudgetReview(),
+        // so the JUNIOR_HIGH check is invisible — the plan is not submitted.
+        $result = WfpReportSignoffs::submitReadyPlan(
+            $plan->school_id,
+            $plan->year,
+            $plan->schoolDivision(),
+        );
+
+        $this->assertNull($result);
+        $this->assertSame(WfpPlan::STATUS_GENERATED, $plan->fresh()->status);
+
+        // On the superadmin's review view, signatoryStatuses() reads with the
+        // plan's division (ELEMENTARY), so the JUNIOR_HIGH check shows as Pending.
+        $superadmin = $this->superadmin();
+        Livewire::actingAs($superadmin)
+            ->test(WfpApprovals::class)
+            ->call('openReview', $plan->id);
+
+        // The plan is not in the queue because it was never submitted.
+        $this->assertNotContains($plan->school_id, Livewire::actingAs($superadmin)
+            ->test(WfpApprovals::class)
+            ->instance()->plans->pluck('school_id')->all());
+    }
 
     public function test_the_queue_filters_by_school_level_year_status_and_search(): void
     {

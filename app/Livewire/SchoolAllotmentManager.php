@@ -7,6 +7,7 @@ use App\Models\School;
 use App\Models\SchoolAllotment;
 use App\Models\SchoolAllotmentAudit;
 use App\Models\User;
+use App\Models\WfpPlan;
 use App\Support\MemYearInitializer;
 use App\Support\SchoolAllotmentImporter;
 use App\Support\SchoolDivision;
@@ -757,6 +758,15 @@ class SchoolAllotmentManager extends Component
             return;
         }
 
+        // Sign-offs are stored under the plan's own division so they are
+        // visible to hasBudgetReview() regardless of which division the
+        // signer happens to be working in at the moment.
+        $plan = WfpPlan::query()
+            ->where('school_id', $school->id)
+            ->where('year', (int) $this->year)
+            ->first();
+        $signoffDivision = $plan?->schoolDivision() ?? $this->division();
+
         // A certified allotment is locked, and re-certifying would replace the
         // signature already on record — the certificate stands as given.
         if ($allotment->isCertified()) {
@@ -775,7 +785,7 @@ class SchoolAllotmentManager extends Component
         $submitted = WfpReportSignoffs::submitReadyPlan(
             $school->id,
             (int) $this->year,
-            $this->division(),
+            $signoffDivision,
         ) !== null;
 
         $this->certifyingSchoolId = null;

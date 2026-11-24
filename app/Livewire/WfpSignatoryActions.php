@@ -67,8 +67,17 @@ class WfpSignatoryActions extends Component
         $user = $this->viewer();
         abort_unless($user->canCheckWfpReport(), 404);
 
+        // Sign-offs are stored under the plan's own division so they are
+        // visible to hasBudgetReview() regardless of which division the
+        // signer happens to be working in at the moment.
+        $plan = WfpPlan::query()
+            ->where('school_id', $this->schoolId)
+            ->where('year', $this->year)
+            ->first();
+        $division = $plan?->schoolDivision() ?? $user->activeDivision();
+
         try {
-            WfpReportSignoffs::check($user, $this->schoolId, $this->year, $user->activeDivision());
+            WfpReportSignoffs::check($user, $this->schoolId, $this->year, $division);
         } catch (RuntimeException $exception) {
             $this->errorMessage = $exception->getMessage();
 
@@ -78,7 +87,7 @@ class WfpSignatoryActions extends Component
         $submitted = WfpReportSignoffs::submitReadyPlan(
             $this->schoolId,
             $this->year,
-            $user->activeDivision(),
+            $division,
         ) !== null;
 
         $this->successMessage = $submitted
@@ -96,8 +105,17 @@ class WfpSignatoryActions extends Component
         $user = $this->viewer();
         abort_unless($user->canCertifyAllotments(), 404);
 
+        // Sign-offs are stored under the plan's own division so they are
+        // visible to hasBudgetReview() regardless of which division the
+        // signer happens to be working in at the moment.
+        $plan = WfpPlan::query()
+            ->where('school_id', $this->schoolId)
+            ->where('year', $this->year)
+            ->first();
+        $division = $plan?->schoolDivision() ?? $user->activeDivision();
+
         try {
-            WfpReportSignoffs::certify($user, $this->schoolId, $this->year, $user->activeDivision());
+            WfpReportSignoffs::certify($user, $this->schoolId, $this->year, $division);
         } catch (RuntimeException $exception) {
             $this->errorMessage = $exception->getMessage();
 
@@ -107,7 +125,7 @@ class WfpSignatoryActions extends Component
         $submitted = WfpReportSignoffs::submitReadyPlan(
             $this->schoolId,
             $this->year,
-            $user->activeDivision(),
+            $division,
         ) !== null;
 
         $this->successMessage = $submitted
