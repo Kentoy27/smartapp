@@ -202,6 +202,11 @@ class PsdsMonitoringTest extends TestCase
         $this->aip($draft, $year, AipPlan::STATUS_DRAFT);
         $this->wfpPlan($draft, $year, WfpPlan::STATUS_DRAFT);
 
+        $forwarded = $this->school($north, 'Forwarded School', '100005');
+        $forwardedPlan = $this->aip($forwarded, $year, AipPlan::STATUS_FORWARDED);
+        $nextReviewer = User::factory()->create(['name' => 'Eve', 'username' => 'Eve']);
+        $forwardedPlan->update(['assigned_to' => $nextReviewer->id]);
+
         $uploaded = $this->school($north, 'Uploaded School', '100004');
         $this->wfpUpload($this->schoolHead($uploaded), 'CY '.$year);
 
@@ -210,19 +215,37 @@ class PsdsMonitoringTest extends TestCase
             ->keyBy('school_name');
 
         $this->assertSame(PsdsMonitoringReport::DOC_SUBMITTED, $rows['Complete School']['aip']['status']);
+        $this->assertSame('Approved', $rows['Complete School']['aip']['label']);
+        $this->assertSame('badge--ok', $rows['Complete School']['aip']['badge']);
         $this->assertSame(PsdsMonitoringReport::DOC_SUBMITTED, $rows['Complete School']['opcrf']['status']);
         $this->assertSame(PsdsMonitoringReport::DOC_SUBMITTED, $rows['Complete School']['wfp']['status']);
         $this->assertSame('Approved', $rows['Complete School']['wfp']['detail_label']);
         $this->assertSame(PsdsMonitoringReport::OVERALL_COMPLETE, $rows['Complete School']['overall_status']);
 
         $this->assertSame(PsdsMonitoringReport::DOC_NEEDS_REVISION, $rows['Returned School']['aip']['status']);
+        $this->assertSame('Returned for Revision', $rows['Returned School']['aip']['label']);
+        $this->assertSame('badge--warn', $rows['Returned School']['aip']['badge']);
         $this->assertSame(PsdsMonitoringReport::DOC_NEEDS_REVISION, $rows['Returned School']['opcrf']['status']);
         $this->assertSame(PsdsMonitoringReport::DOC_NEEDS_REVISION, $rows['Returned School']['wfp']['status']);
         $this->assertSame(PsdsMonitoringReport::OVERALL_NEEDS_REVISION, $rows['Returned School']['overall_status']);
 
         $this->assertSame(PsdsMonitoringReport::DOC_IN_PROGRESS, $rows['Draft School']['aip']['status']);
+        $this->assertSame('Draft', $rows['Draft School']['aip']['label']);
         $this->assertSame(PsdsMonitoringReport::DOC_IN_PROGRESS, $rows['Draft School']['wfp']['status']);
         $this->assertSame(PsdsMonitoringReport::OVERALL_IN_PROGRESS, $rows['Draft School']['overall_status']);
+
+        $this->assertSame(PsdsMonitoringReport::DOC_SUBMITTED, $rows['Forwarded School']['aip']['status']);
+        $this->assertSame('Approved / Forwarded', $rows['Forwarded School']['aip']['label']);
+        $this->assertSame('Forwarded to Eve', $rows['Forwarded School']['aip']['detail_label']);
+        $this->assertSame('badge--info', $rows['Forwarded School']['aip']['badge']);
+
+        Livewire::actingAs($psds)
+            ->test(PsdsMonitoring::class)
+            ->set('yearFilter', (string) $year)
+            ->assertSee('Complete School')
+            ->assertSee('Approved')
+            ->assertSee('Forwarded School')
+            ->assertSee('Approved / Forwarded');
 
         $this->assertSame(PsdsMonitoringReport::DOC_SUBMITTED, $rows['Uploaded School']['wfp']['status']);
         $this->assertSame('Workbook uploaded', $rows['Uploaded School']['wfp']['detail_label']);
@@ -673,7 +696,7 @@ class PsdsMonitoringTest extends TestCase
 
     /* ------------------------------------------------------------- periods */
 
-    public function test_the_reporting_year_defaults_to_the_current_year_and_all_years_uses_the_latest_on_file(): void
+    public function test_the_reporting_year_defaults_to_all_years_and_specific_years_can_be_selected(): void
     {
         $current = (int) now()->year;
         $previous = $current - 1;
@@ -681,29 +704,17 @@ class PsdsMonitoringTest extends TestCase
         $psds = $this->psds([$north]);
         $school = $this->school($north, 'Alpha North School', '100001');
 
-        // Only the previous year has a plan. The page opens on the current
-        // year, so the school reads as not submitted until "All years".
+        // Only the previous year has a plan. The default all-years view finds
+        // it, while selecting the current year narrows it out.
         $this->aip($school, $previous, AipPlan::STATUS_APPROVED);
 
         $component = Livewire::actingAs($psds)->test(PsdsMonitoring::class);
 
-        $component->assertSet('yearFilter', (string) $current);
-        $this->assertSame(
-            PsdsMonitoringReport::DOC_NOT_SUBMITTED,
-            $component->instance()->reportData()['rows']->first()['aip']['status'],
-        );
+        $component->assertSet('yearFilter', '');
+        $this->assertSame(PsdsMonitoringReport::DOC_SUBMITTED, $component->instance()->reportData()['rows']->first()['aip']['status']);
 
-        $component->set('yearFilter', '');
-        $this->assertSame(
-            PsdsMonitoringReport::DOC_SUBMITTED,
-            $component->instance()->reportData()['rows']->first()['aip']['status'],
-        );
-
-        $component->set('yearFilter', (string) $previous);
-        $this->assertSame(
-            PsdsMonitoringReport::DOC_SUBMITTED,
-            $component->instance()->reportData()['rows']->first()['aip']['status'],
-        );
+        $component->set('yearFilter', (string) $current);
+        $this->assertSame(PsdsMonitoringReport::DOC_NOT_SUBMITTED, $component->instance()->reportData()['rows']->first()['aip']['status']);
 
         // A malformed year is treated as "all years", not as a data leak or
         // an error.
@@ -712,6 +723,31 @@ class PsdsMonitoringTest extends TestCase
             PsdsMonitoringReport::DOC_SUBMITTED,
             $component->instance()->reportData()['rows']->first()['aip']['status'],
         );
+    }
+
+    public function test_the_default_all_years_view_detects_aip_opcrf_and_wfp_from_different_years(): void
+    {
+        $year = (int) now()->year;
+        $nextYear = $year + 1;
+        $north = $this->district('North District');
+        $psds = $this->psds([$north]);
+        $school = $this->school($north, 'Colambo National High School', '100006');
+        $this->aip($school, $nextYear, AipPlan::STATUS_APPROVED);
+        $head = $this->schoolHead($school);
+        $this->opcrf($head, OpcrfSubmission::STATUS_APPROVED, $year);
+        $this->wfpPlan($school, $year, WfpPlan::STATUS_FINALIZED);
+
+        $component = Livewire::actingAs($psds)->test(PsdsMonitoring::class);
+        $component->assertSet('yearFilter', '')
+            ->assertSee('Colambo National High School')
+            ->assertSee('Approved');
+
+        $row = $component->instance()->reportData()['rows']->first();
+        $this->assertSame(PsdsMonitoringReport::DOC_SUBMITTED, $row['aip']['status']);
+        $this->assertSame(PsdsMonitoringReport::DOC_SUBMITTED, $row['opcrf']['status']);
+        $this->assertSame('Approved', $row['opcrf']['detail_label']);
+        $this->assertSame(PsdsMonitoringReport::DOC_SUBMITTED, $row['wfp']['status']);
+        $this->assertSame('Approved', $row['wfp']['detail_label']);
     }
 
     public function test_review_periods_are_parsed_to_their_last_four_digit_year(): void

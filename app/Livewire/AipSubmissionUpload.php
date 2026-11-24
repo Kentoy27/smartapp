@@ -77,10 +77,10 @@ class AipSubmissionUpload extends Component
         }
 
         $this->validate([
-            'aipFile' => ['required', 'file', 'extensions:docx', 'max:'.(int) config('aip.max_kb', 10240)],
+            'aipFile' => ['required', 'file', 'extensions:docx', 'max:'.(int) config('aip.max_kb', 102400)],
         ], [
             'aipFile.extensions' => 'Choose an AIP Word document in DOCX format.',
-            'aipFile.max' => 'The AIP document must be no larger than '.number_format((int) config('aip.max_kb', 10240) / 1024, 1).' MB.',
+            'aipFile.max' => 'The AIP document must be no larger than '.number_format((int) config('aip.max_kb', 102400) / 1024, 1).' MB.',
         ]);
 
         try {
@@ -143,7 +143,7 @@ class AipSubmissionUpload extends Component
         }
 
         $this->validate([
-            'aipFile' => ['required', 'file', 'extensions:docx', 'max:'.(int) config('aip.max_kb', 10240)],
+            'aipFile' => ['required', 'file', 'extensions:docx', 'max:'.(int) config('aip.max_kb', 102400)],
         ]);
 
         if ($user->school_id === null) {

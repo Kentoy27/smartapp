@@ -83,13 +83,12 @@ class PsdsMonitoring extends Component
         abort_unless(in_array($mode, ['all', 'mov'], true), 404);
         $this->mode = $mode;
 
-        // The page opens on the current reporting year. A malformed year, or
-        // one the account has no data for, falls back to the current year
-        // rather than rendering a report nobody asked for.
-        $requested = ctype_digit($this->yearFilter) ? (int) $this->yearFilter : null;
-
-        if ($requested === null || ! in_array($requested, $this->report()->yearOptions(), true)) {
-            $this->yearFilter = (string) now()->year;
+        // The default "All years" view finds each document independently,
+        // so an AIP for a new year cannot hide an OPCRF or WFP from another.
+        if ($this->yearFilter !== ''
+            && (! ctype_digit($this->yearFilter)
+                || ! in_array((int) $this->yearFilter, $this->report()->yearOptions(), true))) {
+            $this->yearFilter = '';
         }
     }
 
@@ -223,13 +222,13 @@ class PsdsMonitoring extends Component
         );
     }
 
-    /** Whether anything but the default reporting year is narrowing the view. */
+    /** Whether anything but the default all-years view is narrowing the report. */
     #[Computed]
     public function hasActiveFilters(): bool
     {
         return $this->districtFilter !== ''
             || $this->schoolFilter !== ''
-            || $this->yearFilter !== (string) now()->year
+            || $this->yearFilter !== ''
             || ($this->mode === 'all' && (
                 $this->aipFilter !== ''
                 || $this->opcrfFilter !== ''

@@ -51,7 +51,7 @@ final class AipTemplateImporter
 
         $fileSize = filesize($path);
 
-        if ($fileSize === false || $fileSize > ((int) config('aip.max_kb', 10240) * 1024)) {
+        if ($fileSize === false || $fileSize > ((int) config('aip.max_kb', 102400) * 1024)) {
             throw new RuntimeException('The AIP template is too large to import.');
         }
 

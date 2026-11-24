@@ -77,6 +77,27 @@ class AipPageTest extends TestCase
         );
     }
 
+    public function test_aip_upload_limit_is_100_mb_and_shown_in_the_upload_form(): void
+    {
+        $this->assertSame(102400, config('aip.max_kb'));
+
+        Livewire::actingAs($this->schoolHead())
+            ->test(AipSubmissionUpload::class)
+            ->call('openModal')
+            ->assertSee('DOCX · up to 100.0 MB', false);
+    }
+
+    public function test_aip_upload_accepts_a_document_larger_than_10_mb(): void
+    {
+        $upload = UploadedFile::fake()->create('over-10-mb.docx', 10241);
+
+        Livewire::actingAs($this->schoolHead())
+            ->test(AipSubmissionUpload::class)
+            ->call('openModal')
+            ->set('aipFile', $upload)
+            ->assertHasNoErrors(['aipFile' => ['max']]);
+    }
+
     public function test_school_heads_only_see_their_own_aip_submissions(): void
     {
         $district = District::create(['name' => 'District I']);

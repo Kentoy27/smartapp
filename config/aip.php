@@ -30,7 +30,7 @@ return [
     */
 
     // The upload/export ceiling for a submitted AIP document, in kilobytes.
-    'max_kb' => (int) env('AIP_MAX_KB', 10240),
+    'max_kb' => (int) env('AIP_MAX_KB', 102400),
 
     'review_route' => env('AIP_REVIEW_ROUTE', 'Rebonie'),
 

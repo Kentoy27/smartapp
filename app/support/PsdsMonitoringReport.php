@@ -517,6 +517,7 @@ final class PsdsMonitoringReport
         return AipPlan::query()
             ->whereIn('school_id', $schoolIds)
             ->when($year !== null, fn ($query) => $query->where('year', $year))
+            ->with('assignedTo:id,name,username')
             ->orderByDesc('year')
             ->orderByDesc('id')
             ->get()
@@ -636,12 +637,21 @@ final class PsdsMonitoringReport
             default => self::DOC_SUBMITTED,
         };
 
-        return $this->cell(
+        $cell = $this->cell(
             $status,
-            AipPlan::statusLabel((string) $plan->status),
+            $plan->status === AipPlan::STATUS_FORWARDED
+                ? $plan->statusLabelFor()
+                : null,
             $plan->submitted_at,
             (int) $plan->year,
         );
+
+        $cell['label'] = $plan->status === AipPlan::STATUS_FORWARDED
+            ? 'Approved / Forwarded'
+            : AipPlan::statusLabel((string) $plan->status);
+        $cell['badge'] = $plan->statusBadgeClass();
+
+        return $cell;
     }
 
     /**

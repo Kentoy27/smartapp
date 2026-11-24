@@ -120,14 +120,14 @@ class AipManager extends Component
         $this->validate([
             'year' => ['required', 'integer', 'min:2000', 'max:2100'],
             'title' => ['nullable', 'string', 'max:255'],
-            'templateFile' => ['nullable', 'file', 'extensions:docx', 'max:'.(int) config('aip.max_kb', 10240)],
+            'templateFile' => ['nullable', 'file', 'extensions:docx', 'max:'.(int) config('aip.max_kb', 102400)],
         ], [
             'year.required' => 'Choose the school year the plan covers.',
             'year.min' => 'Enter a valid four-digit school year.',
             'year.max' => 'Enter a valid four-digit school year.',
             'title.max' => 'Keep the title under 255 characters.',
             'templateFile.extensions' => 'Upload the completed AIP template as a DOCX Word document.',
-            'templateFile.max' => 'The AIP template must be no larger than '.number_format((int) config('aip.max_kb', 10240) / 1024, 1).' MB.',
+            'templateFile.max' => 'The AIP template must be no larger than '.number_format((int) config('aip.max_kb', 102400) / 1024, 1).' MB.',
         ], [
             'year' => 'school year',
             'title' => 'title',

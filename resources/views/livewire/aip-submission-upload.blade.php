@@ -23,7 +23,7 @@
 
                 <div class="modal-form aip-upload-modal__body">
                     <div class="aip-upload-modal__file">
-                        <label for="aip-upload-file">AIP Word document <span class="aip-field__optional">DOCX · up to {{ number_format((int) config('aip.max_kb', 10240) / 1024, 1) }} MB</span></label>
+                        <label for="aip-upload-file">AIP Word document <span class="aip-field__optional">DOCX · up to {{ number_format((int) config('aip.max_kb', 102400) / 1024, 1) }} MB</span></label>
                         <input
                             id="aip-upload-file"
                             type="file"

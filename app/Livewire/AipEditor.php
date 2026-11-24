@@ -317,11 +317,11 @@ class AipEditor extends Component
         $this->assertEditable($plan);
 
         $this->validate([
-            'templateFile' => ['required', 'file', 'extensions:docx', 'max:'.(int) config('aip.max_kb', 10240)],
+            'templateFile' => ['required', 'file', 'extensions:docx', 'max:'.(int) config('aip.max_kb', 102400)],
         ], [
             'templateFile.required' => 'Choose a completed AIP Word document to import.',
             'templateFile.extensions' => 'Upload the completed AIP template as a DOCX Word document.',
-            'templateFile.max' => 'The AIP template must be no larger than '.number_format((int) config('aip.max_kb', 10240) / 1024, 1).' MB.',
+            'templateFile.max' => 'The AIP template must be no larger than '.number_format((int) config('aip.max_kb', 102400) / 1024, 1).' MB.',
         ]);
 
         if (! $this->templateFile instanceof TemporaryUploadedFile) {
