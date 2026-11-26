@@ -200,6 +200,32 @@
                 </span>
             @endif
         @endforeach
+
+        @if ($this->canEdit())
+            {{-- Quick actions after the months: the Per Line Item report and
+                 the year's WFP plan, reachable from any month tab. Both are
+                 School Head actions, so the strip hides them for read-only
+                 readers (Budget, Bookkeeper) who reach the editor by preview. --}}
+            <a
+                href="{{ route('wfp.lineitems.export', ['year' => $matrix->year, 'signatures' => 'with']) }}"
+                class="mem-month-tab mem-month-tab--action"
+                download
+                title="Export the Per Line Item report for CY {{ $matrix->year }} with e-signatures"
+            >
+                <span>Per Line Item generated</span>
+            </a>
+
+            <button
+                type="button"
+                class="mem-month-tab mem-month-tab--action"
+                wire:click="generateWfp"
+                wire:loading.attr="disabled"
+                wire:target="generateWfp"
+                title="Generate the annual WFP from this year's matrices and open the plan"
+            >
+                <span>WFP generated</span>
+            </button>
+        @endif
     </nav>
 
     @if ($errorMessage)

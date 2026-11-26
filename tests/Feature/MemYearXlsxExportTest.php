@@ -8,19 +8,25 @@ use App\Models\MonthlyExpenditureMatrix;
 use App\Models\School;
 use App\Models\SchoolAllotment;
 use App\Models\User;
+use App\Models\WfpPlan;
 use App\Models\WfpReportCheck;
 use App\Support\MemYearXlsxExporter;
+use App\Support\MemXlsxExporter;
 use App\Support\PurePhpZipReader;
 use App\Support\SchoolDivision;
+use App\Support\WfpGenerator;
+use App\Support\WfpPlanExporter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
  * The Monthly Expenditure Matrix page's year export: one workbook carrying
- * twelve worksheets (JAN…DEC), each the month's printed DepEd form, in a
- * signed or unsigned e-signature mode.
+ * twelve worksheets (JAN…DEC), each the month's printed DepEd form, then the
+ * year's Per Line Item Expenditure report and — when a WFP plan exists — the
+ * official WFP, in a signed or unsigned e-signature mode.
  */
 class MemYearXlsxExportTest extends TestCase
 {
@@ -176,10 +182,11 @@ class MemYearXlsxExportTest extends TestCase
         $workbook = $zip->part('xl/workbook.xml');
         $this->assertNotNull($workbook);
 
-        // Exactly the monthly tabs, in calendar order.
+        // The monthly tabs in calendar order, then the line-item report. No
+        // WFP tab: this school has no plan for the year.
         preg_match_all('/<sheet name="([^"]+)"/', $workbook, $matches);
         $this->assertSame(
-            ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'],
+            ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC', 'Per Line Item'],
             $matches[1]
         );
 
@@ -268,6 +275,27 @@ class MemYearXlsxExportTest extends TestCase
         $this->assertStringContainsString('Account Code', $february);
         $this->assertStringContainsString('TOTAL:', $february);
 
+        // The appended Per Line Item tab is the year's own report: its month
+        // roll-up and its account-title roll-up, not a summary table.
+        $lineItem = $zip->part('xl/worksheets/sheet13.xml');
+        $this->assertNotNull($lineItem);
+        $this->assertStringContainsString(
+            '2030 ANNUAL MOOE ALLOTMENT ALLOCATED PER LINE ITEM OR OBJECT OF EXPENDITURE',
+            $lineItem,
+        );
+        $this->assertStringContainsString('Office Supplies Expenses', $lineItem);
+        $this->assertStringContainsString('Training Expenses', $lineItem);
+        $this->assertStringContainsString('JANUARY', $lineItem);
+        $this->assertStringContainsString('JULY', $lineItem);
+        $this->assertStringContainsString('<v>3500</v>', $lineItem);
+        $this->assertStringNotContainsString('Line from another year', $lineItem);
+        $this->assertStringNotContainsString('Line from another school', $lineItem);
+
+        // The line-item donor table is appended after the MEM table: its
+        // title style (3) lands at 24 + 3 in the single merged styles part.
+        $this->assertStringContainsString('<c r="A5" s="27"', $lineItem);
+        $this->assertStringNotContainsString('tabSelected="1"', $lineItem);
+
         // 2030 is not the current year, so JAN is the selected tab and no
         // month is artificially highlighted.
         $this->assertStringContainsString('tabSelected="1"', $january);
@@ -336,7 +364,8 @@ class MemYearXlsxExportTest extends TestCase
         $drawings = $this->partsMatching($parts, '#^xl/drawings/drawing\d+\.xml$#');
 
         $this->assertCount(3, $images);
-        $this->assertCount(12, $drawings);
+        // Twelve month sheets plus the appended Per Line Item report.
+        $this->assertCount(13, $drawings);
 
         $drawingRels = $parts['xl/drawings/_rels/drawing1.xml.rels'] ?? '';
         $this->assertSame(3, substr_count($drawingRels, 'relationships/image'));
@@ -354,6 +383,15 @@ class MemYearXlsxExportTest extends TestCase
             $this->assertStringContainsString($bookkeeper->name, $sheet);
             $this->assertStringContainsString($budget->name, $sheet);
         }
+
+        // The Per Line Item tab carries the same workflow signatures. Its
+        // form prints the signers' names in upper case, as the standalone
+        // report does.
+        $lineItem = $parts['xl/worksheets/sheet13.xml'];
+        $this->assertMatchesRegularExpression('/<drawing r:id="rId\d+"\/>/', $lineItem);
+        $this->assertStringContainsString(mb_strtoupper($sh->name), $lineItem);
+        $this->assertStringContainsString(mb_strtoupper($bookkeeper->name), $lineItem);
+        $this->assertStringContainsString(mb_strtoupper($budget->name), $lineItem);
 
         // The descriptor is an XML attribute, so a name like O'Keefe arrives
         // escaped; compare against the decoded text so the assertion does not
@@ -390,6 +428,13 @@ class MemYearXlsxExportTest extends TestCase
         $this->assertStringContainsString($sh->name, $parts['xl/worksheets/sheet1.xml']);
         $this->assertStringContainsString($bookkeeper->name, $parts['xl/worksheets/sheet1.xml']);
         $this->assertStringContainsString($budget->name, $parts['xl/worksheets/sheet1.xml']);
+
+        // The appended Per Line Item tab follows the same mode: the printed
+        // names stay, no image is stamped.
+        $this->assertStringNotContainsString('<drawing', $parts['xl/worksheets/sheet13.xml']);
+        $this->assertStringContainsString(mb_strtoupper($sh->name), $parts['xl/worksheets/sheet13.xml']);
+        $this->assertStringContainsString(mb_strtoupper($bookkeeper->name), $parts['xl/worksheets/sheet13.xml']);
+        $this->assertStringContainsString(mb_strtoupper($budget->name), $parts['xl/worksheets/sheet13.xml']);
 
         unlink($path);
     }
@@ -447,6 +492,10 @@ class MemYearXlsxExportTest extends TestCase
         $bookkeeper = User::factory()->create(['role' => 'bookkeeper', 'is_superadmin' => false]);
 
         foreach ([$viewer, $administrator, $superadmin, $bookkeeper] as $user) {
+            // Each user is a different browser session; reusing one would
+            // trip the password fingerprint that revokes a switched account.
+            $this->flushSession();
+
             $this->actingAs($user)
                 ->get(route('wfp.matrices.year-export', ['year' => 2030]))
                 ->assertNotFound();
@@ -454,6 +503,8 @@ class MemYearXlsxExportTest extends TestCase
 
         // A School Head with no school has no matrix (and no workbook) to own.
         $homeless = User::factory()->create(['role' => 'user', 'is_superadmin' => false, 'school_id' => null]);
+
+        $this->flushSession();
 
         $this->actingAs($homeless)
             ->get(route('wfp.matrices.year-export', ['year' => 2030]))
@@ -665,6 +716,262 @@ class MemYearXlsxExportTest extends TestCase
         $this->assertStringContainsString('<c r="B10" s="21"', $january);
         $this->assertStringContainsString('<c r="B11" s="23"/>', $january);
         $this->assertStringContainsString('<c r="B12" s="7"', $january);
+
+        unlink($path);
+    }
+
+    public function test_the_wfp_tab_is_the_official_plan_workbook_when_a_plan_exists(): void
+    {
+        $sh = $this->schoolHead('WFP Combined School');
+
+        $this->matrixFor($sh, 1, 2030)->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'objective' => 'Keep the office running',
+            'activity_description' => 'January supplies purchase',
+            'resource_kind' => 'MOOE',
+            'quantity' => 10,
+            'unit' => 'ream',
+            'unit_cost' => 250,
+            'account_title' => 'Office Supplies Expenses',
+            'account_code' => '0012345678',
+            'funding_source' => 'MOOE',
+            'organizational_classification' => 'School',
+            'activity_movs' => 'PO, RIS',
+        ]);
+
+        $plan = WfpPlan::create([
+            'school_id' => $sh->school_id,
+            'school_division' => SchoolDivision::ELEMENTARY,
+            'year' => 2030,
+            'status' => WfpPlan::STATUS_DRAFT,
+        ]);
+
+        WfpGenerator::generate($plan);
+
+        $response = $this->actingAs($sh)->get(route('wfp.matrices.year-export', ['year' => 2030]));
+
+        $response->assertOk()
+            ->assertHeader('Content-Type', MemYearXlsxExporter::CONTENT_TYPE)
+            ->assertDownload('Monthly_Expenditure_Matrix_CY_2030_Signed.xlsx');
+
+        [$zip, $path] = $this->readerFor($response->getContent());
+        $parts = $zip->readAll();
+
+        foreach ($parts as $name => $contents) {
+            // The package also carries binary printer settings; only the XML
+            // parts are expected to parse.
+            if (preg_match('/\.(xml|rels)$/', $name) !== 1) {
+                continue;
+            }
+
+            $this->assertNotFalse(
+                @simplexml_load_string($contents),
+                $name.' is not well-formed XML'
+            );
+        }
+
+        $workbook = $parts['xl/workbook.xml'];
+
+        // The months, then the line-item report, then the plan's official WFP.
+        preg_match_all('/<sheet name="([^"]+)"/', $workbook, $matches);
+        $this->assertSame(
+            ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC', 'Per Line Item', 'WFP'],
+            $matches[1],
+        );
+
+        // The WFP workbook was the base package: its sheet and sheetId are
+        // untouched, and only its tab position and Print_Area scope moved.
+        $this->assertStringContainsString('<sheet name="WFP" sheetId="83"', $workbook);
+        $this->assertStringContainsString('localSheetId="13"', $workbook);
+        $this->assertStringContainsString('_xlnm.Print_Area', $workbook);
+        $this->assertStringContainsString('WFP!$A$1:$AV$', $workbook);
+
+        // Appending relationships must never collide with the template's own.
+        $relationships = $parts['xl/_rels/workbook.xml.rels'];
+        preg_match_all('/<Relationship\b[^>]*\bId="([^"]+)"/', $relationships, $relationshipIds);
+        $this->assertSame(
+            $relationshipIds[1],
+            array_values(array_unique($relationshipIds[1])),
+            'The workbook has duplicate relationship IDs.',
+        );
+
+        preg_match_all('/<sheet\b[^>]*\br:id="([^"]+)"/', $workbook, $sheetRelationshipIds);
+        $this->assertSame(
+            [],
+            array_values(array_diff($sheetRelationshipIds[1], $relationshipIds[1])),
+            'A sheet points at a missing relationship.',
+        );
+
+        // January is the selected tab, and it is the appended month sheet —
+        // the WFP template's own sheet stays sheet1.
+        $january = $parts['xl/worksheets/sheet2.xml'];
+        $this->assertStringContainsString('2030 MONTHLY EXPENDITURE MATRIX', $january);
+        $this->assertStringContainsString('MONTH: JANUARY 2030', $january);
+        $this->assertStringContainsString('tabSelected="1"', $january);
+        $this->assertStringContainsString('activeTab="0"', $workbook);
+        $this->assertStringNotContainsString('tabSelected="1"', $parts['xl/worksheets/sheet1.xml']);
+
+        $lineItem = $parts['xl/worksheets/sheet14.xml'];
+        $this->assertStringContainsString('ANNUAL MOOE ALLOTMENT ALLOCATED PER LINE ITEM', $lineItem);
+        $this->assertStringContainsString('Office Supplies Expenses', $lineItem);
+
+        // The WFP tab is the plan's real workbook, not a summary: its title
+        // block carries the school and year and its generated rows are there.
+        $wfp = $parts['xl/worksheets/sheet1.xml'];
+        $this->assertStringContainsString('WFP Combined School', $wfp);
+        $this->assertStringContainsString('2030', $wfp);
+        $this->assertStringContainsString('Office Supplies Expenses', $wfp);
+
+        // One styles table: the filled WFP workbook's own cellXfs, then the
+        // MEM and the line-item tables, and every appended style index
+        // resolves inside it. The WFP filler appends styles of its own, so the
+        // base is the filled workbook the exporter actually started from.
+        [$wfpZip, $wfpPath] = $this->readerFor(WfpPlanExporter::bytes($plan, true, $sh));
+        $baseStyles = (string) $wfpZip->part('xl/styles.xml');
+        unlink($wfpPath);
+
+        preg_match('/<cellXfs\b[^>]*\bcount="(\d+)"/', $baseStyles, $base);
+        $baseXfs = (int) $base[1];
+
+        preg_match('/<cellXfs\b[^>]*\bcount="(\d+)"[^>]*>(.*?)<\/cellXfs>/s', $parts['xl/styles.xml'], $merged);
+        $mergedCount = (int) $merged[1];
+
+        $this->assertSame($baseXfs + 24 + 16, $mergedCount);
+        $this->assertSame($mergedCount, substr_count($merged[2], '<xf '));
+
+        // The donor xfs are re-based onto the template's font and border
+        // tables too, not only its cellXfs.
+        preg_match('/<fonts\b[^>]*\bcount="(\d+)"/', $baseStyles, $baseFonts);
+        preg_match('/<borders\b[^>]*\bcount="(\d+)"/', $baseStyles, $baseBorders);
+        preg_match('/<fonts\b[^>]*\bcount="(\d+)"/', MemXlsxExporter::stylesXml(), $memFonts);
+
+        preg_match_all('/<xf\b[^>]*\/>|<xf\b[^>]*>.*?<\/xf>/s', $merged[2], $mergedXfs);
+        $this->assertCount($mergedCount, $mergedXfs[0]);
+
+        $this->assertStringContainsString(
+            'borderId="'.((int) $baseBorders[1] + 1).'"',
+            $mergedXfs[0][$baseXfs + 7],
+            'The MEM table was not re-based onto the template border table.',
+        );
+        $this->assertStringContainsString(
+            'fontId="'.((int) $baseFonts[1] + (int) $memFonts[1] + 2).'"',
+            $mergedXfs[0][$baseXfs + 24 + 3],
+            'The line-item table was not re-based onto the template font table.',
+        );
+
+        // The template already owns custom numFmt 164/165, so the line-item
+        // 0.00% format must be re-allocated and its xfs pointed at the new id.
+        preg_match_all('/<numFmt numFmtId="(\d+)" formatCode="0\.00%"/', $parts['xl/styles.xml'], $percentFormats);
+        $this->assertNotEmpty($percentFormats[1], 'The line-item percentage format is missing.');
+
+        $percentId = max(array_map('intval', $percentFormats[1]));
+        $percentXfs = array_filter(
+            $mergedXfs[0],
+            static fn (string $xf): bool => str_contains($xf, 'numFmtId="'.$percentId.'"'),
+        );
+        $this->assertNotEmpty($percentXfs, 'No cell style uses the line-item percentage format.');
+
+        $appendedParts = array_map(
+            static fn (int $sheet): string => 'xl/worksheets/sheet'.$sheet.'.xml',
+            range(2, 14),
+        );
+
+        foreach ($appendedParts as $part) {
+            preg_match_all('/\bs="(\d+)"/', $parts[$part], $indexes);
+            $this->assertNotSame([], $indexes[1], $part.' has no styled cells.');
+
+            $highest = max(array_map('intval', $indexes[1]));
+            $this->assertLessThan($mergedCount, $highest, $part.' uses a style index outside the merged table.');
+        }
+
+        // The donor tables are appended after the template's own: MEM style 7
+        // (a one-row objective/activity block) and the line-item title
+        // (style 3) land at those offsets.
+        $this->assertStringContainsString('<c r="A10" s="'.($baseXfs + 7).'"', $january);
+        $this->assertStringContainsString('<c r="A5" s="'.($baseXfs + 24 + 3).'"', $lineItem);
+
+        unlink($path);
+    }
+
+    public function test_the_current_years_workbook_opens_the_current_month(): void
+    {
+        Carbon::setTestNow(Carbon::create(2026, 11, 15, 12, 0, 0));
+
+        try {
+            $sh = $this->schoolHead('Current Year School');
+
+            $this->matrixFor($sh, 11, 2026)->items()->create([
+                'position' => 1,
+                'section' => 'operations',
+                'objective' => 'Keep the office running',
+                'activity_description' => 'November supplies purchase',
+                'resource_kind' => 'MOOE',
+                'quantity' => 10,
+                'unit' => 'ream',
+                'unit_cost' => 250,
+                'account_title' => 'Office Supplies Expenses',
+                'account_code' => '0012345678',
+                'funding_source' => 'MOOE',
+                'organizational_classification' => 'School',
+                'activity_movs' => 'PO, RIS',
+            ]);
+
+            $plan = WfpPlan::create([
+                'school_id' => $sh->school_id,
+                'school_division' => SchoolDivision::ELEMENTARY,
+                'year' => 2026,
+                'status' => WfpPlan::STATUS_DRAFT,
+            ]);
+
+            WfpGenerator::generate($plan);
+
+            $response = $this->actingAs($sh)->get(route('wfp.matrices.year-export', ['year' => 2026]));
+            $response->assertOk();
+
+            [$zip, $path] = $this->readerFor($response->getContent());
+
+            // The WFP workbook is the base, so the months are sheet2…sheet13:
+            // November is sheet12 and its tab opens selected.
+            $workbook = (string) $zip->part('xl/workbook.xml');
+            $this->assertStringContainsString('activeTab="10"', $workbook);
+            $this->assertStringContainsString('tabSelected="1"', (string) $zip->part('xl/worksheets/sheet12.xml'));
+            $this->assertStringNotContainsString('tabSelected="1"', (string) $zip->part('xl/worksheets/sheet2.xml'));
+
+            unlink($path);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_the_export_never_creates_a_wfp_plan(): void
+    {
+        $sh = $this->schoolHead('No Plan School');
+
+        $this->matrixFor($sh, 1, 2030)->items()->create([
+            'position' => 1,
+            'section' => 'operations',
+            'activity_description' => 'January supplies purchase',
+            'quantity' => 1,
+            'unit_cost' => 100,
+            'account_title' => 'Office Supplies Expenses',
+            'account_code' => '5020301000',
+        ]);
+
+        $this->assertSame(0, WfpPlan::query()->count());
+
+        $response = $this->actingAs($sh)->get(route('wfp.matrices.year-export', ['year' => 2030]));
+        $response->assertOk();
+
+        // Reading the workbook must not write a plan: the WFP tab is simply
+        // absent until the school generates one.
+        $this->assertSame(0, WfpPlan::query()->count());
+
+        [$zip, $path] = $this->readerFor($response->getContent());
+        $workbook = (string) $zip->part('xl/workbook.xml');
+
+        $this->assertStringNotContainsString('name="WFP"', $workbook);
+        $this->assertStringContainsString('name="Per Line Item"', $workbook);
 
         unlink($path);
     }

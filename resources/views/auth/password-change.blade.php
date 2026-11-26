@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#f1f5f9">
     <title>Change your password — SmartApp</title>
-    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=68">
+    <link rel="stylesheet" href="{{ public_asset('css/dashboard.css') }}?v=69">
     <style>
         body { display: grid; min-height: 100vh; place-items: center; padding: 20px; }
         .password-change-card { width: min(100%, 440px); padding: 28px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-panel); box-shadow: var(--shadow-card); }

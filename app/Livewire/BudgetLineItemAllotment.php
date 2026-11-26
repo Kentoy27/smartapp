@@ -22,11 +22,11 @@ use Livewire\Component;
  *
  * It is the same printed form the School Head reads on /wfp/line-items: the
  * MONTH / BUDGET column beside the year's lines rolled up per account code,
- * with each line's share of the grand total. The difference is scope. A School
- * Head is fixed to their own school; the Budget office oversees every school,
- * so the report is read one school at a time through `schoolId` — chosen from
- * a searchable picker (chooseSchool() over the `schoolSearch` box), because a
- * division's roster is longer than a select shows comfortably.
+ * with each line's share of the year's allotment. The difference is scope. A
+ * School Head is fixed to their own school; the Budget office oversees every
+ * school, so the report is read one school at a time through `schoolId` —
+ * chosen from a searchable picker (chooseSchool() over the `schoolSearch`
+ * box), because a division's roster is longer than a select shows comfortably.
  *
  * The figures are not computed here. They come from WfpAllotment, which is
  * also what the .xlsx export reads, so what is downloaded is what was read on
@@ -598,7 +598,7 @@ class BudgetLineItemAllotment extends Component
     /**
      * The No. / Account Title / Account Code / Total Amount / % rows: the
      * year's lines rolled up per account code, in account-code order, each
-     * with its share of the grand total.
+     * with its share of the year's allotment.
      *
      * @return array<int, array{title: string, code: ?string, total: float, percent: float}>
      */
@@ -613,9 +613,8 @@ class BudgetLineItemAllotment extends Component
     }
 
     /**
-     * The year's total: the figure the percentages are shares of. It is the
-     * sum of the line-item rows, which is the same money as the sum of the
-     * twelve months — one year's lines, read two ways.
+     * The year's total: the sum of the line-item rows, which is the same money
+     * as the sum of the twelve months — one year's lines, read two ways.
      */
     #[Computed]
     public function grandTotal(): float

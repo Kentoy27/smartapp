@@ -1,7 +1,7 @@
 {{-- THE ANNUAL MOOE ALLOTMENT REPORT — the school's year of Monthly
      Expenditure Matrices read as the printed form: the MONTH / BUDGET column
      on the left, and the year's lines rolled up per account code with their
-     share of the grand total on the right.
+     share of the year's allotment on the right.
 
      The form itself is the shared partial, so the School Head's copy and the
      Budget office's / Bookkeeper's per-school copy cannot drift apart.

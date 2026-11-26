@@ -16,7 +16,7 @@ use Livewire\Component;
  * The annual MOOE allotment allocated per line item or object of expenditure:
  * one school's year of Monthly Expenditure Matrices read as the printed report
  * — the MONTH / BUDGET column on the left, and the year's lines rolled up per
- * account code with their share of the grand total on the right.
+ * account code with their share of the year's allotment on the right.
  *
  * The figures are not computed here. They come from WfpAllotment, which is
  * also what the page's .xlsx export reads, so what is downloaded is what was
@@ -118,7 +118,7 @@ class WfpLineItemAllotment extends Component
     /**
      * The No. / Account Title / Account Code / Total Amount / % rows: the
      * year's lines rolled up per account code, in account-code order, each
-     * with its share of the grand total.
+     * with its share of the year's allotment.
      *
      * @return array<int, array{title: string, code: ?string, total: float, percent: float}>
      */
@@ -133,9 +133,8 @@ class WfpLineItemAllotment extends Component
     }
 
     /**
-     * The year's total: the figure the percentages are shares of. It is the
-     * sum of the line-item rows, which is the same money as the sum of the
-     * twelve months — one year's lines, read two ways.
+     * The year's total: the sum of the line-item rows, which is the same money
+     * as the sum of the twelve months — one year's lines, read two ways.
      */
     #[Computed]
     public function grandTotal(): float

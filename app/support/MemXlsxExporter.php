@@ -716,13 +716,17 @@ final class MemXlsxExporter
     /* ------------------------------------------------------------- styles */
 
     /**
-     * Four fonts, one gray fill, the border variants (all-thin,
-     * signature-line, header edges, and the open-sided objective/activity
-     * blocks), and the cell styles the form needs. Money uses builtin
-     * numFmtId 4 ("#,##0.00") and account codes builtin 49 ("@") — no custom
-     * numFmts section, so the file opens the same in Excel and WPS.
+     * The form's complete styles part: four fonts, one gray fill, the border
+     * variants (all-thin, signature-line, header edges, and the open-sided
+     * objective/activity blocks), and the cell styles the form needs. Money
+     * uses builtin numFmtId 4 ("#,##0.00") and account codes builtin 49 ("@")
+     * — no custom numFmts section, so the file opens the same in Excel and
+     * WPS.
+     *
+     * Public because the year workbook folds it into its own single styles
+     * table when it appends these sheets.
      */
-    private static function stylesXml(): string
+    public static function stylesXml(): string
     {
         $font = static fn (string $extra = ''): string => '<font>'.$extra.'<sz val="10"/><name val="Calibri"/></font>';
 

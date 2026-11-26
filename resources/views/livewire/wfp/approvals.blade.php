@@ -127,7 +127,14 @@
                                 ))
                                 <div class="wfp-approval-signoff-list">
                                     @foreach ($planSignatories as $signatory)
-                                        <span class="wfp-signatory-status__badge">{{ $signatory['label'] }}: {{ $signatory['badge'] }}</span>
+                                        <span @class([
+                                            'wfp-signatory-status__badge',
+                                            'wfp-signatory-status__badge--pending' => $signatory['state'] === 'pending',
+                                            'wfp-signatory-status__badge--checked' => $signatory['state'] === 'checked',
+                                            'wfp-signatory-status__badge--certified' => $signatory['state'] === 'certified',
+                                            'wfp-signatory-status__badge--approved' => $signatory['state'] === 'approved',
+                                            'wfp-signatory-status__badge--returned' => $signatory['state'] === 'returned',
+                                        ])>{{ $signatory['label'] }}: {{ $signatory['badge'] }}</span>
                                     @endforeach
                                 </div>
                             </td>

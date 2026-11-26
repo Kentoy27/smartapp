@@ -1,7 +1,7 @@
 {{-- THE ANNUAL MOOE ALLOTMENT REPORT as a shared form — the MONTH / BUDGET
      column on the left, and the year's lines rolled up per account code with
-     their share of the grand total on the right. Read by the School Head's own
-     report (/wfp/line-items) and by the Budget office's per-school copy
+     their share of the year's allotment on the right. Read by the School Head's
+     own report (/wfp/line-items) and by the Budget office's per-school copy
      (/budget/per-line-item), so the two cannot describe the form differently.
 
      Everything here is derived from the matrices as they stand, so the report
@@ -123,7 +123,10 @@
 
         <div class="wfp-signatory-statuses__list">
             @foreach ($signatoryStatuses as $status)
-                <div class="wfp-signatory-status">
+                <div @class([
+                    'wfp-signatory-status',
+                    'wfp-signatory-status--'.($status['state'] ?? 'pending'),
+                ])>
                     <div class="wfp-signatory-status__header">
                         <span class="wfp-signatory-status__label">{{ $status['label'] }}</span>
                         <span @class([
@@ -365,7 +368,7 @@
             </table>
 
             {{-- THE LINE ITEMS: one row per account code for the whole year, in
-                 code order, each with its share of the total. --}}
+                 code order, each with its share of the year's allotment. --}}
             <table class="wfp-allotment-table wfp-allotment-table--items">
                 <thead>
                     <tr>
@@ -398,7 +401,9 @@
                     <tr class="is-total">
                         <th scope="row" colspan="3">Grand Total</th>
                         <td class="wfp-allotment-num">{{ number_format($grandTotal, 2) }}</td>
-                        <td class="wfp-allotment-num">{{ $grandTotal > 0 ? '100.00%' : '0.00%' }}</td>
+                        {{-- The total's share of the allotment — not 100% until
+                             the year's lines allocate the whole ceiling. --}}
+                        <td class="wfp-allotment-num">{{ number_format($allocation['percent'], 2) }}%</td>
                     </tr>
                 </tfoot>
             </table>

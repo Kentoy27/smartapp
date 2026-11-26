@@ -12,6 +12,7 @@ use App\Support\MemWorkbookImporter;
 use App\Support\MemYearInitializer;
 use App\Support\MemYearXlsxExporter;
 use App\Support\WfpAllotment;
+use App\Support\WfpGenerator;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
@@ -294,13 +295,15 @@ class MemMatrixList extends Component
 
     /**
      * The whole selected year as ONE workbook: twelve worksheets (JAN…DEC),
-     * each the month's printed form as it stands now. `with` stamps the
-     * workflow signers' registered profile signatures; `without` leaves the
-     * signature bands blank for wet signing. The workbook is generated in
-     * this action, so the button's loading state covers the work and a
-     * generation failure can be reported in-page instead of leaving the
-     * browser on an error page. The download itself is the Livewire file
-     * effect; the authenticated route is the same workbook by URL.
+     * each the month's printed form as it stands now, then the year's Per Line
+     * Item Expenditure report and — when a WFP plan exists for the year — the
+     * plan's official WFP. `with` stamps the workflow signers' registered
+     * profile signatures; `without` leaves the signature bands blank for wet
+     * signing. The workbook is generated in this action, so the button's
+     * loading state covers the work and a generation failure can be reported
+     * in-page instead of leaving the browser on an error page. The download
+     * itself is the Livewire file effect; the authenticated route is the same
+     * workbook by URL.
      */
     public function exportYear(string $signatureMode = 'with')
     {
@@ -353,6 +356,91 @@ class MemMatrixList extends Component
                 'Content-Length' => (string) strlen($bytes),
             ],
         );
+    }
+
+    /* ------------------------------------------------------------ generate */
+
+    public function generateWfp()
+    {
+        $this->manager();
+
+        $year = $this->filterYear();
+
+        if ($year === null) {
+            $this->errorMessage = 'Choose a specific year to generate the WFP for. “All” has no single year.';
+
+            return null;
+        }
+
+        $user = $this->user();
+
+        if ($user->school_id === null) {
+            $this->errorMessage = 'Your account has no school assigned, so there is no WFP to generate. Ask an administrator to set your school first.';
+
+            return null;
+        }
+
+        $division = $this->division();
+
+        $hasLines = MonthlyExpenditureMatrix::query()
+            ->where('school_id', $user->school_id)
+            ->where('school_division', $division)
+            ->where('year', $year)
+            ->has('items')
+            ->exists();
+
+        if (! $hasLines) {
+            $this->errorMessage = "CY {$year} has no expenditure lines to generate a WFP from.";
+
+            return null;
+        }
+
+        $plan = WfpPlan::firstOrCreate(
+            [
+                'school_id' => $user->school_id,
+                'school_division' => $division,
+                'year' => $year,
+            ],
+            ['status' => WfpPlan::STATUS_DRAFT],
+        );
+
+        if (! $plan->isEditable()) {
+            $this->errorMessage = 'This WFP is '.strtolower($plan->statusLabel()).' and can no longer be regenerated.';
+
+            return null;
+        }
+
+        $plan->generated_by = $user->id;
+        $plan->save();
+
+        $result = WfpGenerator::generate($plan);
+
+        $this->successMessage = "WFP generated for CY {$year}: {$result['created']} created, {$result['updated']} updated, {$result['removed']} removed.";
+
+        return $this->redirect(route('wfp.plans.edit', ['plan' => $plan->id]), navigate: true);
+    }
+
+    public function exportLineItems(string $signatureMode = 'with')
+    {
+        abort_unless(in_array($signatureMode, ['with', 'without'], true), 404);
+
+        $user = $this->user();
+
+        if ($user->school_id === null) {
+            $this->errorMessage = 'Your account has no school assigned, so there is no report to export. Ask an administrator to set your school first.';
+
+            return null;
+        }
+
+        $year = $this->filterYear();
+
+        if ($year === null) {
+            $this->errorMessage = 'Choose a specific year to export. “All” has no single year to report on.';
+
+            return null;
+        }
+
+        return $this->redirect(route('wfp.lineitems.export').'?year='.$year.'&signatures='.$signatureMode);
     }
 
     /* -------------------------------------------------------------- delete */

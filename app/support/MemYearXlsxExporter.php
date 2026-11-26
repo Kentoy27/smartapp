@@ -6,25 +6,39 @@ use App\Models\MonthlyExpenditureItem;
 use App\Models\MonthlyExpenditureMatrix;
 use App\Models\School;
 use App\Models\User;
+use App\Models\WfpPlan;
 use Illuminate\Support\Collection;
 
 /**
  * A whole planning year's Monthly Expenditure Matrix as one .xlsx workbook:
  * twelve worksheets, JAN through DEC, each the month's printed DepEd form as
- * it stands NOW.
+ * it stands NOW, followed by the year's Per Line Item Expenditure report and,
+ * when the school has a WFP plan for the year, the official WFP.
  *
- * The sheet layout belongs to {@see MemXlsxExporter::sheet()} — the same form
- * the single-matrix export prints — so the year and the month can never drift
- * apart. This class adds the year packaging, the tab selection, and the
- * optional e-signature stamping: the School Head's, Bookkeeper's and Budget
- * Officer's registered profile signatures are placed in the form's own blank
- * signature bands, on every month. With `$includeSignatures = false` the same
- * workbook is produced without those images; the printed names stay, because
- * the names are part of the form.
+ * The month layout belongs to {@see MemXlsxExporter::sheet()} and the Per Line
+ * Item layout to {@see WfpAllotmentXlsxExporter::sheet()} — the same forms the
+ * standalone downloads print — so a combined workbook and a single export can
+ * never drift apart. The WFP tab is the plan's own official workbook
+ * ({@see WfpPlanExporter::bytes()}), not a summary of it.
+ *
+ * When a plan exists its workbook is the BASE package: the template's theme,
+ * shared strings, printer settings and drawings stay exactly as the WFP export
+ * produced them, and the MEM and Per Line Item sheets are appended into it.
+ * Without a plan the twelve MEM sheets are packaged as before and only the Per
+ * Line Item sheet is appended; the WFP tab is omitted rather than creating a
+ * plan during an export.
+ *
+ * This class adds the year packaging, the tab selection, and the optional
+ * e-signature stamping: the School Head's, Bookkeeper's and Budget Officer's
+ * registered profile signatures are placed in each form's own blank signature
+ * bands. With `$includeSignatures = false` the same workbook is produced
+ * without those images; the printed names stay, because the names are part of
+ * the forms.
  *
  * The `zip` PHP extension is disabled on XAMPP's web-server PHP, so the
- * package is assembled through PurePhpZipWriter exactly as the other
- * exporters are. Signatures are stamped in one pass by
+ * packages are assembled through PurePhpZipWriter exactly as the other
+ * exporters are. {@see XlsxSheetAppender} folds the donors' style tables into
+ * the single OOXML styles part, and signatures are stamped in one pass by
  * {@see OpcrfSignatureStamper::stampManyAtRanges()}.
  */
 final class MemYearXlsxExporter
@@ -57,8 +71,11 @@ final class MemYearXlsxExporter
         $profiles = self::signatureProfiles($schoolId, $year, $division, $preparedBy);
         $activeMonth = self::activeMonthFor($year);
 
-        $sheets = [];
-        $stamps = [];
+        /** @var array<int, array{name: string, xml: string}> $monthSheets */
+        $monthSheets = [];
+
+        /** @var array<int, array<string, string>> $monthRanges */
+        $monthRanges = [];
 
         for ($month = 1; $month <= 12; $month++) {
             $matrix = $matrices->get($month);
@@ -86,14 +103,92 @@ final class MemYearXlsxExporter
                 $activeMonth !== null && $selected,
             );
 
-            $sheets[] = [
+            $monthSheets[] = [
                 'name' => mb_strtoupper(MonthlyExpenditureMatrix::MONTH_ABBREVIATIONS[$month] ?? (string) $month),
                 'xml' => $sheet['xml'],
             ];
 
-            if (! $includeSignatures) {
-                continue;
-            }
+            $monthRanges[$month] = $sheet['signature_ranges'];
+        }
+
+        // The Per Line Item report is always part of the year workbook. Its
+        // sheet is the standalone export's own, so the tab and the separate
+        // download describe the report identically.
+        $lineItemTab = 'Per Line Item';
+        $lineItem = WfpAllotmentXlsxExporter::sheet($schoolId, $year, $preparedBy, $division);
+
+        // Read-only: an export must never create or regenerate a plan. The
+        // WFP tab is present only when the school already has one for the
+        // selected year and division.
+        $plan = WfpPlan::query()
+            ->where('school_id', $schoolId)
+            ->where('school_division', $division)
+            ->where('year', $year)
+            ->first();
+
+        if ($plan instanceof WfpPlan) {
+            // The official WFP workbook is the base, so its theme, shared
+            // strings, printer settings and signature drawings survive
+            // untouched. The months and the line-item report are appended,
+            // then the tabs are put in calendar order with the WFP last.
+            $appended = XlsxSheetAppender::append(
+                WfpPlanExporter::bytes($plan, $includeSignatures, $preparedBy),
+                array_merge(
+                    array_map(
+                        static fn (array $sheet): array => $sheet + ['styles' => MemXlsxExporter::stylesXml()],
+                        $monthSheets,
+                    ),
+                    [[
+                        'name' => $lineItemTab,
+                        'xml' => $lineItem['xml'],
+                        'styles' => WfpAllotmentXlsxExporter::stylesXml(),
+                    ]],
+                ),
+            );
+
+            $tabOrder = array_merge(
+                array_map(static fn (array $sheet): string => $sheet['name'], $monthSheets),
+                [$lineItemTab, 'WFP'],
+            );
+
+            $activeTab = mb_strtoupper(
+                MonthlyExpenditureMatrix::MONTH_ABBREVIATIONS[$activeMonth ?? 1] ?? 'JAN'
+            );
+
+            $bytes = XlsxSheetAppender::arrange($appended['bytes'], $tabOrder, $activeTab);
+
+            $monthParts = array_slice($appended['parts'], 0, 12);
+            $lineItemPart = $appended['parts'][12] ?? null;
+        } else {
+            // No plan for the year: the twelve months are packaged as before,
+            // January (or the current month) opens selected, and the line-item
+            // report is appended after them.
+            $appended = XlsxSheetAppender::append(
+                MemXlsxExporter::package($monthSheets, ($activeMonth ?? 1) - 1),
+                [[
+                    'name' => $lineItemTab,
+                    'xml' => $lineItem['xml'],
+                    'styles' => WfpAllotmentXlsxExporter::stylesXml(),
+                ]],
+            );
+
+            $bytes = $appended['bytes'];
+
+            $monthParts = array_map(
+                static fn (int $month): string => 'xl/worksheets/sheet'.$month.'.xml',
+                range(1, 12),
+            );
+            $lineItemPart = $appended['parts'][0] ?? null;
+        }
+
+        if (! $includeSignatures) {
+            return $bytes;
+        }
+
+        $stamps = [];
+
+        foreach ($monthParts as $index => $part) {
+            $month = $index + 1;
 
             foreach (['prepared', 'checked', 'certified', 'approved'] as $slot) {
                 $signer = $profiles['users'][$slot] ?? null;
@@ -109,8 +204,8 @@ final class MemYearXlsxExporter
                 }
 
                 $stamps[] = [
-                    'sheet' => 'xl/worksheets/sheet'.$month.'.xml',
-                    'range' => $sheet['signature_ranges'][$slot],
+                    'sheet' => $part,
+                    'range' => $monthRanges[$month][$slot],
                     'bytes' => $signature['bytes'],
                     'extension' => $signature['extension'],
                     'name' => trim((string) ($signer->name ?: $signer->username)),
@@ -118,7 +213,16 @@ final class MemYearXlsxExporter
             }
         }
 
-        $bytes = MemXlsxExporter::package($sheets, ($activeMonth ?? 1) - 1);
+        if ($lineItemPart !== null) {
+            $stamps = array_merge($stamps, WfpAllotmentXlsxExporter::signatureStamps(
+                $schoolId,
+                $year,
+                $preparedBy,
+                $division,
+                $lineItemPart,
+                $lineItem['signature_ranges'],
+            ));
+        }
 
         return $stamps === [] ? $bytes : OpcrfSignatureStamper::stampManyAtRanges($bytes, $stamps);
     }

@@ -596,7 +596,12 @@ final class WfpAllotment
      * The No. / Account Title / Account Code / Total Amount / % table: the
      * year's lines rolled up per account code — or per account title when a
      * line carries no code — in account-code order, each with its share of the
-     * grand total.
+     * allotment the Budget office set for the year.
+     *
+     * The share is of the ALLOTMENT, not of the lines' own total: until the
+     * matrices allocate the whole ceiling, the column adds up to less than
+     * 100%. A year with no allotment set has no denominator, so every row
+     * reads 0.00% — the same answer {@see balance()} gives for a null ceiling.
      *
      * Grouping by code rather than by line is what makes this the allotment
      * per line item: a code the school spent from in March and again in
@@ -613,6 +618,8 @@ final class WfpAllotment
             return [];
         }
 
+        $allotted = self::allotment($schoolId, $year, $division);
+
         $items = MonthlyExpenditureItem::query()
             ->whereHas('matrix', fn ($query) => $query
                 ->where('school_id', $schoolId)
@@ -622,7 +629,6 @@ final class WfpAllotment
 
         /** @var array<string, array{title: string, code: ?string, total: float}> $grouped */
         $grouped = [];
-        $sum = 0.0;
 
         foreach ($items as $item) {
             $code = trim((string) $item->account_code);
@@ -642,7 +648,6 @@ final class WfpAllotment
 
             $total = self::lineTotal($item);
             $grouped[$key]['total'] = round($grouped[$key]['total'] + $total, 2);
-            $sum = round($sum + $total, 2);
         }
 
         $rows = array_values($grouped);
@@ -663,7 +668,9 @@ final class WfpAllotment
         });
 
         foreach ($rows as &$row) {
-            $row['percent'] = $sum > 0.0 ? round($row['total'] / $sum * 100, 2) : 0.0;
+            $row['percent'] = $allotted !== null && $allotted > 0.0
+                ? round($row['total'] / $allotted * 100, 2)
+                : 0.0;
         }
 
         unset($row);
@@ -672,9 +679,8 @@ final class WfpAllotment
     }
 
     /**
-     * The year's total: the figure the percentages are shares of. It is the
-     * sum of the line-item rows, which is the same money as the sum of the
-     * twelve months — one year's lines, read two ways.
+     * The year's total: the sum of the line-item rows, which is the same money
+     * as the sum of the twelve months — one year's lines, read two ways.
      *
      * @param  array<int, array{total: float}>  $lineItems
      */

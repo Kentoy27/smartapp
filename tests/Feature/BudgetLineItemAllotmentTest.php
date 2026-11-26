@@ -179,6 +179,14 @@ class BudgetLineItemAllotmentTest extends TestCase
             'account_code' => '5020101000',
         ]); // 53,000.00
 
+        // The ceiling the shares are read against is bigger than the year's
+        // lines: the column adds up to the share allocated so far, not 100%.
+        SchoolAllotment::create([
+            'school_id' => $head->school_id,
+            'year' => 2026,
+            'amount' => 100000,
+        ]);
+
         $component = Livewire::actingAs($this->budgetOfficer())
             ->test(BudgetLineItemAllotment::class);
 
@@ -187,20 +195,22 @@ class BudgetLineItemAllotmentTest extends TestCase
         $this->assertCount(2, $rows);
         $this->assertSame('5020101000', $rows[0]['code']);
         $this->assertSame(53000.0, $rows[0]['total']);
-        $this->assertSame(77.94, $rows[0]['percent']);
+        $this->assertSame(53.0, $rows[0]['percent']);
         $this->assertSame('5020301000', $rows[1]['code']);
         $this->assertSame(15000.0, $rows[1]['total']);
-        $this->assertSame(22.06, $rows[1]['percent']);
+        $this->assertSame(15.0, $rows[1]['percent']);
 
         $this->assertSame(68000.0, $component->instance()->grandTotal);
 
         $component
             ->assertSee('Travelling Expense (Local)')
             ->assertSee('53,000.00')
-            ->assertSee('77.94%')
+            ->assertSee('53.00%')
             ->assertSee('15,000.00')
-            ->assertSee('22.06%')
-            ->assertSee('68,000.00');
+            ->assertSee('15.00%')
+            ->assertSee('68,000.00')
+            // The grand total is the allocated share of the ceiling — not 100%.
+            ->assertSee('68.00%');
     }
 
     public function test_another_schools_lines_are_never_in_the_report(): void

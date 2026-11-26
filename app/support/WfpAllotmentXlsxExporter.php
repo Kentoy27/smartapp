@@ -9,7 +9,8 @@ use Illuminate\Support\Str;
 /**
  * The annual MOOE allotment report as an .xlsx: the same form the page shows —
  * the DepEd letterhead, the MONTH / BUDGET column beside the year's lines
- * rolled up per account code with their shares, and the signature block.
+ * rolled up per account code with their share of the allotment, and the
+ * signature block.
  *
  * The workbook is BUILT FROM SCRATCH through PurePhpZipWriter, exactly as the
  * MEM exporter is, because the `zip` PHP extension is disabled on XAMPP's
@@ -108,20 +109,82 @@ final class WfpAllotmentXlsxExporter
         ?string $division = SchoolDivision::ELEMENTARY,
         bool $includeSignatures = true,
     ): string {
+        $sheet = self::sheet($schoolId, $year, $preparedBy, $division);
+
+        $bytes = PurePhpZipWriter::create([
+            '[Content_Types].xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                .'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+                .'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+                .'<Default Extension="xml" ContentType="application/xml"/>'
+                .'<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+                .'<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+                .'<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+                .'</Types>',
+
+            '_rels/.rels' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                .'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                .'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+                .'</Relationships>',
+
+            'xl/workbook.xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                .'<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+                .'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+                .'<sheets>'
+                .'<sheet name="Line Item Allotment" sheetId="1" r:id="rId1"/>'
+                .'</sheets>'
+                .'</workbook>',
+
+            'xl/_rels/workbook.xml.rels' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                .'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                .'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+                .'<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+                .'</Relationships>',
+
+            'xl/styles.xml' => self::stylesXml(),
+
+            'xl/worksheets/sheet1.xml' => $sheet['xml'],
+        ]);
+
+        if (! $includeSignatures) {
+            return $bytes;
+        }
+
+        $stamps = self::signatureStamps(
+            $schoolId,
+            $year,
+            $preparedBy,
+            $division,
+            'xl/worksheets/sheet1.xml',
+            $sheet['signature_ranges'],
+        );
+
+        return $stamps === [] ? $bytes : OpcrfSignatureStamper::stampManyAtRanges($bytes, $stamps);
+    }
+
+    /**
+     * The report as one worksheet, with the ranges its e-signatures are
+     * stamped into. The year workbook appends this sheet to its own package,
+     * so the page, the standalone download and the combined download can
+     * never describe the report differently.
+     *
+     * @return array{xml: string, signature_ranges: array<string, string>}
+     */
+    public static function sheet(
+        int $schoolId,
+        int $year,
+        ?User $preparedBy = null,
+        ?string $division = SchoolDivision::ELEMENTARY,
+    ): array {
         $school = School::query()->with('district')->find($schoolId);
         $months = WfpAllotment::months($schoolId, $year, $division);
         $lines = WfpAllotment::lineItems($schoolId, $year, $division);
         $total = WfpAllotment::total($lines);
+        $totalShare = WfpAllotment::balance(
+            WfpAllotment::allotment($schoolId, $year, $division),
+            $total,
+        )['percent'];
         $certification = WfpAllotment::certification($schoolId, $year, $division);
         $checking = WfpAllotment::checking($schoolId, $year, $division);
-
-        // The signer slots whose registered profile signature may be stamped:
-        // the School Head prepares, the Bookkeeper checks, the Budget Officer
-        // certifies. The SDS has no approval record for this report. Resolved
-        // only for a signed export, so an unsigned download does no extra work.
-        $signers = $includeSignatures
-            ? WfpAllotment::signatureSlots($schoolId, $year, $division, $preparedBy)
-            : [];
 
         /** @var array<int, array<string, array{style: int, kind: string, value: string|float|null}>> $cells */
         $cells = [];
@@ -240,7 +303,9 @@ final class WfpAllotmentXlsxExporter
         $merge('D', 'E', $grandTotalRow);
         $blank($grandTotalRow, 'F', self::S_LEFT);
         $money($grandTotalRow, 'G', self::S_MONEY_BOLD, $total);
-        $percent($grandTotalRow, 'H', self::S_PCT_BOLD, $total > 0.0 ? 100.0 : 0.0);
+        // The total's share of the allotment, exactly as the page reads it:
+        // less than 100% until the lines allocate the whole ceiling.
+        $percent($grandTotalRow, 'H', self::S_PCT_BOLD, $totalShare);
 
         /* -------------------------------------------------------- signatures */
 
@@ -310,46 +375,30 @@ final class WfpAllotmentXlsxExporter
             'certified' => 'F'.($labelRow + 1).':F'.$nameRow,
         ];
 
-        /* ----------------------------------------------------------- package */
+        return [
+            'xml' => self::sheetXml($cells, $merges, $measured),
+            'signature_ranges' => $signatureRanges,
+        ];
+    }
 
-        $bytes = PurePhpZipWriter::create([
-            '[Content_Types].xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-                .'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-                .'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-                .'<Default Extension="xml" ContentType="application/xml"/>'
-                .'<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-                .'<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
-                .'<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
-                .'</Types>',
-
-            '_rels/.rels' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-                .'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-                .'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
-                .'</Relationships>',
-
-            'xl/workbook.xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-                .'<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
-                .'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-                .'<sheets>'
-                .'<sheet name="Line Item Allotment" sheetId="1" r:id="rId1"/>'
-                .'</sheets>'
-                .'</workbook>',
-
-            'xl/_rels/workbook.xml.rels' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-                .'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-                .'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
-                .'<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
-                .'</Relationships>',
-
-            'xl/styles.xml' => self::stylesXml(),
-
-            'xl/worksheets/sheet1.xml' => self::sheetXml($cells, $merges, $measured),
-        ]);
-
-        if ($signers === []) {
-            return $bytes;
-        }
-
+    /**
+     * The e-signature stamps this report's slots produce, placed on the
+     * worksheet part the caller names. The year workbook appends the sheet to
+     * its own package and then stamps it, so the boxes are resolved through
+     * the same workflow records as the standalone export.
+     *
+     * @param  array<string, string>  $signatureRanges
+     * @return array<int, array{sheet: string, range: string, bytes: string, extension: string, name: string, widthPx: int, heightPx: int}>
+     */
+    public static function signatureStamps(
+        int $schoolId,
+        int $year,
+        ?User $preparedBy,
+        ?string $division,
+        string $sheetPart,
+        array $signatureRanges,
+    ): array {
+        $signers = WfpAllotment::signatureSlots($schoolId, $year, $division, $preparedBy);
         $stamps = [];
 
         foreach ($signatureRanges as $slot => $range) {
@@ -366,7 +415,7 @@ final class WfpAllotmentXlsxExporter
             }
 
             $stamps[] = [
-                'sheet' => 'xl/worksheets/sheet1.xml',
+                'sheet' => $sheetPart,
                 'range' => $range,
                 'bytes' => $signature['bytes'],
                 'extension' => $signature['extension'],
@@ -379,7 +428,7 @@ final class WfpAllotmentXlsxExporter
             ];
         }
 
-        return $stamps === [] ? $bytes : OpcrfSignatureStamper::stampManyAtRanges($bytes, $stamps);
+        return $stamps;
     }
 
     /**
@@ -507,11 +556,15 @@ final class WfpAllotmentXlsxExporter
     /* --------------------------------------------------------------- styles */
 
     /**
-     * Four fonts (plain 10pt, bold 10pt, bold 12pt, small 9pt), one thin
-     * border, one custom number format for the shares. Money uses builtin
-     * numFmtId 4 ("#,##0.00"), so the file opens the same in Excel and WPS.
+     * The report's complete styles part: four fonts (plain 10pt, bold 10pt,
+     * bold 12pt, small 9pt), one thin border, one custom number format for the
+     * shares. Money uses builtin numFmtId 4 ("#,##0.00"), so the file opens
+     * the same in Excel and WPS.
+     *
+     * Public because the year workbook folds it into its own single styles
+     * table when it appends this sheet.
      */
-    private static function stylesXml(): string
+    public static function stylesXml(): string
     {
         $font = static fn (string $extra = ''): string => '<font>'.$extra.'<sz val="10"/><name val="Calibri"/></font>';
 

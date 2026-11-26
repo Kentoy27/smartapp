@@ -32,7 +32,10 @@
 
                 <div class="wfp-signatory-statuses__list">
                     @foreach ($signatoryStatuses as $status)
-                        <div class="wfp-signatory-status">
+                        <div @class([
+                            'wfp-signatory-status',
+                            'wfp-signatory-status--'.($status['state'] ?? 'pending'),
+                        ])>
                             <div class="wfp-signatory-status__header">
                                 <span class="wfp-signatory-status__label">{{ $status['label'] }}</span>
                                 <span @class([
@@ -131,10 +134,12 @@
 
             @if ($this->canCreate())
                 {{-- The whole year is one workbook: twelve worksheets, JAN…DEC,
-                     each the month's printed form. The selected year on this
-                     page is the one exported. The signed copy stamps the
-                     workflow signers' registered profile signatures; the
-                     unsigned copy leaves the signature bands blank. --}}
+                     each the month's printed form, then the year's Per Line
+                     Item Expenditure report and — when a WFP plan exists — the
+                     official WFP. The selected year on this page is the one
+                     exported. The signed copy stamps the workflow signers'
+                     registered profile signatures; the unsigned copy leaves
+                     the signature bands blank. --}}
                 <div class="mem-export-actions" aria-label="Export the selected year">
                     <button
                         type="button"
@@ -145,7 +150,7 @@
                         @disabled($year === '')
                         title="{{ $year === ''
                             ? 'Choose a specific year to export'
-                            : 'Download all twelve months of CY '.$year.' with the available e-signatures' }}"
+                            : 'Download the twelve months of CY '.$year.' plus the Per Line Item and WFP reports, with the available e-signatures' }}"
                     >
                         <x-icon name="file-spreadsheet" :size="16" />
                         <span wire:loading.remove wire:target="exportYear">Export with E-Signatures</span>
@@ -161,11 +166,47 @@
                         @disabled($year === '')
                         title="{{ $year === ''
                             ? 'Choose a specific year to export'
-                            : 'Download all twelve months of CY '.$year.' for wet signing' }}"
+                            : 'Download the twelve months of CY '.$year.' plus the Per Line Item and WFP reports, for wet signing' }}"
                     >
                         <x-icon name="download" :size="16" />
                         <span wire:loading.remove wire:target="exportYear">Export without E-Signatures</span>
                         <span wire:loading wire:target="exportYear">Preparing…</span>
+                    </button>
+
+                    {{-- Generate the school’s WFP plan for the selected year
+                         from that year’s matrices, then open the plan editor. --}}
+                    <button
+                        type="button"
+                        class="users-add-btn"
+                        wire:click="generateWfp"
+                        wire:loading.attr="disabled"
+                        wire:target="generateWfp"
+                        @disabled($year === '')
+                        title="{{ $year === ''
+                            ? 'Choose a specific year to generate the WFP for'
+                            : 'Generate the annual WFP from the matrices of CY '.$year }}"
+                    >
+                        <x-icon name="file-spreadsheet" :size="16" />
+                        <span wire:loading.remove wire:target="generateWfp">Generate WFP</span>
+                        <span wire:loading wire:target="generateWfp">Generating…</span>
+                    </button>
+
+                    {{-- The same printed report the SH reads on /wfp/line-items,
+                         exported for the selected year. --}}
+                    <button
+                        type="button"
+                        class="ac-import-btn mem-export-btn--signed"
+                        wire:click="exportLineItems('with')"
+                        wire:loading.attr="disabled"
+                        wire:target="exportLineItems"
+                        @disabled($year === '')
+                        title="{{ $year === ''
+                            ? 'Choose a specific year to export'
+                            : 'Export the Per Line Item report for CY '.$year.' with e-signatures' }}"
+                    >
+                        <x-icon name="download" :size="16" />
+                        <span wire:loading.remove wire:target="exportLineItems">Export Per Line Item</span>
+                        <span wire:loading wire:target="exportLineItems">Preparing…</span>
                     </button>
                 </div>
             @endif

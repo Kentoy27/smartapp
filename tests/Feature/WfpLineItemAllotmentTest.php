@@ -139,6 +139,14 @@ class WfpLineItemAllotmentTest extends TestCase
             'account_code' => '5020101000',
         ]); // 53,000.00
 
+        // The ceiling the shares are read against is bigger than the year's
+        // lines: the column adds up to the share allocated so far, not 100%.
+        SchoolAllotment::create([
+            'school_id' => $sh->school_id,
+            'year' => 2026,
+            'amount' => 100000,
+        ]);
+
         $component = Livewire::actingAs($sh)->test(WfpLineItemAllotment::class);
 
         $rows = $component->instance()->lineItems;
@@ -149,23 +157,25 @@ class WfpLineItemAllotmentTest extends TestCase
         $this->assertSame('5020101000', $rows[0]['code']);
         $this->assertSame('Travelling Expense (Local)', $rows[0]['title']);
         $this->assertSame(53000.0, $rows[0]['total']);
-        $this->assertSame(77.94, $rows[0]['percent']);
+        $this->assertSame(53.0, $rows[0]['percent']);
 
         $this->assertSame('5020301000', $rows[1]['code']);
         $this->assertSame(15000.0, $rows[1]['total']);
-        $this->assertSame(22.06, $rows[1]['percent']);
+        $this->assertSame(15.0, $rows[1]['percent']);
 
         $this->assertSame(68000.0, $component->instance()->grandTotal);
 
         // And the same report as the reader sees it: numbered rows, amounts
-        // and shares, with the year's total under them.
+        // and shares of the allotment, with the year's total under them.
         $component
             ->assertSee('Travelling Expense (Local)')
             ->assertSee('53,000.00')
-            ->assertSee('77.94%')
+            ->assertSee('53.00%')
             ->assertSee('15,000.00')
-            ->assertSee('22.06%')
-            ->assertSee('68,000.00');
+            ->assertSee('15.00%')
+            ->assertSee('68,000.00')
+            // The grand total is the allocated share of the ceiling — not 100%.
+            ->assertSee('68.00%');
     }
 
     public function test_an_uncoded_line_is_grouped_by_its_account_title(): void
@@ -236,6 +246,22 @@ class WfpLineItemAllotmentTest extends TestCase
         $this->assertSame(0.0, $component->instance()->lineItems[0]['percent']);
     }
 
+    public function test_with_no_allotment_set_the_shares_have_no_denominator(): void
+    {
+        $sh = $this->schoolHead();
+
+        $this->line($sh, 1, ['quantity' => 1, 'unit_cost' => 100]);
+
+        // Without a ceiling there is nothing to be a share OF: the report
+        // reads 0.00% rather than falling back to a share of its own total,
+        // which would claim the lines had allocated a budget that was never set.
+        $component = Livewire::actingAs($sh)->test(WfpLineItemAllotment::class);
+
+        $this->assertSame(100.0, $component->instance()->grandTotal);
+        $this->assertSame(0.0, $component->instance()->lineItems[0]['percent']);
+        $component->assertSee('0.00%');
+    }
+
     // ------------------------------------------------------------------ year
 
     public function test_the_report_opens_on_the_newest_year_the_school_has_a_matrix_for(): void
@@ -281,6 +307,12 @@ class WfpLineItemAllotmentTest extends TestCase
         ]);
         $this->line($sh, 3, ['quantity' => 100, 'unit_cost' => 100]);
         $this->line($sh, 9, ['quantity' => 50, 'unit_cost' => 100]);
+
+        SchoolAllotment::create([
+            'school_id' => $sh->school_id,
+            'year' => 2026,
+            'amount' => 100000,
+        ]);
 
         $response = $this->actingAs($sh)->get(route('wfp.lineitems.export', ['year' => 2026]));
 
@@ -329,8 +361,10 @@ class WfpLineItemAllotmentTest extends TestCase
         $this->assertStringContainsString('<v>53000</v>', $sheet);
         $this->assertStringContainsString('<v>15000</v>', $sheet);
         $this->assertStringContainsString('<v>68000</v>', $sheet);
-        $this->assertStringContainsString('<v>0.7794</v>', $sheet);
-        $this->assertStringContainsString('<v>0.2206</v>', $sheet);
+        $this->assertStringContainsString('<v>0.53</v>', $sheet);
+        $this->assertStringContainsString('<v>0.15</v>', $sheet);
+        // The grand total's share of the allotment, not 100%.
+        $this->assertStringContainsString('<v>0.68</v>', $sheet);
         $this->assertStringContainsString('formatCode="0.00%"', $styles);
 
         // The signature block names the exporter as the prepared-by.
