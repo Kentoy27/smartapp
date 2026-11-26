@@ -210,7 +210,6 @@ class BudgetLineItemCheckerTest extends TestCase
             $this->schoolHead(),
             User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]),
             User::factory()->create(['role' => 'administrator', 'is_superadmin' => false]),
-            User::factory()->create(['role' => 'superadmin', 'is_superadmin' => true]),
         ];
 
         foreach ($users as $user) {
@@ -218,6 +217,13 @@ class BudgetLineItemCheckerTest extends TestCase
                 ->get(route('budget.lineitems.index'))
                 ->assertNotFound();
         }
+
+        // The superadmin reads the same report, but cannot check or certify
+        // lines from here.
+        $this->actingAs(User::factory()->create(['role' => 'superadmin', 'is_superadmin' => true]))
+            ->get(route('budget.lineitems.index'))
+            ->assertOk()
+            ->assertSeeLivewire('budget-line-item-checker');
     }
 
     public function test_the_component_refuses_guests_and_every_other_role(): void
@@ -231,13 +237,20 @@ class BudgetLineItemCheckerTest extends TestCase
             $this->schoolHead(),
             User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]),
             User::factory()->create(['role' => 'administrator', 'is_superadmin' => false]),
-            User::factory()->create(['role' => 'superadmin', 'is_superadmin' => true]),
         ] as $user) {
             $this->assertStringContainsString(
                 'Page Not Found',
                 Livewire::actingAs($user)->test(BudgetLineItemChecker::class)->html()
             );
         }
+
+        // The superadmin reaches the page read-only.
+        $this->assertStringNotContainsString(
+            'Page Not Found',
+            Livewire::actingAs(User::factory()->create(['role' => 'superadmin', 'is_superadmin' => true]))
+                ->test(BudgetLineItemChecker::class)
+                ->html()
+        );
     }
 
     public function test_the_sidebar_links_the_page_for_the_budget_role_only(): void

@@ -13,6 +13,7 @@ use App\Models\OpcrfMov;
 use App\Models\OpcrfReview;
 use App\Models\OpcrfSchedule;
 use App\Models\OpcrfSubmission;
+use App\Models\AccountClassification;
 use App\Models\OpcrfTemplate;
 use App\Models\School;
 use App\Models\SipSubmission;
@@ -416,6 +417,43 @@ Route::middleware(['auth', 'password.change.required'])->group(function () {
             ->header('Content-Type', 'text/csv; charset=UTF-8')
             ->header('Content-Disposition', 'attachment; filename="account-classifications-template.csv"');
     })->name('account-classifications.template');
+
+    // Download every classification as a CSV the Import step can read back:
+    // the header row matches the template, so an exported file can be edited
+    // offline and re-imported without changes. Retired rows are included so
+    // nothing is lost in a round-trip. Same administrative gate as the module.
+    Route::get('/admin/account-classifications/export', function () {
+        $user = Auth::user();
+        abort_unless($user instanceof User && $user->canManageUsersAndSchools(), 404);
+
+        $handle = fopen('php://temp', 'r+');
+
+        fputcsv($handle, [
+            'Account Title',
+            'RCA Code',
+            'UACS Sub-Object Code',
+            'UACS Object Code',
+            'Covering PPAS',
+        ]);
+
+        foreach (AccountClassification::query()->orderBy('account_title')->cursor() as $classification) {
+            fputcsv($handle, [
+                $classification->account_title,
+                $classification->rca_code,
+                $classification->uacs_sub_object_code,
+                $classification->uacs_object_code,
+                $classification->covering_ppas ?? '',
+            ]);
+        }
+
+        rewind($handle);
+        $csv = stream_get_contents($handle);
+        fclose($handle);
+
+        return response($csv)
+            ->header('Content-Type', 'text/csv; charset=UTF-8')
+            ->header('Content-Disposition', 'attachment; filename="account-classifications.csv"');
+    })->name('account-classifications.export');
 
     /* ------------------------------------------------------------------
      * WFP Setup — the administrator's lookup library and activity
@@ -1007,13 +1045,17 @@ Route::middleware(['auth', 'password.change.required'])->group(function () {
      * editor; the Budget office and the school Bookkeeper check them against
      * the plan and the allotment, and never edit a school's plan. Scope is
      * the Budget role and the Bookkeeper (canCheckLineItems()) — an SH,
-     * administrator or superadmin gets the same 404. The component re-checks
+     * administrator gets the same 404; the superadmin may read it but
+     * cannot check or certify lines from here. The component re-checks
      * the gate on mount, and narrows the roster, the years and every query to
      * the Bookkeeper's own assigned schools (User::canAccessSchool()).
      * ----------------------------------------------------------------- */
     Route::get('/budget/line-items', function () {
         $user = Auth::user();
-        abort_unless($user instanceof User && $user->canCheckLineItems(), 404);
+        // Read-only: the Budget office, the school Bookkeeper, and the
+        // superadmin (who may read any submitted plan's report) all pass.
+        // Check/certify writes stay Bookkeeper/Budget-only on the actions.
+        abort_unless($user instanceof User && ($user->canCheckLineItems() || $user->canApproveWfp()), 404);
 
         return view('budget.line-items');
     })->name('budget.lineitems.index');

@@ -1058,4 +1058,23 @@ class WfpApprovalTest extends TestCase
         $component->set('schoolFilter', (string) $beta->school_id);
         $this->assertSame([$approved->school_id], $component->instance()->plans->pluck('school_id')->all());
     }
+
+    public function test_the_queue_open_link_goes_to_the_monthly_expenditure_report(): void
+    {
+        $sh = $this->schoolHead();
+        $plan = $this->pendingPlan($sh);
+        $superadmin = $this->superadmin();
+
+        $html = Livewire::actingAs($superadmin)->test(WfpApprovals::class)->html();
+
+        // Blade escapes the & in the route URL to &amp; in the rendered href.
+        $this->assertStringContainsString(
+            e(route('budget.lineitems.index', ['school' => $plan->school_id, 'year' => $plan->year])),
+            $html,
+        );
+        $this->assertStringNotContainsString(
+            e(route('budget.per-line-item.index', ['school' => $plan->school_id, 'year' => $plan->year])),
+            $html,
+        );
+    }
 }
