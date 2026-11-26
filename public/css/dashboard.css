@@ -1963,10 +1963,11 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
 
 .wfp-signatory-statuses { margin-bottom: 16px; }
 .wfp-signatory-statuses__list { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
-/* Each checkpoint stands on its own: a rail down the card's edge carries its
-   state (grey while pending, green checked/approved, blue certified, amber
-   returned) so the row of cards can be scanned without reading a badge, and
-   the column layout lets a sign button sit at the card's foot. */
+/* Each checkpoint stands on its own: a signed checkpoint is outlined in the
+   brand green while the rail down its left edge keeps its state colour (grey
+   while pending, green checked, blue certified, amber returned) so the row can
+   be scanned without reading a badge, and the column layout lets a sign button
+   sit at the card's foot. */
 .wfp-signatory-status {
     display: flex;
     flex-direction: column;
@@ -1978,14 +1979,15 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
     border-radius: 10px;
     background: var(--bg);
 }
+.wfp-signatory-status--checked,
+.wfp-signatory-status--approved,
+.wfp-signatory-status--certified,
+.wfp-signatory-status--returned { border-color: #33C481; }
 .wfp-signatory-status--checked { border-left-color: #16a34a; }
-/* Approved is the terminal checkpoint, so its whole outline turns green:
-   the completed card stands out from the pending ones at a glance. */
-.wfp-signatory-status--approved { border-color: #16a34a; }
+.wfp-signatory-status--approved { border-left-color: #33C481; }
 .wfp-signatory-status--certified { border-left-color: #2563eb; }
 .wfp-signatory-status--returned { border-left-color: #d97706; }
 [data-theme="dark"] .wfp-signatory-status--checked { border-left-color: #4ade80; }
-[data-theme="dark"] .wfp-signatory-status--approved { border-color: #4ade80; }
 [data-theme="dark"] .wfp-signatory-status--certified { border-left-color: #60a5fa; }
 [data-theme="dark"] .wfp-signatory-status--returned { border-left-color: #fbbf24; }
 .wfp-signatory-status .allotment-certify { margin-top: auto; }
