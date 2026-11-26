@@ -377,8 +377,17 @@ class BudgetLineItemAllotment extends Component
         $division = $this->division();
         $year = (int) WfpAllotment::resolveYear($school->id, (int) $this->year, $division);
 
+        // Sign-offs are stored under the plan's own division so they are
+        // visible to hasBudgetReview() regardless of which division the
+        // signer happens to be working in at the moment.
+        $plan = WfpPlan::query()
+            ->where('school_id', $school->id)
+            ->where('year', $year)
+            ->first();
+        $signoffDivision = $plan?->schoolDivision() ?? $division;
+
         try {
-            WfpReportSignoffs::certify($user, $school->id, $year, $division);
+            WfpReportSignoffs::certify($user, $school->id, $year, $signoffDivision);
         } catch (\RuntimeException $exception) {
             $this->showCertificationModal = false;
             $this->errorMessage = $exception->getMessage();
@@ -386,7 +395,7 @@ class BudgetLineItemAllotment extends Component
             return;
         }
 
-        $submitted = WfpReportSignoffs::submitReadyPlan($school->id, $year, $division) !== null;
+        $submitted = WfpReportSignoffs::submitReadyPlan($school->id, $year, $signoffDivision) !== null;
 
         $this->showCertificationModal = false;
         $this->errorMessage = null;
@@ -434,7 +443,16 @@ class BudgetLineItemAllotment extends Component
         $division = $this->division();
         $year = (int) WfpAllotment::resolveYear($school->id, (int) $this->year, $division);
 
-        if (WfpAllotment::lineItems($school->id, $year, $division) === []) {
+        // Sign-offs are stored under the plan's own division so they are
+        // visible to hasBudgetReview() regardless of which division the
+        // signer happens to be working in at the moment.
+        $plan = WfpPlan::query()
+            ->where('school_id', $school->id)
+            ->where('year', $year)
+            ->first();
+        $signoffDivision = $plan?->schoolDivision() ?? $division;
+
+        if (WfpAllotment::lineItems($school->id, $year, $signoffDivision) === []) {
             $this->showCheckModal = false;
             $this->errorMessage = 'There are no expenditure lines for '.$school->name.' in CY '.$year.' yet, so there is nothing to check.';
 
@@ -446,13 +464,13 @@ class BudgetLineItemAllotment extends Component
         WfpReportCheck::query()->updateOrCreate(
             [
                 'school_id' => $school->id,
-                'school_division' => $division,
+                'school_division' => $signoffDivision,
                 'year' => $year,
             ],
             ['checked_by' => $user->id, 'checked_at' => now()],
         );
 
-        $submitted = WfpReportSignoffs::submitReadyPlan($school->id, $year, $division) !== null;
+        $submitted = WfpReportSignoffs::submitReadyPlan($school->id, $year, $signoffDivision) !== null;
 
         $this->showCheckModal = false;
         $this->errorMessage = null;

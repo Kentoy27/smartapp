@@ -75,6 +75,16 @@
                     <span>Template</span>
                 </a>
 
+                <a
+                    href="{{ route('account-classifications.export') }}"
+                    class="ac-import-btn"
+                    download
+                    title="Download all current classifications as CSV"
+                >
+                    <x-icon name="download" :size="16" />
+                    <span>Export</span>
+                </a>
+
                 <button type="button" class="ac-import-btn" wire:click="openImport">
                     <x-icon name="upload" :size="16" />
                     <span>Import</span>

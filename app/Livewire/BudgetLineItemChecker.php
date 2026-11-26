@@ -45,9 +45,10 @@ use Livewire\WithPagination;
  * report follow. A stored `calculated_total` is never trusted as the figure
  * to check.
  *
- * Scope is the Budget role and the school Bookkeeper (canCheckLineItems());
- * every other role gets a 404 from the route and from mount(). The filters
- * (year, school, month, search) are read-only narrowing — they can never
+ * Scope is the Budget role and the school Bookkeeper (canCheckLineItems())
+ * plus the superadmin, who may read any submitted plan's report but cannot
+ * check or certify lines from here; every other role gets a 404 from the
+ * route and from mount(). The filters (year, school, month, search) are
  * reach a school's data outside the query they build here.
  *
  * WHICH schools the page can reach is a second, independent boundary: the
@@ -124,7 +125,7 @@ class BudgetLineItemChecker extends Component
     private function user(): User
     {
         $user = Auth::user();
-        abort_unless($user instanceof User && $user->canCheckLineItems(), 404);
+        abort_unless($user instanceof User && ($user->canCheckLineItems() || $user->canApproveWfp()), 404);
 
         return $user;
     }

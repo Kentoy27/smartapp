@@ -83,11 +83,14 @@ class PsdsMonitoring extends Component
         abort_unless(in_array($mode, ['all', 'mov'], true), 404);
         $this->mode = $mode;
 
-        // The default "All years" view finds each document independently,
-        // so an AIP for a new year cannot hide an OPCRF or WFP from another.
-        if ($this->yearFilter !== ''
-            && (! ctype_digit($this->yearFilter)
-                || ! in_array((int) $this->yearFilter, $this->report()->yearOptions(), true))) {
+        // No reporting year is forced by default: each document shows its
+        // latest year on file. An explicitly requested year must be one the
+        // account can actually see; anything else clears the filter instead of
+        // forcing the current year — which would hide a school's approved
+        // documents from a different reporting period.
+        $requested = ctype_digit($this->yearFilter) ? (int) $this->yearFilter : null;
+
+        if ($requested !== null && !in_array($requested, $this->report()->yearOptions(), true)) {
             $this->yearFilter = '';
         }
     }
@@ -100,10 +103,18 @@ class PsdsMonitoring extends Component
             $this->schoolFilter = '';
         }
 
-        if (in_array($property, [
-            'yearFilter', 'districtFilter', 'schoolFilter',
-            'aipFilter', 'opcrfFilter', 'wfpFilter', 'overallFilter', 'search',
-        ], true)) {
+        if (
+            in_array($property, [
+                'yearFilter',
+                'districtFilter',
+                'schoolFilter',
+                'aipFilter',
+                'opcrfFilter',
+                'wfpFilter',
+                'overallFilter',
+                'search',
+            ], true)
+        ) {
             $this->resetPage();
         }
     }
@@ -222,7 +233,7 @@ class PsdsMonitoring extends Component
         );
     }
 
-    /** Whether anything but the default all-years view is narrowing the report. */
+    /** Whether anything but the default (latest year on file) is narrowing the view. */
     #[Computed]
     public function hasActiveFilters(): bool
     {
@@ -244,14 +255,14 @@ class PsdsMonitoring extends Component
     {
         $rows = collect($this->reportData['rows']);
         $totalSchools = $rows->count();
-        $required = (int) $rows->sum(fn (array $row): int => $row['mov']['total']);
-        $submitted = (int) $rows->sum(fn (array $row): int => $row['mov']['submitted']);
+        $required = (int) $rows->sum(fn(array $row): int => $row['mov']['total']);
+        $submitted = (int) $rows->sum(fn(array $row): int => $row['mov']['submitted']);
 
         return [
             'schools' => $totalSchools,
             'submitted' => $submitted,
             'required' => $required,
-            'returned' => (int) $rows->sum(fn (array $row): int => $row['mov']['returned']),
+            'returned' => (int) $rows->sum(fn(array $row): int => $row['mov']['returned']),
             'percent' => $required > 0 ? (int) round($submitted / $required * 100) : 0,
         ];
     }
@@ -271,7 +282,7 @@ class PsdsMonitoring extends Component
                 'overall' => $this->overallFilter,
                 'q' => trim($this->search),
             ],
-            fn (string $value): bool => $value !== ''
+            fn(string $value): bool => $value !== ''
         );
 
         return route('psds.report', $query);
@@ -308,7 +319,7 @@ class PsdsMonitoring extends Component
     #[Computed]
     public function detail(): ?array
     {
-        if (! $this->showDetail || $this->detailSchoolId === null) {
+        if (!$this->showDetail || $this->detailSchoolId === null) {
             return null;
         }
 
@@ -323,7 +334,7 @@ class PsdsMonitoring extends Component
     {
         $this->districtFilter = '';
         $this->schoolFilter = '';
-        $this->yearFilter = (string) now()->year;
+        $this->yearFilter = '';
         $this->aipFilter = '';
         $this->opcrfFilter = '';
         $this->wfpFilter = '';

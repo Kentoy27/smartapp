@@ -174,10 +174,6 @@ class AccountClassificationImporter
                 }
             }
 
-            if ($errors === [] && AccountClassification::duplicateExists($values)) {
-                $errors[] = 'Already exists as an active classification';
-            }
-
             $valid = $errors === [];
             $validCount += $valid ? 1 : 0;
 
@@ -205,21 +201,39 @@ class AccountClassificationImporter
     }
 
     /**
-     * Insert the validated rows. Re-checks duplicates against the database so a
-     * row that became a duplicate since the analysis is skipped, not fatal.
+     * Insert new rows and update existing ones. Re-checks identity against the
+     * database so a row that became a duplicate since the analysis is updated
+     * (or skipped if nothing changed) rather than skipped outright.
      *
      * @param  array<int, array<string, mixed>>  $validRows
-     * @return array{imported: int, skipped: int}
+     * @return array{imported: int, updated: int, skipped: int}
      */
     public static function commit(array $validRows, ?User $user): array
     {
         return DB::transaction(function () use ($validRows, $user) {
             $imported = 0;
+            $updated = 0;
             $skipped = 0;
 
             foreach ($validRows as $row) {
-                if (AccountClassification::duplicateExists($row)) {
-                    $skipped++;
+                $existing = AccountClassification::findByIdentity($row);
+
+                if ($existing) {
+                    // Already known identity: update mutable fields and
+                    // reactivate if retired, unless nothing changed.
+                    if ($existing->covering_ppas === $row['covering_ppas'] && $existing->is_active) {
+                        $skipped++;
+
+                        continue;
+                    }
+
+                    $before = $existing->auditSnapshot();
+                    $existing->covering_ppas = $row['covering_ppas'];
+                    $existing->is_active = true;
+                    $existing->save();
+
+                    $existing->recordAudit(AccountClassification::AUDIT_UPDATE, $user, $before, $existing->auditSnapshot());
+                    $updated++;
 
                     continue;
                 }
@@ -233,7 +247,7 @@ class AccountClassificationImporter
                 $imported++;
             }
 
-            return ['imported' => $imported, 'skipped' => $skipped];
+            return ['imported' => $imported, 'updated' => $updated, 'skipped' => $skipped];
         });
     }
 

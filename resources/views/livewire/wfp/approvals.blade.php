@@ -173,12 +173,12 @@
                                     </span>
                                 </button>
                                 @if (auth()->user()?->canCheckLineItems() || auth()->user()?->canApproveWfp())
-                                    {{-- Budget and Bookkeeper readers open the school's per-line-item
-                                         expenditure report — the same annual allotment view the
-                                         School Head reads on /wfp/line-items. The superadmin opens
-                                         it too, read-only: no check or certify ability. --}}
+                                    {{-- Budget and Bookkeeper readers open the school's Monthly
+                                         Expenditure — the month-by-month lines behind the plan.
+                                         The superadmin opens it too, read-only: no check or certify
+                                         ability on this page. --}}
                                     <a class="users-action"
-                                        href="{{ route('budget.per-line-item.index', [
+                                        href="{{ route('budget.lineitems.index', [
                                             'school' => $plan->school_id,
                                             'year' => $plan->year,
                                         ]) }}"

@@ -735,10 +735,15 @@ final class PsdsMonitoringReport
      */
     private function cell(string $status, ?string $detailLabel, ?CarbonInterface $submittedAt, ?int $year): array
     {
+        // The badge reads the document's own status label (e.g. "Approved" for
+        // a finalized WFP plan) rather than the generic submission bucket
+        // ("Submitted"). detail_label is dropped when it would just repeat it.
+        $label = $detailLabel ?? self::docStatusLabel($status);
+
         return [
             'status' => $status,
-            'label' => self::docStatusLabel($status),
-            'detail_label' => $detailLabel,
+            'label' => $label,
+            'detail_label' => $detailLabel !== null && $detailLabel !== $label ? $detailLabel : null,
             'submitted_at' => $submittedAt,
             'year' => $year,
             'badge' => self::docBadgeClass($status),

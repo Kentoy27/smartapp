@@ -6,6 +6,7 @@ use App\Livewire\Sidebar;
 use App\Models\AccountClassification;
 use App\Models\AccountClassificationAudit;
 use App\Models\User;
+use App\Support\AccountClassificationImporter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Livewire\Livewire;
@@ -121,6 +122,91 @@ class AccountClassificationsTest extends TestCase
         $this->actingAs($this->superadmin())
             ->get(route('account-classifications.template'))
             ->assertNotFound();
+    }
+
+    public function test_export_returns_every_classification_as_csv(): void
+    {
+        $admin = $this->administrator();
+        $this->make(['account_title' => 'Office Supplies Expenses', 'covering_ppas' => 'PPAS 1']);
+        $this->make([
+            'account_title' => 'Training Expenses',
+            'rca_code' => '50202010',
+            'uacs_sub_object_code' => '00',
+            'uacs_object_code' => '5020201000',
+            'covering_ppas' => null,
+            'is_active' => false,
+        ]);
+
+        $this->actingAs($admin)
+            ->get(route('account-classifications.export'))
+            ->assertOk()
+            ->assertHeader('Content-Type', 'text/csv; charset=UTF-8')
+            ->assertHeader('Content-Disposition', 'attachment; filename="account-classifications.csv"')
+            ->assertSee('Account Title', false)
+            ->assertSee('RCA Code', false)
+            ->assertSee('UACS Sub-Object Code', false)
+            ->assertSee('UACS Object Code', false)
+            ->assertSee('Covering PPAS', false)
+            ->assertSee('Office Supplies Expenses', false)
+            ->assertSee('50203010', false)
+            ->assertSee('PPAS 1', false)
+            ->assertSee('Training Expenses', false)
+            ->assertSee('50202010', false);
+    }
+
+    public function test_export_is_administrator_only_for_staff(): void
+    {
+        $staff = User::factory()->create(['role' => 'user', 'is_superadmin' => false]);
+
+        $this->actingAs($staff)
+            ->get(route('account-classifications.export'))
+            ->assertNotFound();
+    }
+
+    public function test_export_is_administrator_only_for_superadmin(): void
+    {
+        // The module belongs to the Administrator side, so a superadmin is
+        // refused exactly like any other non-administrator account.
+        $this->actingAs($this->superadmin())
+            ->get(route('account-classifications.export'))
+            ->assertNotFound();
+    }
+
+    public function test_exported_file_imports_back_cleanly(): void
+    {
+        $admin = $this->administrator();
+        $this->make();
+        $this->make([
+            'account_title' => 'Training Expenses',
+            'rca_code' => '50202010',
+            'uacs_sub_object_code' => '00',
+            'uacs_object_code' => '5020201000',
+        ]);
+
+        $csv = $this->actingAs($admin)
+            ->get(route('account-classifications.export'))
+            ->assertOk()
+            ->getContent();
+
+        $path = tempnam(sys_get_temp_dir(), 'ac_export_').'.csv';
+        file_put_contents($path, $csv);
+
+        try {
+            // The rows already exist as active classifications, so a straight
+            // re-import would skip them as duplicates — not a parse problem.
+            // Clear them first so the exported file can be validated on its
+            // own merits: every row should parse as a valid import row.
+            AccountClassification::query()->delete();
+
+            $analysis = AccountClassificationImporter::analyzeCsv($path);
+
+            // The exported file parses through the same validation the import
+            // uses: every row valid, ready to be re-imported.
+            $this->assertSame(2, $analysis['validCount']);
+            $this->assertSame(0, $analysis['invalidCount']);
+        } finally {
+            @unlink($path);
+        }
     }
 
     // ------------------------------------------------------------------ read
@@ -357,13 +443,13 @@ class AccountClassificationsTest extends TestCase
 
         // Show.
         $this->actingAs($admin)
-            ->getJson('/api/admin/account-classifications/' . $created['id'])
+            ->getJson('/api/admin/account-classifications/'.$created['id'])
             ->assertOk()
             ->assertJsonPath('data.account_title', 'Office Supplies Expenses');
 
         // Update.
         $this->actingAs($admin)
-            ->putJson('/api/admin/account-classifications/' . $created['id'], [
+            ->putJson('/api/admin/account-classifications/'.$created['id'], [
                 'account_title' => 'Office Supplies Expense',
                 'rca_code' => '50203010',
                 'uacs_sub_object_code' => '00',
@@ -374,7 +460,7 @@ class AccountClassificationsTest extends TestCase
 
         // Delete = soft delete.
         $this->actingAs($admin)
-            ->deleteJson('/api/admin/account-classifications/' . $created['id'])
+            ->deleteJson('/api/admin/account-classifications/'.$created['id'])
             ->assertOk()
             ->assertJsonPath('data.is_active', false);
 
@@ -385,7 +471,7 @@ class AccountClassificationsTest extends TestCase
 
         // Reactivate.
         $this->actingAs($admin)
-            ->postJson('/api/admin/account-classifications/' . $created['id'] . '/activate')
+            ->postJson('/api/admin/account-classifications/'.$created['id'].'/activate')
             ->assertOk()
             ->assertJsonPath('data.is_active', true);
     }
@@ -437,7 +523,7 @@ class AccountClassificationsTest extends TestCase
 
         $component->call('commitImport')
             ->assertSet('showImport', false)
-            ->assertSet('successMessage', 'Import complete — 2 classification(s) added.');
+            ->assertSet('successMessage', 'Import complete — 2 added classification(s).');
 
         $this->assertSame(2, AccountClassification::count());
         // Codes keep their leading zeroes.
@@ -469,10 +555,35 @@ class AccountClassificationsTest extends TestCase
         $this->assertDatabaseHas('account_classifications', ['account_title' => 'Good Row']);
     }
 
-    public function test_import_flags_rows_that_already_exist(): void
+    public function test_import_updates_existing_row(): void
     {
         $admin = $this->administrator();
-        $this->make(); // Office Supplies Expenses / 50203010 / 00 / 5020301000
+        $this->make(['covering_ppas' => 'PPAS 1']);
+
+        $csv = implode("\n", [
+            'Account Title,RCA Code,UACS Sub-Object Code,UACS Object Code,Covering PPAS',
+            'Office Supplies Expenses,50203010,00,5020301000,PPAS 2',
+        ]);
+
+        Livewire::actingAs($admin)->test('account-classifications-table')
+            ->call('openImport')
+            ->set('importFile', $this->csv($csv))
+            ->assertSet('importValidCount', 1)
+            ->assertSet('importInvalidCount', 0)
+            ->call('commitImport')
+            ->assertSet('successMessage', 'Import complete — 1 updated classification(s).');
+
+        $this->assertSame(1, AccountClassification::count());
+        $this->assertDatabaseHas('account_classifications', [
+            'account_title' => 'Office Supplies Expenses',
+            'covering_ppas' => 'PPAS 2',
+        ]);
+    }
+
+    public function test_import_reactivates_retired_row(): void
+    {
+        $admin = $this->administrator();
+        $this->make(['is_active' => false, 'covering_ppas' => 'PPAS 1']);
 
         $csv = implode("\n", [
             'Account Title,RCA Code,UACS Sub-Object Code,UACS Object Code,Covering PPAS',
@@ -482,9 +593,29 @@ class AccountClassificationsTest extends TestCase
         Livewire::actingAs($admin)->test('account-classifications-table')
             ->call('openImport')
             ->set('importFile', $this->csv($csv))
-            ->assertSet('importValidCount', 0)
-            ->assertSet('importInvalidCount', 1)
-            ->assertSee('Already exists as an active classification');
+            ->call('commitImport')
+            ->assertSet('successMessage', 'Import complete — 1 updated classification(s).');
+
+        $this->assertTrue(AccountClassification::first()->is_active);
+    }
+
+    public function test_import_skips_unchanged_existing_row(): void
+    {
+        $admin = $this->administrator();
+        $this->make(['covering_ppas' => 'PPAS 1']);
+
+        $csv = implode("\n", [
+            'Account Title,RCA Code,UACS Sub-Object Code,UACS Object Code,Covering PPAS',
+            'Office Supplies Expenses,50203010,00,5020301000,PPAS 1',
+        ]);
+
+        Livewire::actingAs($admin)->test('account-classifications-table')
+            ->call('openImport')
+            ->set('importFile', $this->csv($csv))
+            ->call('commitImport')
+            ->assertSet('successMessage', 'Import complete — 1 unchanged classification(s).');
+
+        $this->assertSame(1, AccountClassification::count());
     }
 
     public function test_api_import_accepts_a_rows_array(): void
@@ -529,7 +660,7 @@ class AccountClassificationsTest extends TestCase
                         'rca_code' => '1',
                         'uacs_sub_object_code' => '0',
                         'uacs_object_code' => '10',
-                    ]
+                    ],
                 ],
             ])
             ->assertForbidden();

@@ -805,7 +805,19 @@ class MemEditor extends Component
     {
         $this->guard();
 
-        $this->lineResources[] = $this->blankResourceRow();
+        $row = $this->blankResourceRow();
+
+        // Carry the first resource's account over to the new row so the SH
+        // does not re-pick the same account for each resource under one line.
+        // Blank when nothing is selected yet — identical to a blank row.
+        $row['account_title'] = (string) ($this->lineForm['account_title'] ?? '');
+        $row['account_code'] = (string) ($this->lineForm['account_code'] ?? '');
+        $row['account_classification_id'] = ! empty($this->lineForm['account_classification_id'])
+            ? (int) $this->lineForm['account_classification_id']
+            : null;
+        $row['accountSearch'] = (string) ($this->lineForm['account_title'] ?? '');
+
+        $this->lineResources[] = $row;
     }
 
     /** Remove one of the extra resource rows (the first row is lineForm). */
