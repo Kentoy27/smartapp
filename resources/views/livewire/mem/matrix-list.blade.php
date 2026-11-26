@@ -138,7 +138,7 @@
                 <div class="mem-export-actions" aria-label="Export the selected year">
                     <button
                         type="button"
-                        class="ac-import-btn"
+                        class="ac-import-btn mem-export-btn--signed"
                         wire:click="exportYear('with')"
                         wire:loading.attr="disabled"
                         wire:target="exportYear"
@@ -154,7 +154,7 @@
 
                     <button
                         type="button"
-                        class="ac-import-btn"
+                        class="ac-import-btn mem-export-btn--unsigned"
                         wire:click="exportYear('without')"
                         wire:loading.attr="disabled"
                         wire:target="exportYear"

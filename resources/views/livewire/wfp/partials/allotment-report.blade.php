@@ -296,7 +296,7 @@
                  download, not discovered in the file. --}}
             @if ($exportSignedUrl)
                 <a
-                    class="ac-import-btn"
+                    class="ac-import-btn mem-export-btn--signed"
                     href="{{ $exportSignedUrl }}"
                     title="Download this report as Excel with the signers’ e-signatures"
                     x-on:click.prevent="if (missing.length === 0 || window.confirm('These sections have no applicable registered e-signature and will remain unsigned: ' + missing.join('; ') + '. Continue with the available signatures?')) window.location.href = $el.href"
@@ -308,7 +308,7 @@
 
             @if ($exportUnsignedUrl)
                 <a
-                    class="ac-import-btn"
+                    class="ac-import-btn mem-export-btn--unsigned"
                     href="{{ $exportUnsignedUrl }}"
                     title="Download this report as Excel without e-signatures, for wet signing"
                 >

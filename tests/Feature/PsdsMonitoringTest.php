@@ -212,7 +212,9 @@ class PsdsMonitoringTest extends TestCase
         $this->assertSame(PsdsMonitoringReport::DOC_SUBMITTED, $rows['Complete School']['aip']['status']);
         $this->assertSame(PsdsMonitoringReport::DOC_SUBMITTED, $rows['Complete School']['opcrf']['status']);
         $this->assertSame(PsdsMonitoringReport::DOC_SUBMITTED, $rows['Complete School']['wfp']['status']);
-        $this->assertSame('Approved', $rows['Complete School']['wfp']['detail_label']);
+        // The badge reads the document's own status label ("Approved" for a
+        // finalized WFP plan), not the generic "Submitted" bucket.
+        $this->assertSame('Approved', $rows['Complete School']['wfp']['label']);
         $this->assertSame(PsdsMonitoringReport::OVERALL_COMPLETE, $rows['Complete School']['overall_status']);
 
         $this->assertSame(PsdsMonitoringReport::DOC_NEEDS_REVISION, $rows['Returned School']['aip']['status']);
@@ -225,7 +227,9 @@ class PsdsMonitoringTest extends TestCase
         $this->assertSame(PsdsMonitoringReport::OVERALL_IN_PROGRESS, $rows['Draft School']['overall_status']);
 
         $this->assertSame(PsdsMonitoringReport::DOC_SUBMITTED, $rows['Uploaded School']['wfp']['status']);
-        $this->assertSame('Workbook uploaded', $rows['Uploaded School']['wfp']['detail_label']);
+        // The badge reads the upload's own label ("Workbook uploaded") rather
+        // than the generic "Submitted" bucket.
+        $this->assertSame('Workbook uploaded', $rows['Uploaded School']['wfp']['label']);
         $this->assertNotNull($rows['Uploaded School']['wfp']['submitted_at']);
         $this->assertSame(PsdsMonitoringReport::OVERALL_PARTIALLY_SUBMITTED, $rows['Uploaded School']['overall_status']);
     }
@@ -673,7 +677,7 @@ class PsdsMonitoringTest extends TestCase
 
     /* ------------------------------------------------------------- periods */
 
-    public function test_the_reporting_year_defaults_to_the_current_year_and_all_years_uses_the_latest_on_file(): void
+    public function test_the_reporting_year_defaults_to_each_schools_latest_year_on_file(): void
     {
         $current = (int) now()->year;
         $previous = $current - 1;
@@ -681,36 +685,75 @@ class PsdsMonitoringTest extends TestCase
         $psds = $this->psds([$north]);
         $school = $this->school($north, 'Alpha North School', '100001');
 
-        // Only the previous year has a plan. The page opens on the current
-        // year, so the school reads as not submitted until "All years".
+        // Only the previous year has an AIP plan. With no year filter the page
+        // shows each document's latest year on file, so last year's approval
+        // is visible instead of being hidden behind "this year".
         $this->aip($school, $previous, AipPlan::STATUS_APPROVED);
 
         $component = Livewire::actingAs($psds)->test(PsdsMonitoring::class);
 
-        $component->assertSet('yearFilter', (string) $current);
-        $this->assertSame(
-            PsdsMonitoringReport::DOC_NOT_SUBMITTED,
-            $component->instance()->reportData()['rows']->first()['aip']['status'],
-        );
-
-        $component->set('yearFilter', '');
+        $component->assertSet('yearFilter', '');
         $this->assertSame(
             PsdsMonitoringReport::DOC_SUBMITTED,
             $component->instance()->reportData()['rows']->first()['aip']['status'],
         );
 
+        // Explicitly narrowing to a year with no document reads as not
+        // submitted.
+        $component->set('yearFilter', (string) $current);
+        $this->assertSame(
+            PsdsMonitoringReport::DOC_NOT_SUBMITTED,
+            $component->instance()->reportData()['rows']->first()['aip']['status'],
+        );
+
+        // Selecting the plan's own year shows it again.
         $component->set('yearFilter', (string) $previous);
         $this->assertSame(
             PsdsMonitoringReport::DOC_SUBMITTED,
             $component->instance()->reportData()['rows']->first()['aip']['status'],
         );
 
-        // A malformed year is treated as "all years", not as a data leak or
-        // an error.
+        // A malformed year clears the filter (all years / latest on file)
+        // rather than forcing the current year or leaking data.
         $component->set('yearFilter', 'not-a-year');
         $this->assertSame(
             PsdsMonitoringReport::DOC_SUBMITTED,
             $component->instance()->reportData()['rows']->first()['aip']['status'],
+        );
+    }
+
+    public function test_a_prior_year_approved_wfp_shows_approved_not_not_submitted_on_the_default_view(): void
+    {
+        $current = (int) now()->year;
+        $previous = $current - 1;
+        $north = $this->district('North District');
+        $psds = $this->psds([$north]);
+        $school = $this->school($north, 'Alpha North School', '100001');
+        $head = $this->schoolHead($school);
+
+        // The school's WFP was finalized last year; this year it has nothing.
+        $this->wfpPlan($school, $previous, WfpPlan::STATUS_FINALIZED);
+
+        $component = Livewire::actingAs($psds)->test(PsdsMonitoring::class);
+
+        // No year filter: each document shows its latest year on file, so last
+        // year's approval reads as submitted and labelled "Approved", not
+        // "Not Submitted / No record".
+        $component->assertSet('yearFilter', '');
+        $this->assertSame(
+            PsdsMonitoringReport::DOC_SUBMITTED,
+            $component->instance()->reportData()['rows']->first()['wfp']['status'],
+        );
+        $this->assertSame(
+            'Approved',
+            $component->instance()->reportData()['rows']->first()['wfp']['label'],
+        );
+
+        // Narrowing to this year (no plan) correctly reads as not submitted.
+        $component->set('yearFilter', (string) $current);
+        $this->assertSame(
+            PsdsMonitoringReport::DOC_NOT_SUBMITTED,
+            $component->instance()->reportData()['rows']->first()['wfp']['status'],
         );
     }
 

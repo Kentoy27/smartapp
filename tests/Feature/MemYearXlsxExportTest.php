@@ -509,4 +509,163 @@ class MemYearXlsxExportTest extends TestCase
             ->assertSee('Export with E-Signatures')
             ->assertSee('Export without E-Signatures');
     }
+
+    public function test_the_export_prints_a_repeated_objective_and_activity_only_once(): void
+    {
+        $sh = $this->schoolHead('Grouped School');
+
+        $this->matrixFor($sh, 1, 2030)->items()->createMany([
+            [
+                'position' => 1,
+                'section' => 'operations',
+                'objective' => 'Keep the office running',
+                'activity_description' => 'January supplies purchase',
+                'resource_kind' => 'MOOE',
+                'quantity' => 2,
+                'unit' => 'ream',
+                'unit_cost' => 240,
+                'account_title' => 'Office Supplies Expenses',
+                'account_code' => '5020301000',
+            ],
+            [
+                'position' => 2,
+                'section' => 'operations',
+                'objective' => 'Keep the office running',
+                'activity_description' => 'January supplies purchase',
+                'resource_kind' => 'Bond Paper',
+                'quantity' => 4,
+                'unit' => 'ream',
+                'unit_cost' => 550,
+                'account_title' => 'Office Supplies Expenses',
+                'account_code' => '5020301000',
+            ],
+            [
+                'position' => 3,
+                'section' => 'operations',
+                'objective' => 'Keep the office running',
+                'activity_description' => 'January supplies purchase',
+                'resource_kind' => 'Ink Cartridge',
+                'quantity' => 10,
+                'unit' => 'piece',
+                'unit_cost' => 250,
+                'account_title' => 'Office Supplies Expenses',
+                'account_code' => '5020301000',
+            ],
+            [
+                'position' => 4,
+                'section' => 'operations',
+                'objective' => 'Keep the office running',
+                'activity_description' => 'July training materials',
+                'resource_kind' => 'MOOE',
+                'quantity' => 1,
+                'unit' => 'set',
+                'unit_cost' => 500,
+                'account_title' => 'Training Expenses',
+                'account_code' => '5020301000',
+            ],
+        ]);
+
+        $response = $this->actingAs($sh)->get(route('wfp.matrices.year-export', ['year' => 2030]));
+
+        $response->assertOk();
+
+        [$zip, $path] = $this->readerFor($response->getContent());
+        $january = $zip->part('xl/worksheets/sheet1.xml');
+
+        // The objective and activity print once for the group of resources
+        // beneath them; the rows below repeat neither column.
+        $this->assertSame(1, substr_count($january, 'Keep the office running'));
+        $this->assertSame(1, substr_count($january, 'January supplies purchase'));
+        // A new activity shows even when the objective stays the same, while
+        // the repeated objective stays blank.
+        $this->assertSame(1, substr_count($january, 'July training materials'));
+
+        // The grouped rows read as one continuous block: interior rows carry
+        // a style with no top or bottom rule (s=22), and only the block's
+        // outer edges are ruled (s=21 above, s=23 below). A new activity
+        // under the same objective closes the activity block (s=23) while the
+        // objective block carries on.
+        $this->assertStringContainsString('<c r="A10" s="21"', $january);
+        $this->assertStringContainsString('<c r="A11" s="22"/>', $january);
+        $this->assertStringContainsString('<c r="A12" s="22"/>', $january);
+        $this->assertStringContainsString('<c r="A13" s="23"/>', $january);
+        $this->assertStringContainsString('<c r="B10" s="21"', $january);
+        $this->assertStringContainsString('<c r="B11" s="22"/>', $january);
+        $this->assertStringContainsString('<c r="B12" s="23"/>', $january);
+        $this->assertStringContainsString('<c r="B13" s="7"', $january);
+
+        // All four resource lines are still there, each with its own cost.
+        $this->assertSame(3, substr_count($january, 'Office Supplies Expenses'));
+        $this->assertSame(1, substr_count($january, 'Training Expenses'));
+        $this->assertStringContainsString('<v>480</v>', $january);
+        $this->assertStringContainsString('<v>2200</v>', $january);
+        $this->assertStringContainsString('<v>2500</v>', $january);
+        $this->assertStringContainsString('<v>500</v>', $january);
+
+        unlink($path);
+    }
+
+    public function test_an_activity_block_does_not_continue_across_a_new_objective(): void
+    {
+        $sh = $this->schoolHead('Split School');
+
+        $this->matrixFor($sh, 1, 2030)->items()->createMany([
+            [
+                'position' => 1,
+                'section' => 'operations',
+                'objective' => 'First objective',
+                'activity_description' => 'Shared activity',
+                'resource_kind' => 'MOOE',
+                'quantity' => 1,
+                'unit' => 'ream',
+                'unit_cost' => 10,
+                'account_title' => 'Office Supplies Expenses',
+                'account_code' => '5020301000',
+            ],
+            [
+                'position' => 2,
+                'section' => 'operations',
+                'objective' => 'First objective',
+                'activity_description' => 'Shared activity',
+                'resource_kind' => 'MOOE',
+                'quantity' => 1,
+                'unit' => 'ream',
+                'unit_cost' => 20,
+                'account_title' => 'Office Supplies Expenses',
+                'account_code' => '5020301000',
+            ],
+            [
+                'position' => 3,
+                'section' => 'operations',
+                'objective' => 'Second objective',
+                'activity_description' => 'Shared activity',
+                'resource_kind' => 'MOOE',
+                'quantity' => 1,
+                'unit' => 'ream',
+                'unit_cost' => 30,
+                'account_title' => 'Office Supplies Expenses',
+                'account_code' => '5020301000',
+            ],
+        ]);
+
+        $response = $this->actingAs($sh)->get(route('wfp.matrices.year-export', ['year' => 2030]));
+
+        $response->assertOk();
+
+        [$zip, $path] = $this->readerFor($response->getContent());
+        $january = $zip->part('xl/worksheets/sheet1.xml');
+
+        // Rows 10-11 are the first objective, row 12 starts the second. The
+        // repeated activity text prints again because it belongs to a new
+        // objective, and both blocks close and reopen.
+        $this->assertSame(2, substr_count($january, 'Shared activity'));
+        $this->assertStringContainsString('<c r="A10" s="21"', $january);
+        $this->assertStringContainsString('<c r="A11" s="23"/>', $january);
+        $this->assertStringContainsString('<c r="A12" s="7"', $january);
+        $this->assertStringContainsString('<c r="B10" s="21"', $january);
+        $this->assertStringContainsString('<c r="B11" s="23"/>', $january);
+        $this->assertStringContainsString('<c r="B12" s="7"', $january);
+
+        unlink($path);
+    }
 }

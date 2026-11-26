@@ -83,13 +83,15 @@ class PsdsMonitoring extends Component
         abort_unless(in_array($mode, ['all', 'mov'], true), 404);
         $this->mode = $mode;
 
-        // The page opens on the current reporting year. A malformed year, or
-        // one the account has no data for, falls back to the current year
-        // rather than rendering a report nobody asked for.
+        // No reporting year is forced by default: each document shows its
+        // latest year on file. An explicitly requested year must be one the
+        // account can actually see; anything else clears the filter instead of
+        // forcing the current year — which would hide a school's approved
+        // documents from a different reporting period.
         $requested = ctype_digit($this->yearFilter) ? (int) $this->yearFilter : null;
 
-        if ($requested === null || ! in_array($requested, $this->report()->yearOptions(), true)) {
-            $this->yearFilter = (string) now()->year;
+        if ($requested !== null && ! in_array($requested, $this->report()->yearOptions(), true)) {
+            $this->yearFilter = '';
         }
     }
 
@@ -223,13 +225,13 @@ class PsdsMonitoring extends Component
         );
     }
 
-    /** Whether anything but the default reporting year is narrowing the view. */
+    /** Whether anything but the default (latest year on file) is narrowing the view. */
     #[Computed]
     public function hasActiveFilters(): bool
     {
         return $this->districtFilter !== ''
             || $this->schoolFilter !== ''
-            || $this->yearFilter !== (string) now()->year
+            || $this->yearFilter !== ''
             || ($this->mode === 'all' && (
                 $this->aipFilter !== ''
                 || $this->opcrfFilter !== ''
@@ -324,7 +326,7 @@ class PsdsMonitoring extends Component
     {
         $this->districtFilter = '';
         $this->schoolFilter = '';
-        $this->yearFilter = (string) now()->year;
+        $this->yearFilter = '';
         $this->aipFilter = '';
         $this->opcrfFilter = '';
         $this->wfpFilter = '';

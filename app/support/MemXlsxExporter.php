@@ -60,6 +60,9 @@ final class MemXlsxExporter
 
     private const S_LABEL = 14;     // bold, no border ("Prepared by:")
 
+    private const S_TH_A = 19;      // th minus right border (Objectives header, one border with Project/Activity)
+    private const S_TH_B = 20;      // th minus left border (Project/Activity header)
+
     private const S_PLAIN = 15;     // plain, no border
 
     private const S_SIGN_NAME = 16; // plain with a signature line beneath
@@ -67,6 +70,10 @@ final class MemXlsxExporter
     private const S_CODE = 17;      // bordered, text format ("@"), left
 
     private const S_EMPTY = 18;     // italic, centred, no border
+
+    private const S_TEXT_TOP = 21;    // text, no bottom rule (top of an objective/activity block)
+    private const S_TEXT_MID = 22;    // text, no top or bottom rule (inside a block)
+    private const S_TEXT_BOTTOM = 23; // text, no top rule (bottom of a block)
 
     /** The last frozen row: the two-tier column header. */
     private const HEADER_ROW = 7;
@@ -202,8 +209,8 @@ final class MemXlsxExporter
         $subRow = $headerRow + 1;
 
         $addRow(
-            self::cell($headerRow, 'A', self::S_TH, 'Objectives')
-            .self::cell($headerRow, 'B', self::S_TH, 'Project/Activity/Expenditure')
+            self::cell($headerRow, 'A', self::S_TH_A, 'Objectives')
+            .self::cell($headerRow, 'B', self::S_TH_B, 'Project/Activity/Expenditure')
             .self::cell($headerRow, 'C', self::S_TH, 'Resources needed')
             .self::blankCell($headerRow, 'D', self::S_TH)
             .self::blankCell($headerRow, 'E', self::S_TH)
@@ -266,7 +273,27 @@ final class MemXlsxExporter
                 ])
                 ->values();
 
-            foreach ($sectionItems as $item) {
+            // The printed form shows an objective and an activity once for
+            // the group of resources under them, with no rule between those
+            // rows: the two columns read as one tall cell per group. The runs
+            // are found first so each row knows whether it opens, continues
+            // or closes its block.
+            $objectiveRuns = self::consecutiveRuns(
+                $sectionItems,
+                fn (MonthlyExpenditureItem $item): string => (string) ($item->objective ?? ''),
+            );
+            $activityRuns = self::consecutiveRuns(
+                $sectionItems,
+                fn (MonthlyExpenditureItem $item): string => (string) ($item->objective ?? '')
+                    ."\0".(string) $item->activity_description,
+            );
+            $objectiveBounds = self::runBounds($objectiveRuns);
+            $activityBounds = self::runBounds($activityRuns);
+
+            $previousObjective = null;
+            $previousActivity = null;
+
+            foreach ($sectionItems as $index => $item) {
                 $quantity = $item->quantity !== null ? (float) $item->quantity : null;
                 $unitCost = $item->unit_cost !== null ? (float) $item->unit_cost : null;
                 $total = round(($quantity ?? 0.0) * ($unitCost ?? 0.0), 2);
@@ -274,9 +301,26 @@ final class MemXlsxExporter
 
                 $r = $row + 1;
 
+                // A row that repeats the one above keeps both cells blank,
+                // while its resource kind, quantity and cost still print.
+                // A new activity under the same objective still shows, and an
+                // activity never carries over into a different objective.
+                $rawObjective = (string) ($item->objective ?? '');
+                $rawActivity = (string) $item->activity_description;
+                $sameObjective = $rawObjective === $previousObjective;
+                $sameActivity = $rawActivity === $previousActivity;
+
+                $objective = $sameObjective ? '' : $rawObjective;
+                $activity = ($sameObjective && $sameActivity) ? '' : $rawActivity;
+
+                $previousObjective = $rawObjective;
+                $previousActivity = $rawActivity;
+
+                // Inside a block the internal rules are dropped, so the
+                // objective and activity read as one continuous cell.
                 $addRow(
-                    self::cell($r, 'A', self::S_TEXT, (string) ($item->objective ?? ''))
-                    .self::cell($r, 'B', self::S_TEXT, (string) $item->activity_description)
+                    self::cell($r, 'A', self::blockTextStyle(...$objectiveBounds[$index]), $objective)
+                    .self::cell($r, 'B', self::blockTextStyle(...$activityBounds[$index]), $activity)
                     .self::cell($r, 'C', self::S_TEXT, (string) ($item->resource_kind ?? ''))
                     .self::numericCell($r, 'D', $quantity)
                     .self::cell($r, 'E', self::S_UNIT, (string) ($item->unit ?? ''))
@@ -426,7 +470,7 @@ final class MemXlsxExporter
             .'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
 
         if ($highlightTab) {
-            $xml .= '<sheetPr><tabColor rgb="FF2F5597"/></sheetPr>';
+            $xml .= '<sheetPr><tabColor rgb="FF70AD47"/></sheetPr>';
         }
 
         $xml .= '<dimension ref="A1:I'.$lastRow.'"/>'
@@ -613,13 +657,70 @@ final class MemXlsxExporter
         return trim((string) ($user?->name ?: $user?->username));
     }
 
+    /**
+     * Runs of consecutive rows that share a value, as inclusive [start, end]
+     * index pairs in the collection's own order.
+     *
+     * @param  Collection<int, MonthlyExpenditureItem>  $items
+     * @param  callable(MonthlyExpenditureItem): string  $value
+     * @return array<int, array{0: int, 1: int}>
+     */
+    private static function consecutiveRuns(Collection $items, callable $value): array
+    {
+        $runs = [];
+        $start = 0;
+        $count = $items->count();
+
+        for ($index = 1; $index <= $count; $index++) {
+            if ($index === $count || $value($items[$index]) !== $value($items[$start])) {
+                $runs[] = [$start, $index - 1];
+                $start = $index;
+            }
+        }
+
+        return $runs;
+    }
+
+    /**
+     * Index → [isFirst, isLast] for each run, so a row can pick the border
+     * variant that leaves the block open above and below.
+     *
+     * @param  array<int, array{0: int, 1: int}>  $runs
+     * @return array<int, array{0: bool, 1: bool}>
+     */
+    private static function runBounds(array $runs): array
+    {
+        $bounds = [];
+
+        foreach ($runs as [$start, $end]) {
+            for ($index = $start; $index <= $end; $index++) {
+                $bounds[$index] = [$index === $start, $index === $end];
+            }
+        }
+
+        return $bounds;
+    }
+
+    /** The text style for a row at the edge of, or inside, an objective/activity block. */
+    private static function blockTextStyle(bool $isFirst, bool $isLast): int
+    {
+        if ($isFirst && $isLast) {
+            return self::S_TEXT;
+        }
+
+        return $isFirst
+            ? self::S_TEXT_TOP
+            : ($isLast ? self::S_TEXT_BOTTOM : self::S_TEXT_MID);
+    }
+
     /* ------------------------------------------------------------- styles */
 
     /**
-     * Four fonts, one gray fill, two borders (all-thin and signature-line),
-     * and the cell styles the form needs. Money uses builtin numFmtId 4
-     * ("#,##0.00") and account codes builtin 49 ("@") — no custom numFmts
-     * section, so the file opens the same in Excel and WPS.
+     * Four fonts, one gray fill, the border variants (all-thin,
+     * signature-line, header edges, and the open-sided objective/activity
+     * blocks), and the cell styles the form needs. Money uses builtin
+     * numFmtId 4 ("#,##0.00") and account codes builtin 49 ("@") — no custom
+     * numFmts section, so the file opens the same in Excel and WPS.
      */
     private static function stylesXml(): string
     {
@@ -640,7 +741,7 @@ final class MemXlsxExporter
 
         $thin = '<color indexed="64"/>';
 
-        $borders = '<borders count="3">'
+        $borders = '<borders count="8">'
             .'<border><left/><right/><top/><bottom/><diagonal/></border>'
             .'<border>'
             .'<left style="thin">'.$thin.'</left>'
@@ -654,13 +755,47 @@ final class MemXlsxExporter
             .'<bottom style="thin">'.$thin.'</bottom>'
             .'<diagonal/>'
             .'</border>'
+            .'<border>'
+            .'<left style="thin">'.$thin.'</left>'
+            .'<right/>'
+            .'<top style="thin">'.$thin.'</top>'
+            .'<bottom style="thin">'.$thin.'</bottom>'
+            .'<diagonal/>'
+            .'</border>'
+            .'<border>'
+            .'<left/>'
+            .'<right style="thin">'.$thin.'</right>'
+            .'<top style="thin">'.$thin.'</top>'
+            .'<bottom style="thin">'.$thin.'</bottom>'
+            .'<diagonal/>'
+            .'</border>'
+            // 5-7: the sides of an objective/activity block. The rule that
+            // would separate its rows is omitted, so the column reads as one
+            // continuous cell; only the block's outer edges are ruled.
+            .'<border>'
+            .'<left style="thin">'.$thin.'</left>'
+            .'<right style="thin">'.$thin.'</right>'
+            .'<top style="thin">'.$thin.'</top>'
+            .'<diagonal/>'
+            .'</border>'
+            .'<border>'
+            .'<left style="thin">'.$thin.'</left>'
+            .'<right style="thin">'.$thin.'</right>'
+            .'<diagonal/>'
+            .'</border>'
+            .'<border>'
+            .'<left style="thin">'.$thin.'</left>'
+            .'<right style="thin">'.$thin.'</right>'
+            .'<bottom style="thin">'.$thin.'</bottom>'
+            .'<diagonal/>'
+            .'</border>'
             .'</borders>';
 
         // The alignment is a CHILD element of <xf>, so it goes after the
         // attributes — never concatenated into the tag itself.
         $xf = static fn (array $attrs, string $alignment = ''): string => '<xf '.implode(' ', $attrs).' xfId="0">'.$alignment.'</xf>';
 
-        $cellXfs = '<cellXfs count="19">'
+        $cellXfs = '<cellXfs count="24">'
             .$xf(['numFmtId="0"', 'fontId="0"', 'fillId="0"', 'borderId="0"']) // 0 default
             .$xf(['numFmtId="0"', 'fontId="2"', 'fillId="0"', 'borderId="0"', 'applyFont="1"', 'applyAlignment="1"'], '<alignment horizontal="center" vertical="center"/>') // 1 title
             .$xf(['numFmtId="0"', 'fontId="0"', 'fillId="0"', 'borderId="0"', 'applyAlignment="1"'], '<alignment horizontal="center" vertical="center"/>') // 2 head line
@@ -680,6 +815,11 @@ final class MemXlsxExporter
             .$xf(['numFmtId="0"', 'fontId="0"', 'fillId="0"', 'borderId="2"', 'applyBorder="1"', 'applyAlignment="1"'], '<alignment horizontal="left" vertical="center"/>') // 16 signature name
             .$xf(['numFmtId="49"', 'fontId="0"', 'fillId="0"', 'borderId="1"', 'applyNumberFormat="1"', 'applyBorder="1"', 'applyAlignment="1"'], '<alignment horizontal="left" vertical="center"/>') // 17 account code
             .$xf(['numFmtId="0"', 'fontId="3"', 'fillId="0"', 'borderId="0"', 'applyFont="1"', 'applyAlignment="1"'], '<alignment horizontal="center" vertical="center"/>') // 18 empty state
+            .$xf(['numFmtId="0"', 'fontId="1"', 'fillId="0"', 'borderId="3"', 'applyFont="1"', 'applyBorder="1"', 'applyAlignment="1"'], '<alignment horizontal="center" vertical="center" wrapText="1"/>') // 19 th no right
+            .$xf(['numFmtId="0"', 'fontId="1"', 'fillId="0"', 'borderId="4"', 'applyFont="1"', 'applyBorder="1"', 'applyAlignment="1"'], '<alignment horizontal="center" vertical="center" wrapText="1"/>') // 20 th no left
+            .$xf(['numFmtId="0"', 'fontId="0"', 'fillId="0"', 'borderId="5"', 'applyBorder="1"', 'applyAlignment="1"'], '<alignment horizontal="left" vertical="top" wrapText="1"/>') // 21 text block top
+            .$xf(['numFmtId="0"', 'fontId="0"', 'fillId="0"', 'borderId="6"', 'applyBorder="1"', 'applyAlignment="1"'], '<alignment horizontal="left" vertical="top" wrapText="1"/>') // 22 text block middle
+            .$xf(['numFmtId="0"', 'fontId="0"', 'fillId="0"', 'borderId="7"', 'applyBorder="1"', 'applyAlignment="1"'], '<alignment horizontal="left" vertical="top" wrapText="1"/>') // 23 text block bottom
             .'</cellXfs>';
 
         return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'

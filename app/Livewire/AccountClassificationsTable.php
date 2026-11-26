@@ -436,11 +436,18 @@ class AccountClassificationsTable extends Component
         $this->resetImport();
         $this->resetPage();
 
-        $skipped = $report['skipped'] > 0
-            ? " {$report['skipped']} skipped (already existed)."
-            : '';
+        $parts = [];
+        if ($report['imported'] > 0) {
+            $parts[] = "{$report['imported']} added";
+        }
+        if ($report['updated'] > 0) {
+            $parts[] = "{$report['updated']} updated";
+        }
+        if ($report['skipped'] > 0) {
+            $parts[] = "{$report['skipped']} unchanged";
+        }
 
-        $this->successMessage = "Import complete — {$report['imported']} classification(s) added.".$skipped;
+        $this->successMessage = 'Import complete — '.implode(', ', $parts).' classification(s).';
     }
 
     private function resetImport(): void

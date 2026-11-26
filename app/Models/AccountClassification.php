@@ -85,6 +85,25 @@ class AccountClassification extends Model
     }
 
     /**
+     * Find an existing record (active or retired) by its title + code identity.
+     *
+     * Used by the importer so a re-import can update/reactivate a record that
+     * already exists instead of inserting a duplicate. Comparison is case- and
+     * whitespace-insensitive, matching `duplicateExists()`.
+     *
+     * @param  array<string, mixed>  $attributes
+     * @return static|null
+     */
+    public static function findByIdentity(array $attributes): ?self
+    {
+        return static::whereRaw('LOWER(TRIM(account_title)) = ?', [mb_strtolower(trim((string) ($attributes['account_title'] ?? '')))])
+            ->whereRaw('LOWER(TRIM(rca_code)) = ?', [mb_strtolower(trim((string) ($attributes['rca_code'] ?? '')))])
+            ->whereRaw('LOWER(TRIM(uacs_sub_object_code)) = ?', [mb_strtolower(trim((string) ($attributes['uacs_sub_object_code'] ?? '')))])
+            ->whereRaw('LOWER(TRIM(uacs_object_code)) = ?', [mb_strtolower(trim((string) ($attributes['uacs_object_code'] ?? '')))])
+            ->first();
+    }
+
+    /**
      * Append one entry to this classification's audit trail.
      *
      * @param  array<string, mixed>|null  $before

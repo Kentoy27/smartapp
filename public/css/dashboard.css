@@ -1922,6 +1922,13 @@ button.user-dropdown-link { background: none; border: none; font-family: inherit
    (Template download), so it must not shrink or clip its label. */
 .ac-import-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 14px; background: none; color: var(--text); border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 0.8125rem; font-weight: 600; line-height: 1; white-space: nowrap; text-decoration: none; cursor: pointer; flex: 0 0 auto; transition: background 0.15s, border-color 0.15s, color 0.15s; }
 .ac-import-btn:hover { background: var(--bg-hover); border-color: var(--primary); color: var(--primary); }
+.mem-export-btn--signed { background: #33C481; color: #fff; border-color: #33C481; }
+.mem-export-btn--signed:hover { background: #2da672; border-color: #2da672; color: #fff; }
+.mem-export-btn--unsigned { background: #e2f7ea; color: #1e6b43; border-color: #c2e6d2; }
+.mem-export-btn--unsigned:hover { background: #cbeede; border-color: #b2e0c8; }
+
+.mem-export-btn { background: #15803d; color: #fff; border-color: #15803d; }
+.mem-export-btn:hover { background: #14532d; border-color: #14532d; }
 /* The import dialog is wider than the standard 420px modal to fit the preview. */
 .modal--wide { max-width: min(920px, calc(100vw - 32px)); }
 .ac-import-loading { margin-top: 6px; font-size: 0.75rem; color: var(--text-muted); }

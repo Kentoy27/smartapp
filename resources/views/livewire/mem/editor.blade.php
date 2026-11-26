@@ -225,19 +225,19 @@
 
 
             <div class="ac-toolbar-actions mem-toolbar">
-                {{-- <a
+                <a
                     href="{{ route('wfp.matrices.export', ['matrix' => $matrix->id]) }}"
-                    class="ac-import-btn"
+                    class="ac-import-btn mem-export-btn"
                     download
                     title="Export the matrix as the printed DepEd form (Excel)"
                 >
                     <x-icon name="file-spreadsheet" :size="16" />
                     <span>Export XLSX</span>
-                </a> --}}
+                </a>
 
                {{-- The template and the CSV import exist to bring lines in —
                     writing work, so only a writing account is offered them. --}}
-                {{-- @if ($this->canEdit())
+                @if ($this->canEdit())
                     @if ($items !== [])
                         <button
                             type="button"
@@ -248,12 +248,12 @@
                             title="Generate or update the annual WFP from this year's Monthly Expenditure Matrices"
                         >
                             <x-icon name="file-spreadsheet" :size="16" />
-                            <span wire:loading.remove wire:target="generateWfp">Generate WFP Plan</span>
+                            {{-- <span wire:loading.remove wire:target="generateWfp">Generate WFP Plan</span> --}}
                             <span wire:loading wire:target="generateWfp">Generating…</span>
                         </button>
-                    @endif --}}
+                    @endif
 
-                    {{-- <a
+                    <a
                         href="{{ route('wfp.matrices.template') }}"
                         class="ac-import-btn"
                         download
@@ -261,13 +261,13 @@
                     >
                         <x-icon name="download" :size="16" />
                         <span>Template</span>
-                    </a> --}}
+                    </a>
 
-                    {{-- <button type="button" class="ac-import-btn" wire:click="openImport">
+                    <button type="button" class="ac-import-btn" wire:click="openImport">
                         <x-icon name="upload" :size="16" />
                         <span>Import CSV</span>
-                    </button> --}}
-                {{-- @endif --}}
+                    </button>
+                @endif
             </div>
         </div>
 
@@ -621,7 +621,7 @@
         <div class="mem-summary__foot">
             <a
                 href="{{ route('wfp.matrices.export', ['matrix' => $matrix->id]) }}"
-                class="ac-import-btn mem-summary__export"
+                class="ac-import-btn mem-summary__export mem-export-btn"
                 download
                 title="Export the matrix as the printed DepEd form (Excel)"
             >
@@ -643,7 +643,7 @@
     <div class="modal-backdrop {{ $showLineModal ? 'is-open' : '' }}"
          @if ($showLineModal) @mousedown.self="$wire.closeLineModal()" @endif
          role="presentation">
-        <div class="modal modal--wide modal--sticky-actions" role="dialog" aria-modal="true" aria-labelledby="memLineTitle" @click.stop>
+        <div class="modal modal--wide modal--sticky-actions" role="dialog" aria-modal="true" aria-labelledby="memLineTitle">
             <div class="modal-head">
                 <h2 id="memLineTitle">{{ $editingKey !== null ? 'Edit line' : 'Add a line' }}</h2>
                 <button type="button" class="modal-close" wire:click="closeLineModal" aria-label="Close" title="Close">×</button>

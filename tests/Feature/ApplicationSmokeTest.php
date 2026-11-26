@@ -127,6 +127,7 @@ class ApplicationSmokeTest extends TestCase
             '/districts',
             '/admin/account-classifications',
             '/admin/account-classifications/template',
+            '/admin/account-classifications/export',
             '/api/admin/account-classifications',
             '/movs',
             '/wfp',
