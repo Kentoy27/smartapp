@@ -125,13 +125,12 @@
 
     {{-- MONTH NAVIGATION — the twelve months of this matrix's year, so moving
          through the year never means going back to the list. The month being
-         edited is marked; the others link straight to their own matrix. A month
-         that is validated or finalized carries a small status dot, so the year's
-         progress reads at a glance; a month whose matrix was deleted is
-         inactive. Each tab also carries that month's total — the same figure as
-         the monthly total at the bottom — so the year's spending reads without
-         opening the months one by one. When the Budget office has set an annual
-         allotment, the tab also carries the running balance after that month. --}}
+         edited is marked; the others link straight to their own matrix, and a
+         month whose matrix was deleted is inactive. Each tab also carries that
+         month's total — the same figure as the monthly total at the bottom — so
+         the year's spending reads without opening the months one by one. When
+         the Budget office has set an annual allotment, the tab also carries the
+         running balance after that month. --}}
     <nav class="mem-month-tabs" aria-label="Months of CY {{ $matrix->year }}">
         @foreach ($this->months as $tab)
             @php($tabTotal = $tab['total'] !== null ? number_format($tab['total'], 2) : null)
@@ -140,9 +139,6 @@
                 <span class="mem-month-tab is-current" aria-current="page" title="{{ $tab['label'] }}">
                     <span class="mem-month-tab__head">
                         <span class="mem-month-tab__abbr">{{ $tab['abbr'] }}</span>
-                        @if (in_array($tab['status'], ['validated', 'finalized'], true))
-                            <span class="mem-month-tab__dot mem-month-tab__dot--{{ $tab['status'] }}" aria-hidden="true"></span>
-                        @endif
                     </span>
                     <span class="mem-month-tab__total">
                         @if ($tabTotal !== null)
@@ -167,9 +163,6 @@
                 >
                     <span class="mem-month-tab__head">
                         <span class="mem-month-tab__abbr">{{ $tab['abbr'] }}</span>
-                        @if (in_array($tab['status'], ['validated', 'finalized'], true))
-                            <span class="mem-month-tab__dot mem-month-tab__dot--{{ $tab['status'] }}" aria-hidden="true"></span>
-                        @endif
                     </span>
                     <span class="mem-month-tab__total">
                         @if ($tabTotal !== null)
@@ -200,32 +193,6 @@
                 </span>
             @endif
         @endforeach
-
-        @if ($this->canEdit())
-            {{-- Quick actions after the months: the Per Line Item report and
-                 the year's WFP plan, reachable from any month tab. Both are
-                 School Head actions, so the strip hides them for read-only
-                 readers (Budget, Bookkeeper) who reach the editor by preview. --}}
-            <a
-                href="{{ route('wfp.lineitems.export', ['year' => $matrix->year, 'signatures' => 'with']) }}"
-                class="mem-month-tab mem-month-tab--action"
-                download
-                title="Export the Per Line Item report for CY {{ $matrix->year }} with e-signatures"
-            >
-                <span>Per Line Item generated</span>
-            </a>
-
-            <button
-                type="button"
-                class="mem-month-tab mem-month-tab--action"
-                wire:click="generateWfp"
-                wire:loading.attr="disabled"
-                wire:target="generateWfp"
-                title="Generate the annual WFP from this year's matrices and open the plan"
-            >
-                <span>WFP generated</span>
-            </button>
-        @endif
     </nav>
 
     @if ($errorMessage)

@@ -2156,17 +2156,6 @@ class MemMatrixTest extends TestCase
             ->assertSeeHtml('mem-month-tab is-empty');
     }
 
-    public function test_a_finalized_month_carries_a_status_dot_on_its_tab(): void
-    {
-        $sh = $this->schoolHead();
-        $january = $this->matrixFor($sh, month: 1, year: 2026);
-        $january->update(['status' => MonthlyExpenditureMatrix::STATUS_FINALIZED]);
-        $july = $this->matrixFor($sh, month: 7, year: 2026);
-
-        Livewire::actingAs($sh)->test(MemEditor::class, ['matrix' => $july])
-            ->assertSeeHtml('mem-month-tab__dot--finalized');
-    }
-
     public function test_each_month_tab_carries_that_months_total(): void
     {
         $sh = $this->schoolHead();

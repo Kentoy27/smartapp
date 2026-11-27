@@ -3095,7 +3095,6 @@ class MemEditor extends Component
                     ? $sibling->periodLabel()
                     : $abbreviation.' '.$matrix->year,
                 'id' => $sibling instanceof MonthlyExpenditureMatrix ? (int) $sibling->id : null,
-                'status' => $sibling instanceof MonthlyExpenditureMatrix ? $sibling->status : null,
                 'current' => $isCurrent,
                 'total' => $total,
                 'balance' => $allotted === null ? null : round($allotted - $running, 2),

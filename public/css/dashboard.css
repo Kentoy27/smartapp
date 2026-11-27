@@ -3217,10 +3217,8 @@ body.sorting .mem-drag-handle { cursor: grabbing; }
    The editor is one month, but a year is planned a month at a time, so the
    twelve months sit as a strip across the top of the editor. The month being
    edited is marked; the rest link straight to their own matrix, so moving
-   through the year never means going back to the list. A month that is
-   validated or finalized carries a small status dot, so the year's progress
-   is readable without opening each month; a month whose matrix was deleted
-   is dimmed and not clickable. */
+   through the year never means going back to the list. A month whose matrix
+   was deleted is dimmed and not clickable. */
 .mem-month-tabs {
     display: flex;
     flex-wrap: wrap;
@@ -3269,10 +3267,19 @@ button.mem-month-tab {
 
 button.mem-month-tab:hover { background: var(--bg-hover); color: var(--text-strong); }
 
+/* The month being edited is the strip's anchor: raised above the muted strip
+   and lettered in the brand colour, so the current month reads at a glance
+   instead of blending in with the months that only link away. */
+.mem-month-tab.is-current {
+    background: var(--bg-elevated);
+    color: var(--primary);
+    box-shadow: var(--shadow-card);
+}
+
 .mem-month-tab.is-empty { color: var(--text-faint); opacity: 0.55; cursor: not-allowed; }
 
-/* The abbreviation and its status dot sit on the first line; the month's
-   total sits beneath them, the same figure as the monthly total strip. */
+/* The abbreviation sits on the first line; the month's total beneath it, the
+   same figure as the monthly total strip. */
 .mem-month-tab__head {
     display: inline-flex;
     align-items: center;
@@ -3302,27 +3309,9 @@ button.mem-month-tab:hover { background: var(--bg-hover); color: var(--text-stro
 
 .mem-month-tab__balance.is-over { color: var(--danger); }
 
+.mem-month-tab.is-current .mem-month-tab__total { color: var(--primary); }
+
 a.mem-month-tab:hover .mem-month-tab__total { color: var(--text-muted); }
-
-.mem-month-tab__dot {
-    width: 6px;
-    height: 6px;
-    flex: 0 0 auto;
-    border-radius: 50%;
-    background: var(--text-faint);
-}
-
-.mem-month-tab__dot--validated { background: var(--primary); }
-.mem-month-tab__dot--finalized { background: var(--ok); }
-
-/* Action tabs appended after the months (Per Line Item / WFP generated):
-   their labels are longer than month abbreviations, so let them wrap instead
-   of forcing every tab in the strip to the widest label's width. */
-.mem-month-tab--action {
-    white-space: normal;
-    text-align: center;
-    line-height: 1.35;
-}
 
 /* ---------- MEM editor: the list in the printed form's layout ----------
    The columns are the DepEd form's own, so what the School Head reads on
