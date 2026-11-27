@@ -281,6 +281,48 @@ class SchoolDivisionSeparationTest extends TestCase
         $this->assertSame('SENIOR_HIGH', $budget->activeDivision());
     }
 
+    public function test_the_bookkeeper_sidebar_lists_every_division_without_a_switcher(): void
+    {
+        $school = $this->school('Integrated School');
+        $this->offer($school, ['ELEMENTARY', 'JUNIOR_HIGH', 'SENIOR_HIGH']);
+
+        $bookkeeper = User::factory()->create([
+            'role' => 'bookkeeper',
+            'is_superadmin' => false,
+            'school_id' => $school->id,
+            'school_level' => 'HIGH_SCHOOL',
+            'school_sublevel' => 'JUNIOR_HIGH',
+            'division_access' => ['ELEMENTARY', 'JUNIOR_HIGH', 'SENIOR_HIGH'],
+        ]);
+
+        $component = Livewire::actingAs($bookkeeper)->test(Sidebar::class);
+
+        // The Bookkeeper's checked divisions are all visible at once, like
+        // the Budget office's groups — not just the default sublevel.
+        $component
+            ->assertSee('WFP — Junior High')
+            ->assertSee('WFP — Senior High')
+            ->assertDontSee('id="divisionSwitcher"', false);
+
+        $wfpGroups = collect($component->instance()->items())->where('division')->values();
+        $this->assertSame(
+            ['ELEMENTARY', 'JUNIOR_HIGH', 'SENIOR_HIGH'],
+            $wfpGroups->pluck('division')->all(),
+        );
+        $this->assertSame(
+            ['WFP', 'WFP — Junior High', 'WFP — Senior High'],
+            $wfpGroups->pluck('label')->all(),
+        );
+        $this->assertContains(
+            'Monthly Expenditure — Senior High',
+            array_column($wfpGroups->firstWhere('division', 'SENIOR_HIGH')['children'], 'label'),
+        );
+
+        // Clicking a division's group switches the pages that division reads.
+        $component->call('selectWfpDivision', 'SENIOR_HIGH');
+        $this->assertSame('SENIOR_HIGH', $bookkeeper->activeDivision());
+    }
+
     public function test_a_division_the_school_does_not_offer_is_rejected(): void
     {
         $admin = User::factory()->create(['role' => 'administrator', 'is_superadmin' => false]);

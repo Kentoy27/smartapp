@@ -54,12 +54,13 @@ class Sidebar extends Component
         abort_unless(Auth::check(), 404);
 
         // The active WFP division opens on arrival; dual-division School
-        // Heads get one group per division, and so does the Budget office:
-        // its WFP navigation is one group per division instead of a toggle bar.
+        // Heads get one group per division, and so do the Budget office and
+        // the Bookkeeper: their WFP navigation is one group per division
+        // instead of a toggle bar.
         $user = Auth::user();
         $wfpPath = 'wfp';
 
-        if ($user?->canSwitchDivision() && ($user?->canAccessWfp() || $user?->isBudgetRole())) {
+        if ($user?->canSwitchDivision() && ($user?->canAccessWfp() || $user?->isBudgetRole() || $user?->isBookkeeperRole())) {
             $wfpPath = 'wfp-'.strtolower($user->activeDivision());
         }
 
@@ -452,57 +453,77 @@ class Sidebar extends Component
             // (uploaded-plan review, allotment setting and certification).
             // No OPCRF, MOV or AIP destination exists for the role; the pages
             // it lacks are refused by their own guards, not by this absence.
-            $items[] = [
-                'label' => 'WFP',
-                'route' => 'budget.lineitems.index',
-                // The group lights up on any page it holds, like the Budget
-                // office's copy of it.
-                'active' => ['budget.*', 'wfp.index', 'wfp.preview.index'],
-                'path' => 'wfp',
-                'icon' => 'chart-column',
-                'section' => 'Files',
-                'order' => 14,
-                'children' => [
-                    [
-                        'key' => 'bookkeeper-wfp-signoffs',
-                        'label' => 'WFP Sign-offs',
-                        'title' => 'View and sign the WFP sections for your assigned schools',
-                        'url' => route('wfp.index'),
-                        'route' => 'wfp.index',
-                    ],
-                    [
-                        'key' => 'budget-line-items',
-                        'label' => 'Monthly Expenditure',
-                        'title' => 'Every school\'s expenditure lines, per line item, read-only — the account titles and codes you check',
-                        'url' => route('budget.lineitems.index'),
-                        'route' => 'budget.lineitems.*',
-                    ],
-                    // The report that carries the check: each school's year
-                    // rolled up per account code, and the "Checked as to the
-                    // Correctness of Account Titles and Codes" signatory.
-                    [
-                        'key' => 'budget-line-item-allotment',
-                        'label' => 'Per Line Item Expenditure',
-                        'title' => 'Read each school\'s annual MOOE allotment report and sign it as checked',
-                        'url' => route('budget.per-line-item.index'),
-                        'route' => 'budget.per-line-item.*',
-                    ],
-                    /*
-                    // The generated plan itself, read-only: the School Head's
-                    // Excel-based generation of the WFP, seen from the
-                    // Bookkeeper's side so the account titles and codes can be
-                    // checked against the plan that carries them. It sits last
-                    // because it is the document the pages above it produce.
-                    [
-                        'key' => 'bookkeeper-wfp-preview',
-                        'label' => 'WFP Preview',
-                        'title' => 'Preview the generated Work and Financial Plan of your assigned schools',
-                        'url' => route('wfp.preview.index'),
-                        'route' => 'wfp.preview.index',
-                    ],
-                    */
+            //
+            // One WFP group per division the Bookkeeper may work in — like
+            // the Budget office's navigation, every division is visible at
+            // once, so there is no toggle bar to switch division access from.
+            $children = [
+                [
+                    'key' => 'bookkeeper-wfp-signoffs',
+                    'label' => 'WFP Sign-offs',
+                    'title' => 'View and sign the WFP sections for your assigned schools',
+                    'url' => route('wfp.index'),
+                    'route' => 'wfp.index',
                 ],
+                [
+                    'key' => 'budget-line-items',
+                    'label' => 'Monthly Expenditure',
+                    'title' => 'Every school\'s expenditure lines, per line item, read-only — the account titles and codes you check',
+                    'url' => route('budget.lineitems.index'),
+                    'route' => 'budget.lineitems.*',
+                ],
+                // The report that carries the check: each school's year
+                // rolled up per account code, and the "Checked as to the
+                // Correctness of Account Titles and Codes" signatory.
+                [
+                    'key' => 'budget-line-item-allotment',
+                    'label' => 'Per Line Item Expenditure',
+                    'title' => 'Read each school\'s annual MOOE allotment report and sign it as checked',
+                    'url' => route('budget.per-line-item.index'),
+                    'route' => 'budget.per-line-item.*',
+                ],
+                /*
+                // The generated plan itself, read-only: the School Head's
+                // Excel-based generation of the WFP, seen from the
+                // Bookkeeper's side so the account titles and codes can be
+                // checked against the plan that carries them. It sits last
+                // because it is the document the pages above it produce.
+                [
+                    'key' => 'bookkeeper-wfp-preview',
+                    'label' => 'WFP Preview',
+                    'title' => 'Preview the generated Work and Financial Plan of your assigned schools',
+                    'url' => route('wfp.preview.index'),
+                    'route' => 'wfp.preview.index',
+                ],
+                */
             ];
+
+            $divisions = Auth::user()->authorizedDivisions();
+            $hasMultipleDivisions = count($divisions) > 1;
+
+            foreach ($divisions as $division) {
+                $suffix = SchoolDivision::sidebarSuffix($division);
+                $divisionChildren = $children;
+
+                foreach ($divisionChildren as &$child) {
+                    $child['label'] .= $suffix;
+                }
+                unset($child);
+
+                $items[] = [
+                    'label' => 'WFP'.$suffix,
+                    'route' => 'budget.lineitems.index',
+                    // The group lights up on any page it holds, like the
+                    // Budget office's copy of it.
+                    'active' => ['budget.*', 'wfp.index', 'wfp.preview.index'],
+                    'path' => $hasMultipleDivisions ? 'wfp-'.strtolower($division) : 'wfp',
+                    'division' => $division,
+                    'icon' => 'chart-column',
+                    'section' => 'Files',
+                    'order' => 14,
+                    'children' => $divisionChildren,
+                ];
+            }
         } elseif (Auth::user()?->isPsdsRole()) {
             // Both PSDS monitoring views are read-only and district-scoped.
             $items[] = [
@@ -732,7 +753,7 @@ class Sidebar extends Component
         $user = Auth::user();
         abort_unless(
             $user?->canAccessDivision($division)
-            && ($user?->canAccessWfp() || $user?->canManageAllotments()),
+            && ($user?->canAccessWfp() || $user?->canManageAllotments() || $user?->isBookkeeperRole()),
             404,
         );
 
