@@ -115,6 +115,11 @@ class MemImporter
                 $cells[0] = self::stripBom((string) $cells[0]);
             }
 
+            // Excel on Windows writes CSV in the system ANSI code page unless
+            // the user picks the UTF-8 variant. Normalise every cell before it
+            // can reach the component state (or the database).
+            $cells = CsvEncoding::cellsToUtf8($cells);
+
             if (self::isBlankRow($cells)) {
                 continue;
             }

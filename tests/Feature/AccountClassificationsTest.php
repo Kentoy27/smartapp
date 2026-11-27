@@ -533,6 +533,34 @@ class AccountClassificationsTest extends TestCase
         ]);
     }
 
+    public function test_import_normalises_a_windows_1252_csv_to_utf8(): void
+    {
+        $admin = $this->administrator();
+
+        // Excel on Windows saves "CSV (Comma delimited)" in the system ANSI
+        // code page: 0xF1 is "ñ" there, but it is not valid UTF-8. The preview
+        // must hold UTF-8, otherwise Livewire cannot serialise the component
+        // state back to the browser ("Malformed UTF-8 characters...").
+        $csv = "Account Title,RCA Code,UACS Sub-Object Code,UACS Object Code,Covering PPAS\n"
+            ."Ba\xF1o Supplies,50203010,00,5020301000,PPAS 1";
+
+        $component = Livewire::actingAs($admin)->test('account-classifications-table')
+            ->call('openImport')
+            ->set('importFile', $this->csv($csv))
+            ->assertSet('importValidCount', 1)
+            ->assertSet('importError', null);
+
+        $rows = $component->get('importRows');
+        $this->assertSame('Baño Supplies', $rows[0]['data']['account_title']);
+        $this->assertTrue(mb_check_encoding($rows[0]['data']['account_title'], 'UTF-8'));
+
+        $component->call('commitImport');
+
+        $this->assertDatabaseHas('account_classifications', [
+            'account_title' => 'Baño Supplies',
+        ]);
+    }
+
     public function test_import_skips_invalid_rows_and_reports_them(): void
     {
         $admin = $this->administrator();
