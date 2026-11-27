@@ -82,6 +82,26 @@ class WfpCsvReaderTest extends TestCase
         $this->assertSame('Maintenance and Other Operating Expenses', $rows[0]['data']['name']);
     }
 
+    public function test_it_converts_windows_1252_cells_to_utf8(): void
+    {
+        // Excel on Windows writes CSV in the system ANSI code page: 0xF1 is
+        // "ñ" there, but it is not valid UTF-8.
+        $path = $this->tempCsv("Code,Name\nMOOE,Ba\xF1o Supplies\n");
+
+        $rows = WfpCsvReader::read(
+            $path,
+            [
+                'code' => ['label' => 'Code', 'aliases' => ['code']],
+                'name' => ['label' => 'Name', 'aliases' => ['name']],
+            ],
+            100
+        );
+
+        $this->assertCount(1, $rows);
+        $this->assertSame('Baño Supplies', $rows[0]['data']['name']);
+        $this->assertTrue(mb_check_encoding($rows[0]['data']['name'], 'UTF-8'));
+    }
+
     public function test_it_skips_blank_rows(): void
     {
         $path = $this->tempCsv("Code,Name\n\nMOOE,Maintenance and Other Operating Expenses\n\nSEF,Special Education Fund\n");
