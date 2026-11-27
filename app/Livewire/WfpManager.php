@@ -53,6 +53,16 @@ class WfpManager extends Component
     }
 
     /**
+     * A row's sign-off child submitted the plan: re-read the list so its
+     * status badge reflects the new state without a page reload.
+     */
+    #[On('wfp-plan-submitted')]
+    public function refreshPlans(): void
+    {
+        unset($this->plans);
+    }
+
+    /**
      * The year the sign-off card renders for: the year the select picked,
      * and until it does, the newest year the school has data for — the
      * current year when it has none — the same resolution the generate

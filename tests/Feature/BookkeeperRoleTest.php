@@ -23,6 +23,7 @@ use App\Models\WfpPlan;
 use App\Models\WfpReportCheck;
 use App\Support\PurePhpZipReader;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
 use Livewire\Livewire;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -764,6 +765,36 @@ class BookkeeperRoleTest extends TestCase
             ->set('lineForm.quantity', '5')
             ->set('lineForm.unit_cost', '250')
             ->call('saveLineFromModal');
+
+        $this->assertSame(0, WfpReportCheck::count());
+    }
+
+    public function test_importing_csv_lines_clears_the_check(): void
+    {
+        $bookkeeper = $this->bookkeeper();
+        // The head works the bookkeeper's base school — on its roster.
+        $head = $this->schoolHead($bookkeeper->school);
+        $matrix = $this->line($head, 3)->matrix;
+
+        Livewire::actingAs($bookkeeper)
+            ->test(BudgetLineItemAllotment::class, ['schoolId' => (string) $head->school_id])
+            ->call('check');
+
+        $this->assertSame(1, WfpReportCheck::count());
+
+        $csv = implode("\n", [
+            'Section,Activity Description,Quantity,Unit,Unit Cost',
+            'operations,Procure more supplies,5,ream,250',
+        ]);
+
+        // The import adds lines the check never covered: the check is
+        // cleared so the Bookkeeper checks the report as it now stands.
+        Livewire::actingAs($head)
+            ->test(MemEditor::class, ['matrix' => $matrix])
+            ->call('openImport')
+            ->set('importFile', UploadedFile::fake()->createWithContent('mem.csv', $csv))
+            ->call('commitImport')
+            ->assertSet('showImport', false);
 
         $this->assertSame(0, WfpReportCheck::count());
     }

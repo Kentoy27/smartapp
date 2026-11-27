@@ -150,14 +150,24 @@ class WfpSignatoryActions extends Component
             ->firstOrFail();
 
         try {
-            $plan->submitForApprovalByBudget($user);
+            $submitted = WfpReportSignoffs::submitReadyPlan(
+                $this->schoolId,
+                $this->year,
+                $plan->schoolDivision(),
+            );
         } catch (RuntimeException $exception) {
             $this->errorMessage = $exception->getMessage();
 
             return;
         }
 
-        $this->successMessage = 'Submitted '.$plan->fiscalYearLabel().' for the Schools Division Superintendent’s final approval.';
+        if ($submitted === null) {
+            $this->errorMessage = 'This WFP is not ready to submit — both Budget sign-offs must still be recorded and valid.';
+
+            return;
+        }
+
+        $this->successMessage = 'Submitted '.$submitted->fiscalYearLabel().' for the Schools Division Superintendent’s final approval.';
         $this->errorMessage = null;
         $this->dispatch('wfp-plan-submitted');
     }
@@ -185,8 +195,6 @@ class WfpSignatoryActions extends Component
         $canSubmit = $user->canCertifyAllotments()
             && $plan !== null
             && $plan->isEditable()
-            && $plan->items()->exists()
-            && ! $plan->isOutOfDate()
             && $plan->hasBudgetReview();
 
         return view('livewire.wfp.signatory-actions', [

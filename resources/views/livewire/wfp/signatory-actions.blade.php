@@ -98,8 +98,8 @@
                 wire:target="submitForApproval"
                 @disabled(! $canSubmit)
                 title="{{ $canSubmit
-                    ? 'Send the current, fully reviewed plan to the Superadmin'
-                    : 'Requires a current plan and both Budget sign-offs' }}"
+                    ? 'Send the fully reviewed plan to the Superadmin'
+                    : 'Requires both Budget sign-offs' }}"
             >
                 <x-icon name="send" :size="13" />
                 <span>Submit to Superadmin</span>
@@ -180,8 +180,8 @@
                 wire:target="submitForApproval"
                 @disabled(! $canSubmit)
                 title="{{ $canSubmit
-                    ? 'Send the current, fully reviewed plan to the Superadmin'
-                    : 'Requires a current plan and both Budget sign-offs' }}"
+                    ? 'Send the fully reviewed plan to the Superadmin'
+                    : 'Requires both Budget sign-offs' }}"
             >
                 <x-icon name="send" :size="14" />
                 <span>Submit to Superadmin</span>

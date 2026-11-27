@@ -72,6 +72,12 @@ final class WfpReportSignoffs
      * component: a plan whose report is checked and whose allotment is
      * certified is submitted by the officer behind that certification.
      *
+     * The WFP is derived from the MEM, and the sign-offs are given over the
+     * MEM report. A plan the MEM has moved on from — or one generated before
+     * its lines existed — is brought up to date first, so the plan filed is
+     * the one the sign-offs describe instead of the auto-submit silently
+     * stopping on a stale plan.
+     *
      * Returns the submitted plan, or null when the plan is not ready.
      */
     public static function submitReadyPlan(int $schoolId, int $year, string $division): ?WfpPlan
@@ -82,13 +88,7 @@ final class WfpReportSignoffs
             ->where('year', $year)
             ->first();
 
-        if (
-            $plan === null
-            || ! $plan->isEditable()
-            || ! $plan->items()->exists()
-            || $plan->isOutOfDate()
-            || ! $plan->hasBudgetReview()
-        ) {
+        if ($plan === null || ! $plan->isEditable() || ! $plan->hasBudgetReview()) {
             return null;
         }
 
@@ -98,6 +98,15 @@ final class WfpReportSignoffs
             ! $budgetOfficer instanceof User
             || WfpAllotment::checkingUser($schoolId, $year, $division) === null
         ) {
+            return null;
+        }
+
+        if (! $plan->items()->exists() || $plan->isOutOfDate()) {
+            WfpGenerator::generate($plan);
+            $plan->refresh();
+        }
+
+        if (! $plan->items()->exists() || $plan->isOutOfDate()) {
             return null;
         }
 

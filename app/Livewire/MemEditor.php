@@ -2948,6 +2948,11 @@ class MemEditor extends Component
 
         $report = MemImporter::commit($analysis['valid'], $matrix, Auth::user());
 
+        // The import added lines the report's check never covered, so the
+        // check no longer describes the year's lines: clear it (see
+        // WfpReportCheck). The workbook import clears it the same way.
+        WfpReportCheck::clearFor((int) $matrix->school_id, (int) $matrix->year, $matrix->schoolDivision());
+
         $this->showImport = false;
         $this->resetImport();
 

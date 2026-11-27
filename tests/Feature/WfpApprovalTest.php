@@ -320,6 +320,40 @@ class WfpApprovalTest extends TestCase
         $this->assertDatabaseCount('wfp_approvals', 0);
     }
 
+    public function test_the_budget_officer_can_still_submit_a_reviewed_plan_the_mem_has_moved_on_from(): void
+    {
+        $sh = $this->schoolHead();
+        $plan = $this->generatedPlan($sh);
+        $this->budgetReview($plan);
+
+        // The sign-offs are recorded, then the MEM advances: the auto-submit
+        // no longer fires, but Budget can still file the reviewed plan by
+        // hand — the plan is regenerated from the MEM first.
+        $matrix = MonthlyExpenditureMatrix::query()
+            ->where('school_id', $plan->school_id)
+            ->firstOrFail();
+        $matrix->bumpVersion();
+
+        $this->assertTrue($plan->fresh()->isOutOfDate());
+
+        $budget = User::query()->where('role', 'budget')->firstOrFail();
+        Livewire::actingAs($budget)
+            ->test(WfpSignatoryActions::class, [
+                'schoolId' => $plan->school_id,
+                'year' => $plan->year,
+            ])
+            ->assertSee('Submit to Superadmin')
+            ->call('submitForApproval')
+            ->assertSet(
+                'successMessage',
+                'Submitted '.$plan->fiscalYearLabel().' for the Schools Division Superintendent’s final approval.',
+            );
+
+        $submitted = $plan->fresh();
+        $this->assertSame(WfpPlan::STATUS_PENDING_APPROVAL, $submitted->status);
+        $this->assertFalse($submitted->isOutOfDate());
+    }
+
     public function test_budget_certification_automatically_submits_when_the_bookkeeper_has_already_checked(): void
     {
         $sh = $this->schoolHead();
@@ -393,6 +427,114 @@ class WfpApprovalTest extends TestCase
             'year' => $plan->year,
             'checked_by' => $bookkeeper->id,
         ]);
+    }
+
+    public function test_budget_certification_submits_a_plan_the_mem_has_moved_on_from(): void
+    {
+        $sh = $this->schoolHead();
+        $plan = $this->generatedPlan($sh);
+
+        // The Budget office corrects an account code after the plan was
+        // generated — a MEM write that advances the matrix version, so the
+        // plan is out of date even though the report's check is current.
+        $matrix = MonthlyExpenditureMatrix::query()
+            ->where('school_id', $plan->school_id)
+            ->firstOrFail();
+        $item = $matrix->items()->firstOrFail();
+        $item->account_code = '5020301001';
+        $item->save();
+        $matrix->bumpVersion();
+
+        $bookkeeper = User::factory()->create([
+            'role' => 'bookkeeper',
+            'is_superadmin' => false,
+            'school_id' => $plan->school_id,
+        ]);
+        $bookkeeper->syncAssignedSchools([$plan->school_id]);
+        WfpReportCheck::create([
+            'school_id' => $plan->school_id,
+            'school_division' => $plan->schoolDivision(),
+            'year' => $plan->year,
+            'checked_by' => $bookkeeper->id,
+            'checked_at' => now(),
+        ]);
+        SchoolAllotment::create([
+            'school_id' => $plan->school_id,
+            'school_division' => $plan->schoolDivision(),
+            'year' => $plan->year,
+            'amount' => 50000,
+        ]);
+
+        $this->assertTrue($plan->fresh()->isOutOfDate());
+
+        $budget = User::factory()->create(['role' => 'budget', 'is_superadmin' => false]);
+        Livewire::actingAs($budget)
+            ->test(WfpSignatoryActions::class, ['schoolId' => $plan->school_id, 'year' => $plan->year])
+            ->call('signCertification')
+            ->assertSet(
+                'successMessage',
+                'WFP submitted to the Schools Division Superintendent for final approval after the Budget certification.',
+            );
+
+        $submitted = $plan->fresh();
+        $this->assertSame(WfpPlan::STATUS_PENDING_APPROVAL, $submitted->status);
+        $this->assertFalse($submitted->isOutOfDate());
+        $this->assertDatabaseHas('wfp_items', [
+            'wfp_plan_id' => $plan->id,
+            'account_code' => '5020301001',
+        ]);
+    }
+
+    public function test_budget_certification_submits_a_generated_plan_that_has_no_lines_yet(): void
+    {
+        $sh = $this->schoolHead();
+
+        // A plan generated before the school's MEM carried any line: it is
+        // marked Generated with nothing to file. The lines were added later,
+        // and Budget's sign-offs now describe them.
+        $plan = WfpPlan::create([
+            'school_id' => $sh->school_id,
+            'school_division' => $sh->activeDivision(),
+            'year' => 2026,
+            'status' => WfpPlan::STATUS_GENERATED,
+            'generated_at' => now(),
+        ]);
+        $this->matrixWithLine($sh);
+
+        $bookkeeper = User::factory()->create([
+            'role' => 'bookkeeper',
+            'is_superadmin' => false,
+            'school_id' => $plan->school_id,
+        ]);
+        $bookkeeper->syncAssignedSchools([$plan->school_id]);
+        WfpReportCheck::create([
+            'school_id' => $plan->school_id,
+            'school_division' => $plan->schoolDivision(),
+            'year' => $plan->year,
+            'checked_by' => $bookkeeper->id,
+            'checked_at' => now(),
+        ]);
+        SchoolAllotment::create([
+            'school_id' => $plan->school_id,
+            'school_division' => $plan->schoolDivision(),
+            'year' => $plan->year,
+            'amount' => 50000,
+        ]);
+
+        $this->assertSame(0, $plan->items()->count());
+
+        $budget = User::factory()->create(['role' => 'budget', 'is_superadmin' => false]);
+        Livewire::actingAs($budget)
+            ->test(WfpSignatoryActions::class, ['schoolId' => $plan->school_id, 'year' => $plan->year])
+            ->call('signCertification')
+            ->assertSet(
+                'successMessage',
+                'WFP submitted to the Schools Division Superintendent for final approval after the Budget certification.',
+            );
+
+        $submitted = $plan->fresh();
+        $this->assertSame(WfpPlan::STATUS_PENDING_APPROVAL, $submitted->status);
+        $this->assertSame(1, $submitted->items()->count());
     }
 
     public function test_budget_certifying_from_the_per_line_item_page_submits_a_checked_plan(): void
