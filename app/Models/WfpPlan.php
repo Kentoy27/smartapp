@@ -398,6 +398,9 @@ class WfpPlan extends Model
      * A plan Budget has fully reviewed may be approved even when the school
      * never filed it (for example when the sign-offs predate generation):
      * the Superintendent's sign-off is then the final decision.
+     *
+     * A plan whose MEM has advanced since generation is also approved as-is;
+     * staleness no longer blocks the final signature.
      */
     public function markApproved(User $approver, ?string $remarks = null): void
     {
@@ -418,10 +421,8 @@ class WfpPlan extends Model
                 throw new RuntimeException('Add at least one line before approving the WFP.');
             }
 
-            if ($plan->isOutOfDate()) {
-                throw new RuntimeException('This WFP is out of date and cannot be approved. Return it for revision instead.');
-            }
-
+            // A stale plan (its MEM advanced after generation) is still
+            // approvable: the Superintendent signs the plan as it stands.
             if (! $plan->hasBudgetReview()) {
                 throw new RuntimeException('Budget review is no longer current. Return this WFP for revision instead.');
             }

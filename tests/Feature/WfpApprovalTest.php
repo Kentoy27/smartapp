@@ -784,29 +784,43 @@ class WfpApprovalTest extends TestCase
         $this->assertNull($plan->finalApproverName());
     }
 
-    public function test_a_decision_is_refused_when_the_plan_is_no_longer_current(): void
+    public function test_a_stale_plan_can_still_be_approved(): void
     {
         $sh = $this->schoolHead();
-        $plan = $this->pendingPlan($sh);
+        $plan = $this->generatedPlan($sh);
+        $this->budgetReview($plan);
         $superadmin = $this->superadmin();
 
-        // The MEM moves on after the plan was submitted: the reviewed numbers
-        // are stale, so the Superadmin may only return it.
-        $matrix = MonthlyExpenditureMatrix::query()->firstOrFail();
+        // The MEM moves on after Budget reviewed the plan: the reviewed
+        // numbers are stale, but the Superintendent may still sign them.
+        $matrix = MonthlyExpenditureMatrix::query()
+            ->where('school_id', $plan->school_id)
+            ->firstOrFail();
         $matrix->items()->firstOrFail()->update(['quantity' => 20]);
         $matrix->bumpVersion();
 
+        $this->assertTrue($plan->fresh()->isOutOfDate());
+
         $component = Livewire::actingAs($superadmin)->test(WfpApprovals::class)
-            ->call('openReview', $plan->id);
+            ->call('openReview', $plan->id)
+            ->assertDontSee('cannot be approved until the School Head regenerates');
 
-        $this->assertFalse($component->instance()->canApproveReview);
-        $this->assertTrue($component->instance()->canDecideReview);
+        $this->assertTrue($component->instance()->canApproveReview);
 
-        $component->set('remarks', 'Stale numbers.')->call('approve')
-            ->assertSet('errorMessage', fn($value) => $value !== null);
+        $component->call('closeReview')
+            ->call('approveFromQueue', $plan->id)
+            ->assertSet('successMessage', 'WFP approved and signed off.');
 
-        $this->assertSame(0, WfpApproval::count());
-        $this->assertSame(WfpPlan::STATUS_PENDING_APPROVAL, $plan->fresh()->status);
+        $plan->refresh();
+
+        $this->assertSame(WfpPlan::STATUS_FINALIZED, $plan->status);
+        $this->assertSame($superadmin->id, $plan->approved_by);
+        $this->assertNotNull($plan->approved_at);
+        $this->assertDatabaseHas('wfp_approvals', [
+            'wfp_plan_id' => $plan->id,
+            'decision' => WfpApproval::DECISION_APPROVED,
+            'decided_by' => $superadmin->id,
+        ]);
     }
 
     /* ------------------------------------------------- returning for revision */

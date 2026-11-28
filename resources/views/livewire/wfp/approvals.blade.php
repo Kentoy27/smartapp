@@ -246,13 +246,7 @@
                         'division' => $reviewPlan->schoolDivision(),
                     ], key('wfp-approval-signoffs-'.$reviewPlan->id))
 
-                    @if ($this->reviewOutOfDate)
-                        <div class="mem-banner mem-banner--warn" role="status">
-                            <strong>Out of date.</strong>
-                            A Monthly Expenditure Matrix has changed since this plan was generated.
-                            It cannot be approved until the School Head regenerates it and Budget reviews it again.
-                        </div>
-                    @elseif (! $this->reviewHasBudgetReview)
+                    @if (! $this->reviewHasBudgetReview)
                         <div class="mem-banner mem-banner--warn" role="status">
                             <strong>Budget review is not current.</strong>
                             The plan can no longer be approved; return it for revision so Budget can certify it again.

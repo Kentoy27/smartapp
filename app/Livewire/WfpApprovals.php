@@ -196,26 +196,20 @@ class WfpApprovals extends Component
     }
 
     #[Computed]
-    public function reviewOutOfDate(): bool
-    {
-        return $this->reviewPlan?->isOutOfDate() ?? false;
-    }
-
-    #[Computed]
     public function reviewHasBudgetReview(): bool
     {
         return $this->reviewPlan?->hasBudgetReview() ?? false;
     }
 
     /**
-     * Whether the current detail may be approved. A stale plan, or one whose
-     * Budget sign-offs were cleared after submission, can only be returned.
+     * Whether the current detail may be approved. Budget's sign-offs must be
+     * current; a plan whose MEM has moved on can still be signed.
      */
     #[Computed]
     public function canApproveReview(): bool
     {
         return $this->reviewPlan?->canBeApproved() === true
-            && ! $this->reviewOutOfDate;
+            && $this->reviewHasBudgetReview;
     }
 
     #[Computed]
@@ -261,7 +255,6 @@ class WfpApprovals extends Component
             $this->reviewGroups,
             $this->reviewBudgetCertification,
             $this->reviewBudgetChecking,
-            $this->reviewOutOfDate,
             $this->reviewHasBudgetReview,
             $this->canApproveReview,
             $this->canDecideReview,
