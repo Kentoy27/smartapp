@@ -316,6 +316,17 @@ class WfpPlan extends Model
             && $this->budgetChecking() !== null;
     }
 
+    /**
+     * Whether the Superintendent may sign this plan now: a filed plan is
+     * ready, and so is a plan Budget has fully reviewed even if the school
+     * never filed it (the sign-offs can predate the plan's generation).
+     */
+    public function canBeApproved(): bool
+    {
+        return $this->isPendingApproval()
+            || ($this->isEditable() && $this->hasBudgetReview());
+    }
+
     /* -------------------------------------------------------- transitions */
 
     /**
@@ -383,6 +394,10 @@ class WfpPlan extends Model
      * Record the Superadmin's final approval. The status check, Budget
      * re-check and history row happen under one lock so a double click or a
      * second reviewer cannot approve the same submission twice.
+     *
+     * A plan Budget has fully reviewed may be approved even when the school
+     * never filed it (for example when the sign-offs predate generation):
+     * the Superintendent's sign-off is then the final decision.
      */
     public function markApproved(User $approver, ?string $remarks = null): void
     {
@@ -395,8 +410,12 @@ class WfpPlan extends Model
         DB::transaction(function () use ($approver, $remarks): void {
             $plan = static::query()->lockForUpdate()->findOrFail($this->getKey());
 
-            if (! $plan->isPendingApproval()) {
+            if (! $plan->canBeApproved()) {
                 throw new RuntimeException('This WFP is no longer pending approval.');
+            }
+
+            if (! $plan->items()->exists()) {
+                throw new RuntimeException('Add at least one line before approving the WFP.');
             }
 
             if ($plan->isOutOfDate()) {

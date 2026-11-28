@@ -1323,6 +1323,35 @@ class WfpApprovalTest extends TestCase
             ->assertSee('Approve: Pending');
     }
 
+    public function test_a_checked_and_certified_plan_can_be_approved_without_a_separate_submission(): void
+    {
+        $sh = $this->schoolHead();
+        $plan = $this->generatedPlan($sh);
+        $this->budgetReview($plan); // both sign-offs, but the school never filed the plan
+        $superadmin = $this->superadmin();
+
+        Livewire::actingAs($superadmin)
+            ->test(WfpApprovals::class)
+            ->assertSee('Sign &amp; approve', false)
+            ->call('openReview', $plan->id)
+            ->assertSee('Sign &amp; approve WFP', false)
+            ->call('closeReview')
+            ->call('approveFromQueue', $plan->id)
+            ->assertSet('successMessage', 'WFP approved and signed off.');
+
+        $plan->refresh();
+
+        $this->assertSame(WfpPlan::STATUS_FINALIZED, $plan->status);
+        $this->assertSame($superadmin->id, $plan->approved_by);
+        $this->assertNotNull($plan->approved_at);
+        $this->assertNull($plan->submitted_at);
+        $this->assertDatabaseHas('wfp_approvals', [
+            'wfp_plan_id' => $plan->id,
+            'decision' => WfpApproval::DECISION_APPROVED,
+            'decided_by' => $superadmin->id,
+        ]);
+    }
+
     public function test_the_queue_filters_by_school_level_year_status_and_search(): void
     {
         $alpha = $this->schoolHead('Alpha Elementary School');

@@ -214,9 +214,8 @@ class WfpApprovals extends Component
     #[Computed]
     public function canApproveReview(): bool
     {
-        return $this->reviewPlan?->isPendingApproval() === true
-            && ! $this->reviewOutOfDate
-            && $this->reviewHasBudgetReview;
+        return $this->reviewPlan?->canBeApproved() === true
+            && ! $this->reviewOutOfDate;
     }
 
     #[Computed]
@@ -293,8 +292,8 @@ class WfpApprovals extends Component
     public function approveFromQueue(int $planId): void
     {
         $user = $this->reviewer();
-        $plan = WfpPlan::query()->inApprovalQueue()->findOrFail($planId);
-        abort_unless($plan->isPendingApproval(), 404);
+        $plan = WfpPlan::query()->findOrFail($planId);
+        abort_unless($plan->canBeApproved(), 404);
 
         try {
             $plan->markApproved($user);
