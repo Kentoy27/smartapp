@@ -121,14 +121,7 @@
                                 </div>
                             </td>
                             <td class="users-actions-col">
-                                @if (! $plan->isPendingApproval() && $plan->isEditable() && $plan->hasBudgetReview())
-                                    {{-- Budget has signed, but the school has not filed the plan:
-                                         the Superintendent cannot approve an unsubmitted plan. --}}
-                                    <span class="cell-sub" title="The School Head must submit this plan for final approval before the Superintendent can sign it.">
-                                        Awaiting school submission
-                                    </span>
-                                @endif
-                                @if ($plan->isPendingApproval())
+                                @if ($plan->canBeApproved())
                                     <button
                                         type="button"
                                         class="users-action"
@@ -146,7 +139,7 @@
                                 <button type="button" class="users-action" wire:click="openReview({{ $plan->id }})">
                                     <span class="users-action-inner">
                                         <x-icon name="eye" :size="14" />
-                                        <span>{{ $plan->isPendingApproval() ? 'Review & Sign' : 'Review' }}</span>
+                                        <span>{{ $plan->canBeApproved() ? 'Review & Sign' : 'Review' }}</span>
                                     </span>
                                 </button>
                                 @if (auth()->user()?->canCheckLineItems() || auth()->user()?->canApproveWfp())
@@ -239,6 +232,8 @@
                             @if ($reviewPlan->submitted_at)
                                 <strong>{{ $reviewPlan->submittedBy?->name ?? 'School Head' }}</strong>
                                 on {{ $reviewPlan->submitted_at->format('M j, Y g:i A') }}
+                            @elseif ($reviewPlan->isApproved())
+                                <strong>Approved directly</strong> — no separate school filing
                             @else
                                 <strong>Not submitted</strong>
                             @endif
@@ -391,7 +386,7 @@
                         </a>
                     </div>
 
-                    @if ($this->canDecideReview)
+                    @if ($this->canDecideReview || $this->canApproveReview)
                         <div class="field aip-remarks-field">
                             <label for="wfp-approval-remarks">Remarks</label>
                             <textarea
@@ -405,16 +400,18 @@
                         </div>
 
                         <div class="modal-actions">
-                            <button
-                                type="button"
-                                class="btn-ghost"
-                                wire:click="returnForRevision"
-                                wire:loading.attr="disabled"
-                                wire:target="returnForRevision"
-                            >
-                                <span wire:loading.remove wire:target="returnForRevision">Return for revision</span>
-                                <span wire:loading wire:target="returnForRevision">Returning…</span>
-                            </button>
+                            @if ($this->canDecideReview)
+                                <button
+                                    type="button"
+                                    class="btn-ghost"
+                                    wire:click="returnForRevision"
+                                    wire:loading.attr="disabled"
+                                    wire:target="returnForRevision"
+                                >
+                                    <span wire:loading.remove wire:target="returnForRevision">Return for revision</span>
+                                    <span wire:loading wire:target="returnForRevision">Returning…</span>
+                                </button>
+                            @endif
 
                             @if ($this->canApproveReview)
                                 <button

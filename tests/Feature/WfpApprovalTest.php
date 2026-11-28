@@ -42,7 +42,7 @@ class WfpApprovalTest extends TestCase
 
     private function schoolHead(string $name = 'Test School'): User
     {
-        $district = District::create(['name' => 'District '.$name]);
+        $district = District::create(['name' => 'District ' . $name]);
         $school = School::create(['district_id' => $district->id, 'name' => $name]);
 
         return User::factory()->create(['role' => 'user', 'is_superadmin' => false, 'school_id' => $school->id]);
@@ -136,8 +136,8 @@ class WfpApprovalTest extends TestCase
     /** Point the export at a synthetic template; returns the temp file name. */
     private function useSyntheticTemplate(bool $withApprovalBlock = false): string
     {
-        $name = 'test-wfp-'.uniqid().'.xlsx';
-        file_put_contents(storage_path('forms/'.$name), $this->wfpTemplateBytes(3, null, $withApprovalBlock));
+        $name = 'test-wfp-' . uniqid() . '.xlsx';
+        file_put_contents(storage_path('forms/' . $name), $this->wfpTemplateBytes(3, null, $withApprovalBlock));
         config(['wfp.template_file' => $name, 'wfp.template.school_name_cell' => 'B5']);
 
         return $name;
@@ -192,7 +192,7 @@ class WfpApprovalTest extends TestCase
         $admin = User::factory()->create(['role' => 'administrator', 'is_superadmin' => false]);
         $superadmin = $this->superadmin();
 
-        $labels = fn (User $user): array => collect(Livewire::actingAs($user)->test(Sidebar::class)->instance()->items())
+        $labels = fn(User $user): array => collect(Livewire::actingAs($user)->test(Sidebar::class)->instance()->items())
             ->pluck('label')
             ->all();
 
@@ -211,7 +211,7 @@ class WfpApprovalTest extends TestCase
         $component = Livewire::actingAs($sh)->test(WfpPlanEditor::class, ['plan' => $plan]);
         $this->assertFalse($component->instance()->canSubmitForApproval);
 
-        $component->call('submitForApproval')->assertSet('errorMessage', fn ($value) => $value !== null);
+        $component->call('submitForApproval')->assertSet('errorMessage', fn($value) => $value !== null);
         $this->assertSame(WfpPlan::STATUS_GENERATED, $plan->fresh()->status);
 
         // The Bookkeeper's check alone is not enough.
@@ -225,7 +225,7 @@ class WfpApprovalTest extends TestCase
 
         Livewire::actingAs($sh)->test(WfpPlanEditor::class, ['plan' => $plan->fresh()])
             ->call('submitForApproval')
-            ->assertSet('errorMessage', fn ($value) => $value !== null);
+            ->assertSet('errorMessage', fn($value) => $value !== null);
         $this->assertSame(WfpPlan::STATUS_GENERATED, $plan->fresh()->status);
 
         // With both sign-offs the same action goes through.
@@ -241,7 +241,7 @@ class WfpApprovalTest extends TestCase
         Livewire::actingAs($sh)->test(WfpPlanEditor::class, ['plan' => $plan->fresh()])
             ->call('submitForApproval')
             ->assertSet('errorMessage', null)
-            ->assertSet('successMessage', fn ($value) => $value !== null);
+            ->assertSet('successMessage', fn($value) => $value !== null);
 
         $this->assertSame(WfpPlan::STATUS_PENDING_APPROVAL, $plan->fresh()->status);
         $this->assertSame($sh->id, $plan->fresh()->submitted_by);
@@ -319,7 +319,7 @@ class WfpApprovalTest extends TestCase
             ->call('submitForApproval')
             ->assertSet(
                 'successMessage',
-                'Submitted '.$plan->fiscalYearLabel().' for the Schools Division Superintendent’s final approval.',
+                'Submitted ' . $plan->fiscalYearLabel() . ' for the Schools Division Superintendent’s final approval.',
             );
 
         $submitted = $plan->fresh();
@@ -355,7 +355,7 @@ class WfpApprovalTest extends TestCase
             ->call('submitForApproval')
             ->assertSet(
                 'successMessage',
-                'Submitted '.$plan->fiscalYearLabel().' for the Schools Division Superintendent’s final approval.',
+                'Submitted ' . $plan->fiscalYearLabel() . ' for the Schools Division Superintendent’s final approval.',
             );
 
         $submitted = $plan->fresh();
@@ -578,7 +578,7 @@ class WfpApprovalTest extends TestCase
                 'year' => (string) $plan->year,
             ])
             ->call('certify')
-            ->assertSet('successMessage', fn ($value) => str_contains((string) $value, 'WFP submitted'));
+            ->assertSet('successMessage', fn($value) => str_contains((string) $value, 'WFP submitted'));
 
         $this->assertSame(WfpPlan::STATUS_PENDING_APPROVAL, $plan->fresh()->status);
         $this->assertSame($budget->id, $plan->fresh()->submitted_by);
@@ -610,7 +610,7 @@ class WfpApprovalTest extends TestCase
                 'year' => (string) $plan->year,
             ])
             ->call('check')
-            ->assertSet('successMessage', fn ($value) => str_contains((string) $value, 'WFP submitted'));
+            ->assertSet('successMessage', fn($value) => str_contains((string) $value, 'WFP submitted'));
 
         $this->assertSame(WfpPlan::STATUS_PENDING_APPROVAL, $plan->fresh()->status);
         $this->assertSame($budget->id, $plan->fresh()->submitted_by);
@@ -646,7 +646,7 @@ class WfpApprovalTest extends TestCase
             ->test(SchoolAllotmentManager::class)
             ->set('year', (string) $plan->year)
             ->call('certify', $plan->school_id)
-            ->assertSet('successMessage', fn ($value) => str_contains((string) $value, 'WFP submitted'));
+            ->assertSet('successMessage', fn($value) => str_contains((string) $value, 'WFP submitted'));
 
         $this->assertSame(WfpPlan::STATUS_PENDING_APPROVAL, $plan->fresh()->status);
         $this->assertSame($budget->id, $plan->fresh()->submitted_by);
@@ -679,7 +679,7 @@ class WfpApprovalTest extends TestCase
         Livewire::actingAs($this->superadmin())
             ->test(WfpApprovals::class)
             ->call('approveFromQueue', $plan->id)
-            ->assertSet('errorMessage', fn ($message) => $message !== null);
+            ->assertSet('errorMessage', fn($message) => $message !== null);
 
         $this->assertSame(WfpPlan::STATUS_PENDING_APPROVAL, $plan->fresh()->status);
         $this->assertDatabaseCount('wfp_approvals', 0);
@@ -706,7 +706,7 @@ class WfpApprovalTest extends TestCase
         Livewire::actingAs($superadmin)->test(WfpApprovals::class)
             ->call('openReview', $plan->id)
             ->call('approve')
-            ->assertSet('errorMessage', fn ($value) => $value !== null);
+            ->assertSet('errorMessage', fn($value) => $value !== null);
 
         $this->assertSame(1, WfpApproval::count());
         $this->assertSame(WfpPlan::STATUS_FINALIZED, $plan->fresh()->status);
@@ -803,7 +803,7 @@ class WfpApprovalTest extends TestCase
         $this->assertTrue($component->instance()->canDecideReview);
 
         $component->set('remarks', 'Stale numbers.')->call('approve')
-            ->assertSet('errorMessage', fn ($value) => $value !== null);
+            ->assertSet('errorMessage', fn($value) => $value !== null);
 
         $this->assertSame(0, WfpApproval::count());
         $this->assertSame(WfpPlan::STATUS_PENDING_APPROVAL, $plan->fresh()->status);
@@ -954,7 +954,7 @@ class WfpApprovalTest extends TestCase
             $pendingSheet = $this->wfpSheetXml((string) $pending->getContent());
             $labelRow = $this->approvalLabelRow($pendingSheet);
 
-            $this->assertSame('', $this->wfpCellText($pendingSheet, 'A'.($labelRow + 4)));
+            $this->assertSame('', $this->wfpCellText($pendingSheet, 'A' . ($labelRow + 4)));
             $this->assertStringNotContainsString($superadmin->name, $pendingSheet);
 
             $plan->fresh()->markApproved($superadmin);
@@ -967,9 +967,9 @@ class WfpApprovalTest extends TestCase
 
             // The filler trimmed two blank data rows, so the block moved up.
             // The stamp must follow it, not the template's original row.
-            $this->assertSame($superadmin->name, $this->wfpCellText($sheet, 'A'.($labelRow + 4)));
+            $this->assertSame($superadmin->name, $this->wfpCellText($sheet, 'A' . ($labelRow + 4)));
         } finally {
-            @unlink(storage_path('forms/'.$name));
+            @unlink(storage_path('forms/' . $name));
         }
     }
 
@@ -997,10 +997,10 @@ class WfpApprovalTest extends TestCase
             $sheet = $this->wfpSheetXml((string) $response->getContent());
             $labelRow = $this->approvalLabelRow($sheet);
 
-            $this->assertSame('', $this->wfpCellText($sheet, 'A'.($labelRow + 4)));
+            $this->assertSame('', $this->wfpCellText($sheet, 'A' . ($labelRow + 4)));
             $this->assertStringNotContainsString($sh->name, $sheet);
         } finally {
-            @unlink(storage_path('forms/'.$name));
+            @unlink(storage_path('forms/' . $name));
         }
     }
 
@@ -1054,7 +1054,7 @@ class WfpApprovalTest extends TestCase
                 ->get(route('wfp.plans.export', ['plan' => $plan->id]))
                 ->assertOk();
         } finally {
-            @unlink(storage_path('forms/'.$name));
+            @unlink(storage_path('forms/' . $name));
         }
     }
 
@@ -1088,7 +1088,7 @@ class WfpApprovalTest extends TestCase
         Livewire::actingAs($bookkeeper)
             ->test(WfpSignatoryActions::class, ['schoolId' => $plan->school_id, 'year' => $plan->year])
             ->call('signCheck')
-            ->assertSet('successMessage', fn ($value) => str_contains((string) $value, 'Signed the account-title'));
+            ->assertSet('successMessage', fn($value) => str_contains((string) $value, 'Signed the account-title'));
 
         $this->assertDatabaseHas('wfp_report_checks', [
             'school_id' => $plan->school_id,
@@ -1101,7 +1101,7 @@ class WfpApprovalTest extends TestCase
         Livewire::actingAs($budget)
             ->test(WfpSignatoryActions::class, ['schoolId' => $plan->school_id, 'year' => $plan->year])
             ->call('signCertification')
-            ->assertSet('successMessage', fn ($value) => str_contains((string) $value, 'submitted'));
+            ->assertSet('successMessage', fn($value) => str_contains((string) $value, 'submitted'));
 
         // The check was NOT cleared by certification.
         $this->assertDatabaseHas('wfp_report_checks', [
@@ -1323,18 +1323,33 @@ class WfpApprovalTest extends TestCase
             ->assertSee('Approve: Pending');
     }
 
-    public function test_a_checked_and_certified_plan_waits_for_the_school_to_submit_before_approval(): void
+    public function test_a_checked_and_certified_plan_can_be_approved_without_a_separate_submission(): void
     {
         $sh = $this->schoolHead();
         $plan = $this->generatedPlan($sh);
-        $this->budgetReview($plan); // both sign-offs recorded, never submitted
+        $this->budgetReview($plan); // both sign-offs, but the school never filed the plan
+        $superadmin = $this->superadmin();
 
-        Livewire::actingAs($this->superadmin())
+        Livewire::actingAs($superadmin)
             ->test(WfpApprovals::class)
-            ->assertSee('Awaiting school submission')
-            ->assertDontSee('Sign & approve');
+            ->assertSee('Sign &amp; approve', false)
+            ->call('openReview', $plan->id)
+            ->assertSee('Sign &amp; approve WFP', false)
+            ->call('closeReview')
+            ->call('approveFromQueue', $plan->id)
+            ->assertSet('successMessage', 'WFP approved and signed off.');
 
-        $this->assertSame(WfpPlan::STATUS_GENERATED, $plan->fresh()->status);
+        $plan->refresh();
+
+        $this->assertSame(WfpPlan::STATUS_FINALIZED, $plan->status);
+        $this->assertSame($superadmin->id, $plan->approved_by);
+        $this->assertNotNull($plan->approved_at);
+        $this->assertNull($plan->submitted_at);
+        $this->assertDatabaseHas('wfp_approvals', [
+            'wfp_plan_id' => $plan->id,
+            'decision' => WfpApproval::DECISION_APPROVED,
+            'decided_by' => $superadmin->id,
+        ]);
     }
 
     public function test_the_queue_filters_by_school_level_year_status_and_search(): void
