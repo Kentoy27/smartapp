@@ -1323,6 +1323,20 @@ class WfpApprovalTest extends TestCase
             ->assertSee('Approve: Pending');
     }
 
+    public function test_a_checked_and_certified_plan_waits_for_the_school_to_submit_before_approval(): void
+    {
+        $sh = $this->schoolHead();
+        $plan = $this->generatedPlan($sh);
+        $this->budgetReview($plan); // both sign-offs recorded, never submitted
+
+        Livewire::actingAs($this->superadmin())
+            ->test(WfpApprovals::class)
+            ->assertSee('Awaiting school submission')
+            ->assertDontSee('Sign & approve');
+
+        $this->assertSame(WfpPlan::STATUS_GENERATED, $plan->fresh()->status);
+    }
+
     public function test_the_queue_filters_by_school_level_year_status_and_search(): void
     {
         $alpha = $this->schoolHead('Alpha Elementary School');

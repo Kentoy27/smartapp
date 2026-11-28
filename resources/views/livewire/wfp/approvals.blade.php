@@ -121,6 +121,13 @@
                                 </div>
                             </td>
                             <td class="users-actions-col">
+                                @if (! $plan->isPendingApproval() && $plan->isEditable() && $plan->hasBudgetReview())
+                                    {{-- Budget has signed, but the school has not filed the plan:
+                                         the Superintendent cannot approve an unsubmitted plan. --}}
+                                    <span class="cell-sub" title="The School Head must submit this plan for final approval before the Superintendent can sign it.">
+                                        Awaiting school submission
+                                    </span>
+                                @endif
                                 @if ($plan->isPendingApproval())
                                     <button
                                         type="button"
