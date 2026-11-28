@@ -19,10 +19,11 @@ use RuntimeException;
 /**
  * The Superadmin's WFP final-approval queue.
  *
- * Only plans that have left the School Head's desk appear here: pending
- * submissions, approved plans, and returned ones. Each row opens the same
- * read-only detail the School Head sees, plus Budget's two sign-offs and the
- * full approval history. Approving is final and read-only; returning requires
+ * Every school's plan is listed — draft, generated, pending, returned, and
+ * approved — so the approving official can see where each school stands
+ * before the plan reaches their desk. Each row opens the same read-only
+ * detail the School Head sees, plus Budget's two sign-offs and the full
+ * approval history. Approving is final and read-only; returning requires
  * remarks and sends the plan back through Budget re-certification.
  */
 #[Title('WFP Final Approvals — SmartApp')]
@@ -38,7 +39,7 @@ class WfpApprovals extends Component
 
     public string $yearFilter = '';
 
-    public string $statusFilter = WfpPlan::STATUS_PENDING_APPROVAL;
+    public string $statusFilter = 'all';
 
     public ?int $reviewId = null;
 
@@ -75,10 +76,11 @@ class WfpApprovals extends Component
     public function plans(): LengthAwarePaginator
     {
         $query = WfpPlan::query()
-            ->with(['school', 'submittedBy', 'finalApproval.decidedBy', 'latestReturn.decidedBy'])
-            ->inApprovalQueue();
+            ->with(['school', 'finalApproval.decidedBy', 'latestReturn.decidedBy']);
 
         if (in_array($this->statusFilter, [
+            WfpPlan::STATUS_DRAFT,
+            WfpPlan::STATUS_GENERATED,
             WfpPlan::STATUS_PENDING_APPROVAL,
             WfpPlan::STATUS_FINALIZED,
             WfpPlan::STATUS_RETURNED,
@@ -113,7 +115,8 @@ class WfpApprovals extends Component
                 'CASE WHEN wfp_plans.status = ? THEN 0 ELSE 1 END',
                 [WfpPlan::STATUS_PENDING_APPROVAL],
             )
-            ->orderByDesc('submitted_at')
+            ->orderByDesc('year')
+            ->orderBy('school_id')
             ->orderByDesc('id')
             ->paginate(10);
     }
@@ -123,7 +126,6 @@ class WfpApprovals extends Component
     public function years(): array
     {
         return WfpPlan::query()
-            ->inApprovalQueue()
             ->distinct()
             ->orderByDesc('year')
             ->pluck('year')
@@ -136,7 +138,7 @@ class WfpApprovals extends Component
     public function schools(): Collection
     {
         return School::query()
-            ->whereIn('id', WfpPlan::query()->inApprovalQueue()->select('school_id')->distinct())
+            ->whereIn('id', WfpPlan::query()->select('school_id')->distinct())
             ->orderBy('name')
             ->get(['id', 'name']);
     }
@@ -149,7 +151,9 @@ class WfpApprovals extends Component
             WfpPlan::STATUS_PENDING_APPROVAL => 'Pending Approval',
             WfpPlan::STATUS_FINALIZED => 'Approved',
             WfpPlan::STATUS_RETURNED => 'Returned for Revision',
-            'all' => 'All decisions',
+            WfpPlan::STATUS_DRAFT => 'Draft',
+            WfpPlan::STATUS_GENERATED => 'Generated',
+            'all' => 'All statuses',
         ];
     }
 
@@ -227,7 +231,7 @@ class WfpApprovals extends Component
     {
         abort_unless(Auth::user()?->canApproveWfp(), 404);
 
-        $plan = WfpPlan::query()->inApprovalQueue()->find($planId);
+        $plan = WfpPlan::query()->find($planId);
         abort_unless($plan !== null, 404);
 
         $this->reviewId = (int) $plan->id;

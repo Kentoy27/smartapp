@@ -17,8 +17,8 @@
     <div class="page-header">
         <h1>WFP Final Approvals</h1>
         <p>
-            Budget-certified Work and Financial Plans submitted by the schools.
-            Approving one gives it the Schools Division Superintendent's final sign-off;
+            Every school's Work and Financial Plan, from draft to final sign-off.
+            Approving a submitted plan gives it the Schools Division Superintendent's final sign-off;
             returning one sends it back for revision and Budget re-certification.
         </p>
     </div>
@@ -85,21 +85,19 @@
 
     <section class="card" aria-labelledby="wfp-approvals-list-title">
         <div class="card-head">
-            <h2 class="card-title" id="wfp-approvals-list-title">Submitted WFPs</h2>
+            <h2 class="card-title" id="wfp-approvals-list-title">All WFPs</h2>
             <p class="mem-toolbar-copy">{{ $this->plans->total() }} plan(s).</p>
         </div>
 
         <div class="table-wrap">
             <table class="data-table">
-                <caption>WFP final-approval queue</caption>
+                <caption>All WFP plans</caption>
                 <thead>
                     <tr>
                         <th scope="col">School</th>
-                        <th scope="col">Level</th>
                         <th scope="col">Year</th>
-                        <th scope="col">Submitted</th>
                         <th scope="col">Status</th>
-                        <th scope="col">Final decision</th>
+                        <th scope="col">Sign-offs</th>
                         <th scope="col" class="users-actions-col">Actions</th>
                     </tr>
                 </thead>
@@ -107,55 +105,20 @@
                     @forelse ($this->plans as $plan)
                         <tr wire:key="wfp-approval-{{ $plan->id }}">
                             <td><span class="cell-strong">{{ $plan->school?->name ?? '—' }}</span></td>
-                            <td>{{ \App\Support\SchoolDivision::label($plan->schoolDivision()) }}</td>
                             <td>{{ $plan->fiscalYearLabel() }}</td>
                             <td>
-                                @if ($plan->submitted_at)
-                                    {{ $plan->submitted_at->format('M j, Y g:i A') }}
-                                    <div class="aip-sub">by {{ $plan->submittedBy?->name ?? '—' }}</div>
-                                @else
-                                    —
-                                @endif
+                                <span class="mem-status mem-status--{{ $plan->status }}">{{ $plan->statusLabel() }}</span>
                             </td>
                             <td>
-                                <span class="mem-status mem-status--{{ $plan->status }}">{{ $plan->statusLabel() }}</span>
                                 @php($planSignatories = \App\Support\WfpAllotment::signatoryStatuses(
                                     $plan->school_id !== null ? (int) $plan->school_id : null,
                                     (int) $plan->year,
                                     $plan->schoolDivision(),
                                     $plan,
                                 ))
-                                <div class="wfp-approval-signoff-list">
-                                    @foreach ($planSignatories as $signatory)
-                                        <span @class([
-                                            'wfp-signatory-status__badge',
-                                            'wfp-signatory-status__badge--pending' => $signatory['state'] === 'pending',
-                                            'wfp-signatory-status__badge--checked' => $signatory['state'] === 'checked',
-                                            'wfp-signatory-status__badge--certified' => $signatory['state'] === 'certified',
-                                            'wfp-signatory-status__badge--approved' => $signatory['state'] === 'approved',
-                                            'wfp-signatory-status__badge--returned' => $signatory['state'] === 'returned',
-                                        ])>{{ $signatory['label'] }}: {{ $signatory['badge'] }}</span>
-                                    @endforeach
+                                <div class="wfp-signatory-inline">
+                                    <x-wfp-signoff-pills :statuses="$planSignatories" />
                                 </div>
-                            </td>
-                            <td>
-                                @if ($plan->isApproved())
-                                    @if ($plan->finalApproval?->decidedBy)
-                                        <span class="cell-strong">{{ $plan->finalApproval->decidedBy->name }}</span>
-                                        <div class="aip-sub">{{ $plan->finalApproval->decided_at?->format('M j, Y g:i A') }}</div>
-                                    @else
-                                        <span class="field-hint">Legacy finalization — no approval record</span>
-                                    @endif
-                                @elseif ($plan->isReturned())
-                                    @if ($plan->latestReturn?->decidedBy)
-                                        <span class="cell-strong">{{ $plan->latestReturn->decidedBy->name }}</span>
-                                        <div class="aip-sub">{{ $plan->latestReturn->decided_at?->format('M j, Y g:i A') }}</div>
-                                    @else
-                                        <span class="field-hint">Returned for revision</span>
-                                    @endif
-                                @else
-                                    <span class="field-hint">Awaiting decision</span>
-                                @endif
                             </td>
                             <td class="users-actions-col">
                                 @if ($plan->isPendingApproval())
@@ -202,8 +165,8 @@
                         </tr>
                     @empty
                         <tr>
-                            <td class="table-empty" colspan="7">
-                                No submitted WFPs match these filters. Schools appear here after a School Head submits a plan for final approval; this queue is not a school directory, and Superadmin accounts are not assigned to a single school.
+                            <td class="table-empty" colspan="5">
+                                No WFPs match these filters.
                             </td>
                         </tr>
                     @endforelse
@@ -278,6 +241,7 @@
                     @livewire('wfp-signatory-actions', [
                         'schoolId' => $reviewPlan->school_id,
                         'year' => (int) $reviewPlan->year,
+                        'division' => $reviewPlan->schoolDivision(),
                     ], key('wfp-approval-signoffs-'.$reviewPlan->id))
 
                     @if ($this->reviewOutOfDate)

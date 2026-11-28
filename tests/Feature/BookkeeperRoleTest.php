@@ -585,7 +585,7 @@ class BookkeeperRoleTest extends TestCase
         Livewire::actingAs($budget)
             ->test(BudgetLineItemChecker::class)
             ->assertSee('Sign certification')
-            ->assertSee('Submit to Superadmin')
+            ->assertDontSee('Submit to Superadmin')
             ->assertDontSee('Sign check');
 
         Livewire::actingAs($bookkeeper)
@@ -596,7 +596,7 @@ class BookkeeperRoleTest extends TestCase
         Livewire::actingAs($budget)
             ->test(WfpManager::class)
             ->assertSee('Sign certification')
-            ->assertSee('Submit to Superadmin')
+            ->assertDontSee('Submit to Superadmin')
             ->assertDontSee('Sign check');
 
         Livewire::actingAs($bookkeeper)

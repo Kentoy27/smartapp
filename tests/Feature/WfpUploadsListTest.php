@@ -221,19 +221,22 @@ class WfpUploadsListTest extends TestCase
             ->assertDownload('own-plan - Work and Financial Plan.xlsx');
     }
 
-    public function test_the_admin_sidebar_links_the_wfp_uploads_page(): void
+    public function test_the_admin_sidebar_no_longer_offers_wfp_uploads(): void
     {
         Storage::fake('local');
         $head = $this->schoolHead('schoolhead', 'Smoke School');
         $this->storedSubmission($head, 'listed-wfp.xlsx');
 
-        $this->actingAs($this->superadmin());
+        $this->actingAs($admin = $this->superadmin());
 
-        // The sidebar offers WFP under Files, pointing at the uploads page.
-        $html = Livewire::test(Sidebar::class)->html();
-        $this->assertStringContainsString(route('wfp.submissions.index'), $html);
+        // WFP Uploads is no longer a top-level admin sidebar destination;
+        // admins reach the uploads page by URL instead.
+        $items = collect(
+            Livewire::actingAs($admin)->test(Sidebar::class)->instance()->items(),
+        );
+        $this->assertNull($items->firstWhere('label', 'WFP Uploads'));
 
-        // The page it points at is the per-school list.
+        // The page itself is still the per-school uploads list.
         $this->get(route('wfp.submissions.index'))
             ->assertOk()
             ->assertSee('WFP Uploads')

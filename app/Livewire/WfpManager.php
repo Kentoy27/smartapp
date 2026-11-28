@@ -11,6 +11,7 @@ use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Title;
 use Livewire\Component;
+use Livewire\WithPagination;
 
 /**
  * The /wfp page: the school's Work and Financial Plan, generated on demand.
@@ -27,6 +28,8 @@ use Livewire\Component;
 #[Title('Work and Financial Plan — SmartApp')]
 class WfpManager extends Component
 {
+    use WithPagination;
+
     /**
      * The year the generate select picked for the sign-off card. Null until
      * the select has said otherwise.
@@ -34,9 +37,24 @@ class WfpManager extends Component
     #[Locked]
     public ?int $signatoryYear = null;
 
+    /** The school-name filter typed into the sign-off list's search bar. */
+    public string $search = '';
+
     public function mount(): void
     {
         abort_unless(Auth::user()?->canViewWfpSignoffs(), 404);
+    }
+
+    public function updated(string $property): void
+    {
+        if ($property === 'search') {
+            $this->resetPage();
+        }
+    }
+
+    public function clearSearch(): void
+    {
+        $this->search = '';
     }
 
     /**
@@ -88,12 +106,19 @@ class WfpManager extends Component
     {
         $user = Auth::user();
 
-        return WfpPlan::query()
+        $query = WfpPlan::query()
             ->with('school')
             ->visibleTo($user)
             ->orderByDesc('year')
-            ->orderBy('school_id')
-            ->paginate(15);
+            ->orderBy('school_id');
+
+        $search = trim($this->search);
+
+        if ($search !== '') {
+            $query->whereHas('school', fn ($school) => $school->where('name', 'like', '%'.$search.'%'));
+        }
+
+        return $query->paginate(15);
     }
 
     public function render()

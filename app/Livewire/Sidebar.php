@@ -251,18 +251,6 @@ class Sidebar extends Component
                 'order' => 5,
             ];
 
-            // WFP Uploads: every school's uploaded Work and Financial Plan.
-            // The School Head's own /wfp workspace is the other side of this
-            // workflow, so the admin gets that list as its own destination.
-            $items[] = [
-                'label' => 'WFP Uploads',
-                'route' => 'wfp.submissions.index',
-                'path' => 'wfp-submissions',
-                'icon' => 'chart-column',
-                'section' => 'Operations',
-                'order' => 6,
-            ];
-
             // School Allotments: the ceiling each School Head may consume
             // through their Monthly Expenditure Matrices. It belongs beside
             // the WFP review list because it is the same money read as a

@@ -300,7 +300,6 @@ class UsersTableTest extends TestCase
                 'AIP Review',
                 'OPCRF',
                 'OPCRF Schedule',
-                'WFP Uploads',
                 'School Allotments',
                 'Districts & Schools',
                 'Users',

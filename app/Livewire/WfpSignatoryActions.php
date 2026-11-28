@@ -5,6 +5,7 @@ namespace App\Livewire;
 use App\Models\School;
 use App\Models\User;
 use App\Models\WfpPlan;
+use App\Support\SchoolDivision;
 use App\Support\WfpAllotment;
 use App\Support\WfpReportSignoffs;
 use Illuminate\Support\Facades\Auth;
@@ -21,6 +22,14 @@ class WfpSignatoryActions extends Component
     public int $year = 0;
 
     /**
+     * The plan's division when the caller already knows which plan it is
+     * showing. A school may operate more than one division, so school + year
+     * alone cannot identify the plan; null falls back to the first plan row.
+     */
+    #[Locked]
+    public ?string $division = null;
+
+    /**
      * Table-cell mode: the index and plan lists render this component inside
      * a narrow column, so it shows the three checkpoints as small pills plus
      * the sign buttons instead of the full card panel.
@@ -31,11 +40,38 @@ class WfpSignatoryActions extends Component
 
     public ?string $errorMessage = null;
 
-    public function mount(int $schoolId, int $year): void
+    /** The plan this panel describes; resolved once per request. */
+    private ?WfpPlan $signoffPlan = null;
+
+    private bool $signoffPlanResolved = false;
+
+    public function mount(int $schoolId, int $year, ?string $division = null): void
     {
         $this->schoolId = $schoolId;
         $this->year = $year;
+        $this->division = $division !== null && SchoolDivision::isValidDivision($division)
+            ? $division
+            : null;
         $this->viewer();
+    }
+
+    /** The plan for this school and year, or null when none exists yet. */
+    private function plan(): ?WfpPlan
+    {
+        if (! $this->signoffPlanResolved) {
+            $query = WfpPlan::query()
+                ->where('school_id', $this->schoolId)
+                ->where('year', $this->year);
+
+            if ($this->division !== null) {
+                $query->where('school_division', $this->division);
+            }
+
+            $this->signoffPlan = $query->first();
+            $this->signoffPlanResolved = true;
+        }
+
+        return $this->signoffPlan;
     }
 
     private function viewer(): User
@@ -46,7 +82,13 @@ class WfpSignatoryActions extends Component
                 && ($user->canManageWfp() || $user->canCheckLineItems() || $user->canApproveWfp()),
             404,
         );
-        abort_unless($user->canAccessDivision($user->activeDivision()), 404);
+
+        // Read the sign-offs under the plan's own division, not the viewer's
+        // active division: the Superadmin works ELEMENTARY while a plan may
+        // belong to JUNIOR_HIGH or SENIOR_HIGH.
+        $division = $this->plan()?->schoolDivision() ?? $this->division ?? $user->activeDivision();
+
+        abort_unless($user->canAccessDivision($division), 404);
 
         if ($user->canManageWfp()) {
             abort_unless((int) $user->school_id === $this->schoolId, 404);
@@ -57,7 +99,7 @@ class WfpSignatoryActions extends Component
         $school = School::query()
             ->with('divisionSettings')
             ->findOrFail($this->schoolId);
-        abort_unless($school->offersDivision($user->activeDivision()), 404);
+        abort_unless($school->offersDivision($division), 404);
 
         return $user;
     }
@@ -70,11 +112,7 @@ class WfpSignatoryActions extends Component
         // Sign-offs are stored under the plan's own division so they are
         // visible to hasBudgetReview() regardless of which division the
         // signer happens to be working in at the moment.
-        $plan = WfpPlan::query()
-            ->where('school_id', $this->schoolId)
-            ->where('year', $this->year)
-            ->first();
-        $division = $plan?->schoolDivision() ?? $user->activeDivision();
+        $division = $this->plan()?->schoolDivision() ?? $this->division ?? $user->activeDivision();
 
         try {
             WfpReportSignoffs::check($user, $this->schoolId, $this->year, $division);
@@ -108,11 +146,7 @@ class WfpSignatoryActions extends Component
         // Sign-offs are stored under the plan's own division so they are
         // visible to hasBudgetReview() regardless of which division the
         // signer happens to be working in at the moment.
-        $plan = WfpPlan::query()
-            ->where('school_id', $this->schoolId)
-            ->where('year', $this->year)
-            ->first();
-        $division = $plan?->schoolDivision() ?? $user->activeDivision();
+        $division = $this->plan()?->schoolDivision() ?? $this->division ?? $user->activeDivision();
 
         try {
             WfpReportSignoffs::certify($user, $this->schoolId, $this->year, $division);
@@ -181,17 +215,18 @@ class WfpSignatoryActions extends Component
     public function render()
     {
         $user = $this->viewer();
-        $division = $user->activeDivision();
+
+        // The panel reads the plan's own division (see viewer()): the
+        // Superadmin's activeDivision() is always ELEMENTARY, so a plan in
+        // JUNIOR_HIGH/SENIOR_HIGH would otherwise show every sign-off Pending.
+        $plan = $this->plan();
+        $division = $plan?->schoolDivision() ?? $this->division ?? $user->activeDivision();
+
         $statuses = WfpAllotment::signatoryStatuses($this->schoolId, $this->year, $division);
         $checking = WfpAllotment::checking($this->schoolId, $this->year, $division);
         $certification = WfpAllotment::certification($this->schoolId, $this->year, $division);
         $hasLines = WfpAllotment::lineItems($this->schoolId, $this->year, $division) !== [];
         $hasAllotment = WfpAllotment::allotment($this->schoolId, $this->year, $division) !== null;
-        $plan = WfpPlan::query()
-            ->where('school_id', $this->schoolId)
-            ->where('school_division', $division)
-            ->where('year', $this->year)
-            ->first();
         $canSubmit = $user->canCertifyAllotments()
             && $plan !== null
             && $plan->isEditable()

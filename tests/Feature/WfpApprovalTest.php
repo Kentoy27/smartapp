@@ -166,10 +166,19 @@ class WfpApprovalTest extends TestCase
 
         $this->get(route('wfp.approvals.index'))->assertRedirect(route('login'));
 
+        // Each account gets its own session: the device-session middleware
+        // logs out when the stored password fingerprint belongs to another user.
         $this->actingAs($sh)->get(route('wfp.approvals.index'))->assertNotFound();
+        $this->flushSession();
+
         $this->actingAs($admin)->get(route('wfp.approvals.index'))->assertNotFound();
+        $this->flushSession();
+
         $this->actingAs($budget)->get(route('wfp.approvals.index'))->assertNotFound();
+        $this->flushSession();
+
         $this->actingAs($superadmin)->get(route('wfp.approvals.index'))->assertOk();
+        $this->flushSession();
 
         $this->assertStringContainsString('Page Not Found', Livewire::actingAs($sh)->test(WfpApprovals::class)->html());
         $this->assertStringContainsString('Page Not Found', Livewire::actingAs($admin)->test(WfpApprovals::class)->html());
@@ -1157,14 +1166,161 @@ class WfpApprovalTest extends TestCase
         // On the superadmin's review view, signatoryStatuses() reads with the
         // plan's division (ELEMENTARY), so the JUNIOR_HIGH check shows as Pending.
         $superadmin = $this->superadmin();
-        Livewire::actingAs($superadmin)
+        $component = Livewire::actingAs($superadmin)
             ->test(WfpApprovals::class)
             ->call('openReview', $plan->id);
 
-        // The plan is not in the queue because it was never submitted.
-        $this->assertNotContains($plan->school_id, Livewire::actingAs($superadmin)
+        // The plan was never submitted, but the queue lists every plan: it is
+        // visible with its check still Pending, because the JUNIOR_HIGH check
+        // is invisible under the plan's own ELEMENTARY division.
+        $this->assertContains($plan->school_id, Livewire::actingAs($superadmin)
             ->test(WfpApprovals::class)
             ->instance()->plans->pluck('school_id')->all());
+        $this->assertStringContainsString('Check: Pending', $component->html());
+    }
+
+    /** The Superadmin reads a non-ELEMENTARY plan's certification under the plan's own
+     * division, not the viewer's always-ELEMENTARY active division. */
+    public function test_superadmin_sees_budget_certification_when_plan_is_not_elementary(): void
+    {
+        $sh = $this->schoolHead();
+        $plan = $this->generatedPlan($sh); // plan's schoolDivision = ELEMENTARY
+
+        // Move the plan to SENIOR_HIGH so the plan's division differs from
+        // Superadmin's always-ELEMENTARY active division.
+        $plan->forceFill(['school_division' => SchoolDivision::SENIOR_HIGH, 'status' => WfpPlan::STATUS_PENDING_APPROVAL])->save();
+
+        $bookkeeper = User::factory()->create([
+            'role' => 'bookkeeper',
+            'is_superadmin' => false,
+            'school_id' => $plan->school_id,
+        ]);
+        $bookkeeper->syncAssignedSchools([$plan->school_id]);
+
+        WfpReportCheck::updateOrCreate(
+            [
+                'school_id' => $plan->school_id,
+                'school_division' => SchoolDivision::SENIOR_HIGH,
+                'year' => $plan->year,
+            ],
+            ['checked_by' => $bookkeeper->id, 'checked_at' => now()],
+        );
+
+        SchoolAllotment::updateOrCreate(
+            [
+                'school_id' => $plan->school_id,
+                'school_division' => SchoolDivision::SENIOR_HIGH,
+                'year' => $plan->year,
+            ],
+            ['amount' => 50000, 'certified_by' => $this->superadmin()->id, 'certified_at' => now()],
+        );
+
+        // Superadmin's activeDivision() is ELEMENTARY. The signatory-actions
+        // component must read sign-offs under the plan's division (SENIOR_HIGH),
+        // not under the viewer's active division.
+        Livewire::actingAs($this->superadmin())
+            ->test(WfpSignatoryActions::class, ['schoolId' => $plan->school_id, 'year' => $plan->year])
+            ->assertSee('Certified');
+    }
+
+    public function test_the_superadmin_can_review_a_senior_high_plan_from_the_all_plans_list(): void
+    {
+        $sh = $this->schoolHead('Senior High School');
+        $sh->school->divisionSettings()->create([
+            'division_code' => SchoolDivision::SENIOR_HIGH,
+            'is_active' => true,
+        ]);
+
+        $plan = WfpPlan::create([
+            'school_id' => $sh->school_id,
+            'school_division' => SchoolDivision::SENIOR_HIGH,
+            'year' => 2027,
+            'status' => WfpPlan::STATUS_PENDING_APPROVAL,
+            'submitted_at' => now(),
+        ]);
+
+        // The Superadmin works ELEMENTARY; the plan belongs to a school that
+        // offers only SENIOR_HIGH. The list and its review modal must still
+        // open it instead of refusing the division.
+        Livewire::actingAs($this->superadmin())
+            ->test(WfpApprovals::class)
+            ->assertSee('Senior High School')
+            ->call('openReview', $plan->id)
+            ->assertSet('showReview', true)
+            ->assertSee('Senior High School');
+    }
+
+    /** A school may hold a plan in each division; the panel must read the plan whose
+     * division the caller named, not the first plan row for that school and year. */
+    public function test_the_signatory_panel_reads_the_division_it_was_given_when_a_school_has_two_plans(): void
+    {
+        $sh = $this->schoolHead();
+        $elementary = $this->generatedPlan($sh); // created first, division ELEMENTARY
+
+        WfpPlan::create([
+            'school_id' => $sh->school_id,
+            'school_division' => SchoolDivision::SENIOR_HIGH,
+            'year' => $elementary->year,
+            'status' => WfpPlan::STATUS_PENDING_APPROVAL,
+            'submitted_at' => now(),
+        ]);
+
+        $bookkeeper = User::factory()->create([
+            'role' => 'bookkeeper',
+            'is_superadmin' => false,
+            'school_id' => $sh->school_id,
+        ]);
+        $bookkeeper->syncAssignedSchools([$sh->school_id]);
+
+        WfpReportCheck::updateOrCreate(
+            [
+                'school_id' => $sh->school_id,
+                'school_division' => SchoolDivision::SENIOR_HIGH,
+                'year' => $elementary->year,
+            ],
+            ['checked_by' => $bookkeeper->id, 'checked_at' => now()],
+        );
+
+        SchoolAllotment::updateOrCreate(
+            [
+                'school_id' => $sh->school_id,
+                'school_division' => SchoolDivision::SENIOR_HIGH,
+                'year' => $elementary->year,
+            ],
+            ['amount' => 50000, 'certified_by' => $this->superadmin()->id, 'certified_at' => now()],
+        );
+
+        // Only the Senior High plan carries Budget's sign-offs. Without the
+        // division, the panel would read the Elementary plan and show Pending.
+        Livewire::actingAs($this->superadmin())
+            ->test(WfpSignatoryActions::class, [
+                'schoolId' => $sh->school_id,
+                'year' => $elementary->year,
+                'division' => SchoolDivision::SENIOR_HIGH,
+                'compact' => true,
+            ])
+            ->assertSee('Check: Checked')
+            ->assertSee('Certify: Certified');
+    }
+
+    public function test_the_queue_lists_plans_before_budget_checks_or_certifies_them(): void
+    {
+        $sh = $this->schoolHead('Alpha Elementary School');
+        $plan = $this->generatedPlan($sh);
+        $superadmin = $this->superadmin();
+
+        $component = Livewire::actingAs($superadmin)->test(WfpApprovals::class);
+
+        // A generated plan has not been checked, certified, or submitted, yet
+        // it is listed like every other school's plan.
+        $this->assertContains($plan->school_id, $component->instance()->plans->pluck('school_id')->all());
+
+        $component
+            ->assertSee('Alpha Elementary School')
+            ->assertSee('mem-status--generated', false)
+            ->assertSee('Check: Pending')
+            ->assertSee('Certify: Pending')
+            ->assertSee('Approve: Pending');
     }
 
     public function test_the_queue_filters_by_school_level_year_status_and_search(): void
@@ -1179,8 +1335,11 @@ class WfpApprovalTest extends TestCase
 
         $component = Livewire::actingAs($superadmin)->test(WfpApprovals::class);
 
-        // By default only pending work is listed.
-        $this->assertSame([$pending->school_id], $component->instance()->plans->pluck('school_id')->all());
+        // Every plan is listed by default; pending work comes first.
+        $this->assertSame(
+            [$pending->school_id, $approved->school_id],
+            $component->instance()->plans->pluck('school_id')->all()
+        );
 
         $component->set('statusFilter', WfpPlan::STATUS_FINALIZED);
         $this->assertSame([$approved->school_id], $component->instance()->plans->pluck('school_id')->all());

@@ -717,7 +717,7 @@ class SchoolDivisionSeparationTest extends TestCase
         $this->assertSame('SENIOR_HIGH', $head->activeDivision());
     }
 
-    public function test_school_heads_use_division_specific_wfp_groups_and_managers_keep_the_switcher(): void
+    public function test_school_heads_use_division_specific_wfp_groups_and_managers_lose_the_switcher(): void
     {
         $school = $this->school();
         $head = $this->schoolHead($school, 'JUNIOR_HIGH', ['JUNIOR_HIGH', 'SENIOR_HIGH']);
@@ -738,9 +738,7 @@ class SchoolDivisionSeparationTest extends TestCase
             $this->actingAs($allotmentManager)
                 ->get(route('budget.allotments.index'))
                 ->assertOk()
-                ->assertSee('id="divisionSwitcher"', false)
-                ->assertSee('value="JUNIOR_HIGH"', false)
-                ->assertSee('value="SENIOR_HIGH"', false);
+                ->assertDontSee('id="divisionSwitcher"', false);
         }
 
         $viewer = User::factory()->create(['role' => 'viewer', 'is_superadmin' => false]);

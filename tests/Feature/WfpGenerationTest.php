@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Livewire\MemEditor;
+use App\Livewire\WfpManager;
 use App\Livewire\WfpPlanEditor;
 use App\Models\District;
 use App\Models\MonthlyExpenditureItem;
@@ -285,5 +286,33 @@ class WfpGenerationTest extends TestCase
         [, $plan] = $this->generatedPlan($owner);
 
         $this->assertStringContainsString('Page Not Found', Livewire::test(WfpPlanEditor::class)->html());
+    }
+
+    public function test_the_signoff_list_filters_by_school_name(): void
+    {
+        $superadmin = User::factory()->create(['role' => 'superadmin', 'is_superadmin' => true]);
+
+        $district = District::create(['name' => 'District One']);
+
+        $alpha = School::create(['district_id' => $district->id, 'name' => 'Alpha Elementary School']);
+        $beta = School::create(['district_id' => $district->id, 'name' => 'Beta High School']);
+        $gamma = School::create(['district_id' => District::create(['name' => 'District Two'])->id, 'name' => 'Gamma Elementary School']);
+
+        WfpPlan::create(['school_id' => $alpha->id, 'year' => 2027, 'status' => WfpPlan::STATUS_GENERATED]);
+        WfpPlan::create(['school_id' => $beta->id, 'year' => 2027, 'status' => WfpPlan::STATUS_GENERATED]);
+        WfpPlan::create(['school_id' => $gamma->id, 'school_division' => 'HIGH_SCHOOL', 'year' => 2027, 'status' => WfpPlan::STATUS_GENERATED]);
+
+        Livewire::actingAs($superadmin)
+            ->test(WfpManager::class)
+            ->assertSee('Alpha Elementary School')
+            ->assertSee('Beta High School')
+            // The superadmin works the Elementary division, so another division's
+            // plans never enter the list in the first place.
+            ->assertDontSee('Gamma Elementary School')
+            ->set('search', 'Alpha')
+            ->assertSee('Alpha Elementary School')
+            ->assertDontSee('Beta High School')
+            ->set('search', '')
+            ->assertSee('Beta High School');
     }
 }

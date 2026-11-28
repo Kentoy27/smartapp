@@ -57,6 +57,17 @@
         <section class="card" aria-labelledby="wfp-review-list-title">
             <div class="card-head">
                 <h2 class="card-title" id="wfp-review-list-title">Plans in your scope</h2>
+                <div class="users-search">
+                    <input
+                        type="search"
+                        placeholder="Search by school…"
+                        wire:model.live.debounce.300ms="search"
+                        aria-label="Search plans"
+                    >
+                    @if (trim($search) !== '')
+                        <button type="button" class="users-clear" wire:click="clearSearch" title="Clear search">×</button>
+                    @endif
+                </div>
                 <p class="mem-toolbar-copy">{{ $this->plans->total() }} plan(s)</p>
             </div>
             <div class="table-wrap">
@@ -105,7 +116,13 @@
                                 </td>
                             </tr>
                         @empty
-                            <tr><td class="table-empty" colspan="5">No WFPs are available for your schools yet.</td></tr>
+                            <tr><td class="table-empty" colspan="5">
+                                @if (trim($search) !== '')
+                                    No plans match “{{ $search }}”.
+                                @else
+                                    No WFPs are available for your schools yet.
+                                @endif
+                            </td></tr>
                         @endforelse
                     </tbody>
                 </table>

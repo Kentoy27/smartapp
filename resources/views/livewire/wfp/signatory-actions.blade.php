@@ -30,32 +30,7 @@
     @endif
 
     @if ($compact)
-        <div class="wfp-signatory-inline__pills">
-            @foreach ($statuses as $status)
-                @php($short = match ($status['key']) {
-                    'checking' => 'Check',
-                    'certification' => 'Certify',
-                    default => 'Approve',
-                })
-                @php($pillTitle = $status['label'].' — '.($status['name']
-                    ? $status['name'].($status['date'] ? ' · '.$status['date']->format('M j, Y') : '')
-                    : $status['pending_text']))
-                @php($done = in_array($status['state'], ['checked', 'certified', 'approved'], true))
-
-                <span
-                    @class([
-                        'wfp-signatory-inline__pill',
-                        'wfp-signatory-inline__pill--done' => $done,
-                        'wfp-signatory-inline__pill--returned' => $status['state'] === 'returned',
-                    ])
-                    title="{{ $pillTitle }}"
-                    aria-label="{{ $short }}: {{ $status['badge'] }}"
-                >
-                    @if ($done)<x-icon name="check" :size="11" />@endif
-                    <span>{{ $short }}</span>
-                </span>
-            @endforeach
-        </div>
+        <x-wfp-signoff-pills :statuses="$statuses" />
 
         {{-- THE SIGN ACTIONS: the Bookkeeper signs the check and Budget signs
              the certification straight from the row. --}}
@@ -88,23 +63,6 @@
                 </button>
             @endif
         @endforeach
-        @if ($hasSubmittablePlan)
-            <button
-                type="button"
-                class="allotment-certify"
-                wire:click="submitForApproval"
-                wire:confirm="Submit this WFP to the Schools Division Superintendent for final approval?"
-                wire:loading.attr="disabled"
-                wire:target="submitForApproval"
-                @disabled(! $canSubmit)
-                title="{{ $canSubmit
-                    ? 'Send the fully reviewed plan to the Superadmin'
-                    : 'Requires both Budget sign-offs' }}"
-            >
-                <x-icon name="send" :size="13" />
-                <span>Submit to Superadmin</span>
-            </button>
-        @endif
     @else
         <div class="card-head">
             <div class="card-title">Signatory Status · CY {{ $year }}</div>
